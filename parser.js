@@ -45,7 +45,7 @@ const FLAG = {
 function normalise(t){
   return t
     .replace(/[‐-―−]/g, '-')
-    .replace(/\s*\|\s*/g, ' - ')
+    .replace(/\s*\|\s*/g, ' | ')
     .replace(/(\d)\s*[.;](\d{2})/g, '$1:$2')
     .replace(/(\d)\s*:\s*(\d{2})/g, '$1:$2')
     .replace(/[ \t]{2,}/g, ' ');
@@ -150,9 +150,36 @@ function findSingle(line){
   return { time: t, ambiguous: !m[3], text: m[0], hh: m[1], mm: m[2] };
 }
 
+/* ---------- the two separators, which are not the same thing --------------
+
+   TrackTik prints a real boundary inside one field: "Cook Plant ASO | SOUTHERN
+   HENS, I..." is a role and a place, and the pipe is the employer's own mark
+   for where one ends and the other begins. Homebase prints no such thing — its
+   role and its site arrive on separate lines and are joined back together
+   here, and that join is this parser's invention.
+
+   normalise() used to flatten the pipe to " - ", which is exactly what the
+   Homebase join produces, so at the point §8.1 wants to read the boundary a
+   real separator and an arbitrary join looked identical. The pipe is now kept
+   (spacing canonicalised to " | ") and tidy() no longer strips it, so the
+   distinction survives all the way to the label:
+
+     " | "  a separator the employer printed    → splitLabel() can trust it
+     " - "  fragments this parser glued         → means nothing about structure
+
+   Nothing downstream reads splitLabel() yet. It exists so §8.1's site table
+   starts from a boundary that is already correct rather than discovering
+   halfway through that it was destroyed three functions earlier. */
+function splitLabel(label){
+  const s = String(label||'');
+  const i = s.indexOf('|');
+  if(i < 0) return { role: s.trim(), site: '' };
+  return { role: s.slice(0, i).trim(), site: s.slice(i + 1).trim() };
+}
+
 function tidy(s){
   return String(s||'')
-    .replace(/[^A-Za-z0-9À-ſ &'/.,-]/g,' ')
+    .replace(/[^A-Za-z0-9À-ſ &'/.,|-]/g,' ')
     .replace(/\s{2,}/g,' ')
     .replace(/^[\s,.\-]+|[\s,.\-]+$/g,'')
     .slice(0,60);
@@ -321,6 +348,7 @@ function parse(text, opts = {}){
         parts.push(nx);
         consumed = k - i;
       }
+      // Joined with a dash, never a pipe: see the separator note above tidy().
       label = parts.map(x => stripDebris(x.trim())).filter(usefulPart).join(' - ');
 
       // A lone time only counts as a shift if something around it names one.
@@ -373,6 +401,6 @@ function parse(text, opts = {}){
 if(typeof module !== 'undefined' && module.exports){
   module.exports = { MONTHS, WEEKDAYS, FLAG, iso, asDate, normalise, guessYear,
                      monthHeader, fullDate, leadingDay, to24, findRange,
-                     findSingle, tidy, NOISE, PERSON, usefulPart, stripDebris,
-                     looseMeridiem, parse };
+                     findSingle, tidy, splitLabel, NOISE, PERSON, usefulPart,
+                     stripDebris, looseMeridiem, parse };
 }

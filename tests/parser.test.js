@@ -77,7 +77,10 @@ test('guessYear puts a bare month and day near now', () => {
 });
 
 test('tidy strips OCR debris without eating real site names', () => {
-  assert.equal(P.tidy('  (03) Mobile Guard | De la Montagne  '), '03 Mobile Guard De la Montagne');
+  // The pipe is kept deliberately: it is TrackTik's own mark for where the
+  // role ends and the site begins, and §8.1 needs to read it. Brackets and
+  // the rest of the debris still go.
+  assert.equal(P.tidy('  (03) Mobile Guard | De la Montagne  '), '03 Mobile Guard | De la Montagne');
   assert.equal(P.tidy('Café Rue-St'), 'Café Rue-St');
   assert.equal(P.tidy(''), '');
 });
@@ -201,6 +204,26 @@ test('a stray time with nothing naming a shift is still ignored', () => {
   // The guard on the rule above: without it, any clock-like text on the
   // screen would become a row.
   assert.deepEqual(P.parse('Saturday, September 05\n7:15', { now: NOW }), []);
+});
+
+test('the employer separator survives, and a join is not mistaken for one', () => {
+  // TrackTik prints a real boundary inside one field. normalise() used to
+  // flatten it to " - ", which is what the Homebase join produces, so §8.1
+  // could not tell a separator from glue. The pipe now survives both
+  // normalise() and tidy().
+  const tt = P.parse('September\nWED 3:00pm - 11:00pm\n09 Cook Plant ASO | SOUTHERN HENS, I...',
+                     { now: NOW });
+  assert.equal(tt[0].label, 'Cook Plant ASO | SOUTHERN HENS, I');
+  assert.deepEqual(P.splitLabel(tt[0].label),
+                   { role: 'Cook Plant ASO', site: 'SOUTHERN HENS, I' });
+
+  // Homebase's role and site arrive on separate lines; gluing them back
+  // together is this parser's doing and claims nothing about structure.
+  const hb = P.parse('Thursday, September 03\n12:15 am (You) Cerion C.\n4:15 am @ Training\nHeadquarters',
+                     { now: NOW });
+  assert.equal(hb[0].label, 'Training - Headquarters');
+  assert.deepEqual(P.splitLabel(hb[0].label),
+                   { role: 'Training - Headquarters', site: '' });
 });
 
 /* ---------- golden fixtures ---------------------------------------------- */
