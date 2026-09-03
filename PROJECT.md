@@ -88,8 +88,11 @@ upscaled to roughly 1800px wide, converted to greyscale, auto-inverted if the
 mean luminance says it is a dark screenshot, then contrast-stretched. This is
 the difference between clean text and garbage.
 
-**Two layout profiles are handled**, both derived from real OCR output rather
-than guessed:
+**Two layout profiles are handled.** Both were derived from screenshots in the
+vendors' own user guides — *not* from real captures of his schedules. Nothing in
+the parser has yet been shown to work on his actual screens. Correcting an
+earlier version of this document, which claimed the TrackTik profile came from
+real OCR output:
 
 _TrackTik_ — a bare month name as a section header, then the weekday and time
 range on one line with the day number on the line below:
@@ -115,8 +118,10 @@ following line. Day numbers that drop sharply (30, 31, 01) advance the month.
 
 **The weekday is used as a free integrity check.** Where OCR read a usable
 weekday abbreviation, the parser compares it against the weekday of the date it
-constructed. This is what confirmed the February screenshot was 2027 rather
-than 2026 — Feb 3 2027 is a Wednesday, Feb 3 2026 was not.
+constructed. On the guide screenshot this resolved February to 2027 rather than
+2026 — Feb 3 2027 is a Wednesday, Feb 3 2026 was not. That is a fact about a
+vendor demo, not evidence about his data, but the check itself is sound and has
+since caught a wrong weekday in a hand-written test fixture.
 
 **Flags raised for review**, shown as amber rows:
 
@@ -229,10 +234,17 @@ before investing further in OCR.
 Homebase needs no OCR at all — subscribe to it directly and only TrackTik needs
 screenshots. Never confirmed.
 
-**The Homebase parser is under-tested.** It was validated against text
-reconstructed from a help-page screenshot, not a real screenshot of his own
-schedule. Line ordering from a real capture may differ. One real screenshot
-would settle it.
+**Neither parser has seen a real screenshot.** Both profiles come from vendor
+user guides. Guide screenshots are close to the worst available proxy: light
+mode, ideal resolution, uncompressed, never cropped mid-scroll, demo names. His
+are dark mode, compressed, cut off at both ends of a scroll, with real site
+names. Concretely, the auto-invert branch in `prep()` has almost certainly never
+executed against a real input, and `NOISE` was written against guide chrome
+rather than the chrome he will actually capture.
+
+Real screenshots are being collected. Until they land, every fixture in
+`tests/fixtures/` is marked PROVISIONAL and proves only that the parser has not
+changed behaviour — not that the behaviour is right.
 
 **The unlock popup.** Not achievable from the web — there is no unlock event
 exposed to browsers, and PWA widgets on Android do not exist (the manifest
@@ -268,3 +280,263 @@ five-minute fix rather than a debugging session.
 **Editing in subscription mode.** Edits flow through on the next feed save,
 which is correct. In manual import mode an edited shift produces a second
 calendar event rather than replacing the first, hence the rebuild option.
+
+---
+
+## 7. Working agreements
+
+**No live data until development is done.** The app is not carrying anything
+real yet, so there is nothing to preserve across a data-shape change. Schema
+migrations and a `version` field are therefore *deliberately not built*. When a
+stored shape changes, use **Setup → Danger zone → Delete everything and start
+over** and rebuild.
+
+This holds until the first live data point — the first time real shifts are
+entered and relied on. At that moment, before anything else: add `S.version`,
+write the migration path, and make both `loadState()` *and* the backup-restore
+path run it. Restoring an old backup into a new schema is the case that will
+otherwise bite quietly.
+
+**The raw text is the artefact, not the parse.** When a screenshot is imported,
+what is worth keeping is the contents of *Show the raw text that was read*. That
+is what becomes a test fixture. The parsed rows are the thing under test.
+
+---
+
+## 8. Agreed design, not yet built
+
+Four pieces, in the order they should be built. The ordering matters: each one
+changes the shape the next is written against.
+
+### 8.1 Site table, replacing the free-text label — **do first**
+
+`shift.label` is one string doing two jobs. The edit dialog admits it: the field
+is captioned "Site or role". TrackTik's line is `Mobile Guard | De la Montagne`
+— a role *and* a place. Homebase's is `Cook` — a role, no place. Addresses only
+attach to one of them.
+
+```js
+S.sites = [{ id, companyId, name, address, aliases:[], archived }]
+shift = { …, siteId, role, label }   // label kept as fallback
+```
+
+- **`siteId` stays nullable and `label` stays.** If OCR produces something that
+  matches nothing, the shift still imports and renders `site?.name || label`.
+  Requiring a site would let a bad read block an import, which is worse than an
+  unlabelled shift.
+- **Aliases are the real prize.** `snapSite()` currently matches against labels
+  scraped out of `S.shifts` — deriving authority from its own unvalidated
+  output, so one bad read becomes a "known site". A site record instead keeps
+  the spellings confirmed to mean it, and confirming a fuzzy match in review
+  adds one. Matching goes exact-alias → edit distance → no match. It gets quiet
+  within weeks instead of guessing forever.
+- **Merging is permanent, not a migration step.** OCR keeps inventing spellings.
+  Merging site B into A moves its aliases and repoints its shifts.
+- **Addresses earn their keep in the `.ics`.** One added `LOCATION:` line and
+  Android renders a tappable address: the two-hour alarm fires, he taps the
+  event, taps the address, and he is navigating. This is the single best reason
+  to do this work.
+- Knock-ons: the title convention `DSI- Cook Plant` needs preserving as
+  `${company}- ${role} ${site}`; changing `SUMMARY` at all rewrites every event,
+  which is free in subscription mode and messy in manual-import mode.
+- The gap warning gets better for free — back-to-back shifts at *different
+  addresses* is a different warning from two at the same one.
+
+**Blocked on a real TrackTik screenshot.** The site/role split assumes the real
+line contains the `|` separator. If it does not, that split is fiction. Build
+the table and the schema now; wire the parser-side split once the real format is
+known.
+
+### 8.2 am/pm plausibility, from a declared schedule
+
+The documented top risk is that am/pm rides on one character, and the current
+mitigation is "a human glances at the list" — a control that decays exactly when
+vigilance does.
+
+The first design considered was learning normal start times from history. **That
+was rejected**, and the reason generalises: the history *is* the parser's own
+unvalidated output. One bad am/pm import that gets committed becomes evidence,
+so a 5am start starts to look normal and the next 5am misread stops being
+flagged. A check that gets quieter each time it fails is worse than no check.
+
+Instead, declared shift patterns per job:
+
+```js
+co.patterns = [
+  { days:[1,2,3,4,5], start:'07:00', end:'19:00' },  // fixed job: can generate
+  { start:'09:00', end:'17:00' }                      // PRN: snapping only
+]
+```
+
+One field (`days`) distinguishes the two jobs with no mode switch. A pattern
+with `days` can generate a week; one without is only ever used for checking.
+
+**Snapping must never be silent.** If the employer genuinely moves a shift and
+OCR reads it correctly, snapping it back to the declared time makes him late,
+and there is no screenshot discrepancy to notice. So, by distance:
+
+| Distance from a declared shift | Behaviour |
+|---|---|
+| Exactly ±12h | An am/pm flip. Correct it, show the row amber: "read as 9pm, corrected to 9am" |
+| Within a few minutes | Same shift, sloppy OCR. Snap quietly |
+| An hour or two off | **Do not touch.** Flag "doesn't match a known shift for this job" |
+| No patterns declared | Duration and overlap checks still apply — they need no config |
+
+**History still helps, as a suggestion.** A "build from what's on file" button
+lists distinct start/end pairs already in `S.shifts` with counts, and he ticks
+the real ones. He skips the typing; the app gets a list a human filtered. The
+human is what stops bad data becoming authority.
+
+### 8.3 Generating the fixed job's weeks
+
+One job is PRN and moves constantly. The other is fixed for days and times, with
+only the location changing — so most weeks it needs no screenshot at all.
+
+"Fill week of ___" emits rows into the existing `pending` array, so it reuses the
+whole review screen, its flags, the commit path, and the diff in §8.4. Location
+defaults to the most recent site for that pattern — a convenience default is
+fine for a *label* where it would not be for a *time*: a wrong label costs mild
+confusion, a wrong time costs a shift.
+
+**The risk to manage:** "pretty fixed" is not fixed. A generated shift that was
+actually cancelled means the app confidently shows work that does not exist and
+fires alarms for it. That is cheaper than missing a shift but it corrodes trust,
+which is the whole asset.
+
+Mitigation, using the `source` field that already exists on the shift record:
+generated shifts get `source:'pattern'` and render differently — a hollow tick
+rather than a solid one — so assumption is visually distinct from fact. A
+screenshot import then promotes them to confirmed, or flags them via §8.4. If
+unconfirmed shifts pile up past some horizon, the app should say so.
+
+### 8.4 Change detection on import
+
+Partly addressed today (see §9) but the full version is still to build. Match
+candidates within (job, date), pair by nearest start time, then sort into three
+buckets in the review screen:
+
+- **New** — no counterpart on file
+- **Changed** — `9:00–17:00 De la Montagne → 11:00–19:00 De la Montagne`, shown
+  before → after, one tap to accept
+- **On file but not in this screenshot** — probably cancelled
+
+The third bucket is the most valuable for a PRN job and the one nobody builds.
+It **must never auto-remove**: screenshots are of a scrolling list, so a partial
+capture is indistinguishable from a week of cancellations. Only propose removal
+for dates strictly inside the min–max range of what parsed, and always as a
+tick-box.
+
+---
+
+## 9. Built on 3 September 2026
+
+### Test harness
+
+The parser is now a separate file, `parser.js`, holding pure functions only —
+text in, rows out, no DOM, no storage, and the current date injected so tests can
+pin it. It loads as a plain script before `app.js` in the browser and is
+`require`d directly by the tests in node. Still no build step, still no runtime
+dependencies; `package.json` exists only to carry the test command.
+
+```
+npm test           # run
+npm run test:update # regenerate golden files
+```
+
+Two kinds of test: unit tests for the small helpers, which hold regardless of
+what the real screenshots look like, and golden fixtures pairing raw OCR text
+with expected output. `tests/fixtures/README.md` has the workflow and a list of
+what is worth capturing.
+
+Update mode records what the parser *currently does*, which is not the same as
+what it should do. Generated goldens must be read before being committed. Doing
+exactly that caught a hand-written fixture whose weekdays disagreed with its
+dates — the weekday cross-check was right and the fixture was wrong.
+
+**One real parser bug found immediately:** `27 July 2025` parsed as July **20**,
+because the month-first branch of `fullDate()` matched `July 20` and swallowed
+the first two digits of the year. Fixed with a `(?!\d)` guard.
+
+### Bugs fixed
+
+- **Correcting a date wiped every warning on the row.** `p.flags = []` cleared
+  the am/pm and split-line warnings along with the missing-date one — so fixing
+  the most common problem silently discarded the most dangerous one. Now only
+  the date flag is cleared. Rows also update in place rather than re-rendering
+  the whole list on every keystroke, which was reordering rows and dropping
+  focus mid-edit.
+- **Imported rows did not carry their job.** `pending` was never cleared between
+  batches and commit read the job picker once, so importing job A, switching the
+  picker, then importing job B filed everything under B. Each row is now stamped
+  with the job it was read under, carries a stable `rid`, and shows a per-row job
+  picker when more than one job exists.
+- **The dedupe check ignored the label**, so a shift at the same time in a
+  different place was silently dropped — exactly backwards for the job where
+  location is the only thing that changes. Exact repeats are still dropped
+  (including OCR variants that snap to a known site); a genuine location change
+  is kept and flagged.
+
+### The app could not open offline
+
+Two `<head>` resources were blocking, in an app whose stated purpose includes
+working offline:
+
+- The **Tesseract CDN script** was parser-blocking, so an unreachable jsDelivr
+  stopped the whole app from opening, not just OCR. It is now fetched on first
+  use of the Add tab. The service worker still caches it afterwards, so later
+  imports are unchanged.
+- The **Google Fonts stylesheet** blocked script execution entirely — with
+  fonts.googleapis.com unreachable, `document.readyState` never left `loading`
+  and the app rendered a blank page. Now loaded non-blocking; every font stack
+  already falls back to `system-ui`, so text shows immediately and swaps.
+
+Both were confirmed by booting the app in headless Chromium with no network at
+all, which now renders correctly.
+
+### Danger zone
+
+- **Delete everything and start over** — clears jobs, shifts and settings. This
+  is the intended way to move to a new data shape while §7 holds.
+- **Reload the app files** — drops the cached shell and service worker and
+  reloads, so a new version is picked up immediately rather than on the next
+  open. Data untouched. Development convenience.
+
+---
+
+## 10. Open questions
+
+Carried forward, plus what today added.
+
+1. **Do the parsers work at all on his real screens?** Everything in §8 assumes
+   usable rows come out. Screenshots are being collected; the capture list is in
+   `tests/fixtures/README.md`. This gates §8.1's site/role split.
+2. **The TrackTik distribution email.** Still one message to his scheduler. If
+   it lands, email parsing beats screenshots on every axis and much of §8.4
+   becomes unnecessary. Worth asking before investing further in OCR.
+3. **Does Homebase expose its calendar feed on his account?** If so, Homebase
+   needs no OCR at all and only TrackTik needs screenshots. Never confirmed.
+4. **Getting the feed to ICSx⁵** (§4) — still the live blocker, still pointing
+   at a Cloudflare Worker. The browser-native escape hatch does not exist:
+   `showSaveFilePicker()` with a retained handle would solve the `shifts (1).ics`
+   problem exactly, but Chrome on Android does not support it. One idea that may
+   soften the privacy objection: the feed does not need site names. A
+   **minimal-feed option** publishing `DSI shift` with times only, keeping site
+   and role local to the phone, puts nothing meaningful in KV.
+5. **Staleness should be loud, and is not.** The only signal is `#unsent`
+   buried in Setup. Two cheap, transport-independent additions, worth doing
+   whatever happens with (4):
+   - "Last exported N days ago, 4 shifts changed since" on the **Schedule** tab.
+     If the `.ics` is stale the calendar is lying, and Schedule is where he looks.
+   - **"Nothing on file after Friday."** If the last shift held is within ~3
+     days, the schedule is probably unimported rather than empty — and an empty
+     calendar reads as a day off, which is the exact silent failure this project
+     exists to prevent.
+6. **Manual-import mode orphans deleted shifts.** No `METHOD:CANCEL` is emitted,
+   so a deleted shift keeps its calendar event and its alarms forever.
+   Subscription mode is immune.
+7. **Smaller, unowned.** Shift rows are `div`s with `onclick`, so editing is
+   touch-only and unavailable to a screen reader. `fold()` slices ICS lines by
+   character where the spec is byte-based, so an accented site name can produce
+   an invalid line — in scope for Montréal addresses. OCR accuracy might improve
+   cheaply from a page-segmentation mode and a character whitelist, currently
+   left at Tesseract's defaults.
