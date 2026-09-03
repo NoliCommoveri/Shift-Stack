@@ -8,7 +8,11 @@ is specified in §14 and audited against Ray's three existing Cloudflare apps
 in §15. Build order for the agreed-but-unbuilt work is in §11. The first real
 OCR pass ran the same day (§16): TrackTik came through it, Homebase did not,
 and the two jobs turned out to be the opposite way round from what §8 assumed —
-DSI is the fixed one, Trupoint is PRN.
+DSI is the fixed one, Trupoint is PRN. §17 closes the TrackTik email as a dead
+end and makes screenshots the plan, §18 builds the first thing that follows
+from it — DSI's rota, declared, and the am/pm check that runs off it — and §19
+replaces the turnaround warning with one that catches shifts booked over each
+other, across midnight, at the point they arrive.
 
 A record of what has been built, why the design went the way it did, and what
 is still undecided.
@@ -201,8 +205,9 @@ over time rather than nagging forever.
 ### 3.2 The rest of the app
 
 - **Schedule** — grouped by week, colour-coded per job, weekly hour totals,
-  today highlighted. Flags tight turnarounds and overlaps between the two jobs
-  on the same day. Tap any shift to edit or delete.
+  today highlighted. Flags shifts that overlap each other, in a banner and
+  beside both shifts. Tap any shift to edit or delete. (It used to flag tight
+  turnarounds too; §19 removes that.)
 - **Next shift banner** — countdown at the top, refreshed each minute and on
   tab focus.
 - **Launch buttons** — Android intent URLs with a Play Store fallback. Opens
@@ -419,8 +424,13 @@ shift = { …, siteId, role, label }   // label kept as fallback
 - Knock-ons: the title convention `DSI- Cook Plant` needs preserving as
   `${company}- ${role} ${site}`; changing `SUMMARY` at all rewrites every event,
   which is free in subscription mode and messy in manual-import mode.
-- The gap warning gets better for free — back-to-back shifts at *different
-  addresses* is a different warning from two at the same one.
+- ~~The gap warning gets better for free — back-to-back shifts at *different
+  addresses* is a different warning from two at the same one.~~ **Withdrawn,
+  §19.** There is no turnaround warning any more to improve: going straight
+  from one job to the other is the ordinary case here, and a warning about it
+  fired constantly on nothing. What survives is overlap, which addresses do not
+  change — he cannot be in two places at once whether or not they are the same
+  place.
 
 **Blocked on a real TrackTik screenshot.** The site/role split assumes the real
 line contains the `|` separator. If it does not, that split is fiction. Build
@@ -460,7 +470,7 @@ and there is no screenshot discrepancy to notice. So, by distance:
 | Exactly ±12h | An am/pm flip. Correct it, show the row amber: "read as 9pm, corrected to 9am" |
 | Within a few minutes | Same shift, sloppy OCR. Snap quietly |
 | An hour or two off | **Do not touch.** Flag "doesn't match a known shift for this job" |
-| No patterns declared | Duration and overlap checks still apply — they need no config |
+| No patterns declared | Duration and overlap checks still apply — they need no config (both built: §18.3, §19) |
 
 **History still helps, as a suggestion.** A "build from what's on file" button
 lists distinct start/end pairs already in `S.shifts` with counts, and he ticks
@@ -1886,9 +1896,243 @@ whose input is a reader that mangles times.
 | 4 | **§8.1 site table** | Unblocked now (§17.4). Still the heaviest, and everything after assumes `siteId` |
 | 5 | **§8.4 change detection** | Needed in full now the email is closed; wants stable site identity first |
 
+**Step 1 is built** — see §18, which restates this table with it struck off.
+
 §8.2 and §8.3 moving ahead of §8.1 is a change from §11.3, and it is worth
 being explicit about why: they need no schema, they depend only on a pattern
 today's data already hands over, and together they take the OCR path off the
 critical route for most weeks. §8.1 remains the bigger prize for labels and for
 the `LOCATION:` line that makes an address tappable, but it no longer has to go
 first.
+
+---
+
+## 18. Built: declared patterns, 3 September 2026
+
+§8.2 is in, which closes step 1 of §17.5 and puts §8.3 within reach. The
+config for DSI is the one line §16.3 predicted, typed once in Setup:
+
+```js
+co.patterns = [{ days:[1,2,3,5], start:'15:00', end:'23:00' }]
+```
+
+### 18.1 Where it lives, and why that is a new file
+
+`patterns.js`, a third pure module alongside `parser.js` and `ics.js` — no DOM,
+no storage, required directly by `tests/patterns.test.js`. It is not part of
+either reader because it is not about reading anything: both readers turn
+somebody else's text into rows, and this takes a finished row and a list a
+human typed and decides what to do about the gap between them. Putting it in
+`parser.js` would also have tied it to the screenshot path, and the length
+check below is worth having on rows the screenshots never touched.
+
+The app-side wiring is one function, `applyPatterns()`, which is the only place
+that knows which rows are eligible.
+
+### 18.2 The distances, as §8.2 set them out
+
+| Distance from a declared shift | Built as |
+|---|---|
+| Exactly ±12h | Corrected, row amber, "Read as 03:00–11:00." under the flag |
+| Within 5 minutes | Snapped, silently |
+| Anything between | Untouched, flagged "not a shift declared for this job" |
+| Wrong day for a rota with `days` | Untouched, same flag |
+| No patterns declared | Length check only |
+
+Each end of the shift is judged separately, which the real data forced: §16.2's
+worst row was `8:00 pm` read as 08:00 against a correct 00:00 end, so a rule
+requiring both ends to be twelve hours out would have missed the one misread
+that actually happened.
+
+Where two declared shifts could both explain a row, the one needing no flip
+wins before the closer one does. A job whose declared shifts sit twelve hours
+apart — a day rota and a night rota on the same site — must not become a
+machine for inventing misreads.
+
+**Snapping stays narrow on purpose.** §8.2's warning is that snapping a shift
+the employer genuinely moved makes him late with no screenshot discrepancy left
+to notice, so the two tolerances are five minutes and exactly 720, and the
+whole hour-or-two range between them is flagged rather than touched.
+
+### 18.3 The length check, which needed no patterns at all
+
+§8.2's table ends with "duration and overlap checks still apply — they need no
+config". The duration half is below; the overlap half is §19. This row turned
+out to be the one that lands on Trupoint. Its job
+has no rota to declare, and §16.2's misread made a 16-hour shift out of a
+4-hour one. Anything under an hour or over fourteen is now flagged on any
+screenshot row, declared patterns or not. Fourteen is chosen against the data:
+the longest real shift seen is the 12-hour Saturday night in §16.3.
+
+A correction re-runs the check rather than leaving the old verdict standing —
+a row that was impossible as read is usually sensible once put right, and an
+amber warning about a number no longer on the row teaches him to ignore amber.
+
+### 18.4 What it refuses to do
+
+- **Calendar rows and hand-typed rows are never touched.** A feed carries the
+  employer's own numbers and a typed row carries Ray's; correcting either
+  against a declared rota is overwriting fact with assumption, which is §8.2's
+  own objection pointed the other way.
+- **A half-read row is not completed from a pattern.** §16.2a's Saturday shift
+  emits with a blank end and an `onetime` flag. Filling that end in from the
+  rota is inventing the number, and §16.2a already settled that guessing from
+  wreckage reintroduces the twelve-hour error under another name.
+- **Nothing is learned from history.** §8.2 rejected that and the rejection
+  holds: the history is the parser's own unvalidated output, so a committed
+  misread would become evidence and the check would get quieter each time it
+  failed.
+
+### 18.5 The review screen keeps up
+
+Two things decide which declared shifts a row is judged against — its date and
+its job — and both are editable in review, so both re-run the check. That
+matters more than it sounds: §16.1's screen came back with **every row
+undated**, and until a date is set no rota with `days` can be resolved. An
+undated row is still judged on its times alone; setting the date then brings
+the day into it.
+
+Re-running had to be idempotent, so each row keeps what was read off the screen
+and every run is judged against that rather than against the previous run's
+output. Without it the second run finds its own correction sitting there
+looking exactly right and drops the warning that came with it — a check that
+erases its own evidence.
+
+Once he types a time himself, the row is his: nothing is applied over it, and
+the pattern verdict is cleared rather than left amber over a number that is no
+longer there.
+
+The corrections run **before** the duplicate filter, not after. A row twelve
+hours out is a duplicate of nothing until it has been put right.
+
+### 18.6 Declaring it, and the shortcut past the typing
+
+Seven day toggles and two clocks per pattern, in the job's card in Setup. The
+toggles are the only switch between the two kinds of pattern, as §8.2 asked:
+ticked days mean the pattern describes when the job runs and can fill a week
+(§8.3); no days ticked means it is only ever compared against. A pattern with
+an unfinished time is dropped rather than half-believed, which is why "Add a
+shift" starts blank — a made-up default left in by accident would flag every
+real shift as off-pattern.
+
+**"Build from what's on file"** is §8.2's suggestion list: the distinct
+start/end pairs already filed for the job, most common first, with the days
+each was actually filed on pre-ticked. Nothing is applied — he adds the ones he
+recognises. That is the difference between this and the rejected
+learn-from-history design, and it is the whole difference: a human filtering
+the parser's output is what stops the parser's output becoming authority.
+
+### 18.7 §7 is intact
+
+`co.patterns` is an additive optional field on the company record and every
+read of it is guarded, so a job saved before today behaves exactly as it did.
+That is the same technicality `extUid` and `place` passed on in §11.4, and it
+is still not the case §7 is about — no value moves and nothing saved earlier
+means something different now. §11.4's check therefore still stands unspent for
+§8.1, which is the step that will actually need it.
+
+### 18.8 Where this leaves the order
+
+| | Work | Why here |
+|---|---|---|
+| ~~1~~ | ~~**§8.2 patterns** for DSI~~ | Done — this section |
+| 1 | **§8.3 generation**, with holidays | Next, and now unblocked. The pattern it generates from exists, is declared, and `days` already means "can fill a week" |
+| 2 | `METHOD:CANCEL` (§10.6) | No schema |
+| 3 | **§8.1 site table** | Still the heaviest; everything after assumes `siteId` |
+| 4 | **§8.4 change detection** | Wants stable site identity first |
+
+§8.3 needs three things from here and has all three: a pattern with `days`,
+`source:'pattern'` to render a proposal differently from a fact, and the
+`pending` array a generated week is emitted into. What it still has to bring
+of its own is the statutory-holiday lookup (§16.4, §17.2) — Labour Day sits in
+the very first fortnight of real data, and a generated week that fires alarms
+for a shift that does not exist is the failure §8.3 names as trust-corroding.
+
+---
+
+## 19. Built: overlap, and the end of the turnaround warning
+
+The other half of §8.2's no-config row. Ray raised it against §18 and settled
+the shape of it in one sentence: two shifts on the same day are common — he
+often goes straight from one job to the other — and **only real overlap of
+hours is a concern, and it is a major one**.
+
+### 19.1 The turnaround warning was the bug
+
+`app.js` had flagged any two shifts on one day with under an hour between them:
+"Only 45 min between these." For these two jobs that is the ordinary case, not
+a fault. It fired constantly on nothing, and it was the *same line* that had to
+carry the case that matters — so the one warning in the app about being booked
+twice was the one he had already learned to scroll past.
+
+Removed rather than tuned. There is no threshold that makes it right, because
+the thing it was measuring is not a problem.
+
+### 19.2 What replaces it, and why it needed a timeline
+
+Overlap only, measured in minutes both shifts are scheduled for. Zero is a
+handover, not a clash, so a shift ending at 15:00 and one starting at 15:00 say
+nothing.
+
+The check works on an **absolute timeline** — days since 1970, times as minutes
+on it — rather than inside a date, and the real data forces that. Trupoint's
+shifts are 19:15–07:15 and 00:15–08:15 (§16.3): overnight is that job's normal
+shape, so the collision to catch is a night running into the next morning's
+shift, and the two sit on different dates. The old check bucketed by day and
+compared each shift only with the one before it in the same bucket, so that
+collision — the likeliest real one — was structurally invisible to it.
+
+Two more things the old one could not see, both now fixed:
+
+- It dropped any overlap deeper than ten hours (`gap > -600`), so **the worst
+  collisions were the quietest**. A shift wholly inside another said nothing at
+  all.
+- It only ever ran on the Schedule tab, after commit — by which point the shift
+  is filed and, in subscription mode, going out on the next export.
+
+### 19.3 Three places it now shows
+
+- **In review, during the add.** A pending row is checked against what is on
+  file *and* against the rest of the batch, since a screenshot and an `.ics`
+  imported in one sitting can collide with each other as easily as with
+  history. Rows the import is about to replace or remove are not counted —
+  they are the same shift seen twice, and counting them would flag every
+  ordinary calendar update as a clash with itself.
+- **As a banner over the schedule**, red, above the §17.3 horizon notes.
+  This is the one Ray asked for and the reason is the arrival path: Calendar
+  Sync writes a Trupoint shift into Google, the `.ics` comes in, and it lands
+  on top of a DSI shift already on file. **Nobody is looking at that week when
+  it happens.** A warning he has to scroll to the right week to find is a
+  warning about a shift he has already stopped thinking about.
+- **Beside both shifts** in the week list, each naming what it runs over and by
+  how much. Two lines where the old check printed one, which is the right trade
+  for the only failure in this app with no recovery.
+
+### 19.4 It never proposes a fix
+
+Which of the two shifts is wrong is not something this app can know. The feed
+may be right and the screenshot stale, or the screenshot right and the feed
+carrying a shift the employer has not withdrawn. So every message names both
+sides and stops: "Trupoint 19:15–07:15 runs over DSI 06:00–14:00 by 1h 15m. He
+cannot work both — one of them is wrong."
+
+That is also why nothing here blocks a commit. §8.4's rule holds — a partial
+view of a schedule must never cause an automatic removal — and a clash is
+exactly the case where the app knows least and he knows most.
+
+### 19.5 Where it lives
+
+`patterns.js`, beside the declared-pattern checks, because §8.2's table names
+the two together and both take a finished row and decide what is wrong with it.
+`clashMins()`, `findClashes()` and `clashPairs()` are pure and tested; the app
+side is `applyClashes()` for review rows and `clashNotes()` for the banner.
+
+One wiring note worth recording: a clash is a property of the batch, not of a
+row, so correcting one review row can raise or clear a warning on a different
+one. Every row hands back a way to refresh its own note line and they are all
+called together, rather than re-rendering the list — which would reorder rows
+and drop focus mid-edit, the same reason §9's review screen refreshes in place.
+
+Nothing about the order in §18.8 changes. §8.3 generation is still next, and
+now inherits an overlap check that a generated week will be run through like
+any other import.
