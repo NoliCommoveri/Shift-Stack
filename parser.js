@@ -14,6 +14,14 @@
    lines for Homebase. What they changed is the debris around the times: see
    PERSON below. Fixtures marked PROVISIONAL are still guide-derived; those
    marked TRANSCRIBED were read off real screenshots by eye rather than by OCR.
+
+   A real OCR pass finally ran on 3 September 2026, and the two layouts came
+   out of it very differently. TrackTik survives it: the only fault was the
+   month header arriving as "September Vv os", and with that tolerated the week
+   parses exactly, weekday cross-check included. Homebase does not, and the
+   damage is to the times rather than the layout — see
+   tests/fixtures/pending/README.md. TrackTik is the job that has no calendar
+   feed, so it is the one this parser actually has to carry.
    ========================================================================== */
 
 const MONTHS = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
@@ -55,9 +63,17 @@ function guessYear(month, day, now = new Date()){
   return best;
 }
 
-/* A line that is only a month name — TrackTik's section header. */
+/* A line that is only a month name — TrackTik's section header.
+
+   The real September capture read it as "September Vv os": the collapse
+   chevron and a stray icon came through as short letter tokens, which the
+   original trailing class did not allow, so the month never got set and every
+   row on the screen came back nodate. Debris is tolerated as punctuation runs
+   and tokens of one or two letters — long enough for a chevron, too short to
+   swallow "Thursday, September 03", and digits stay excluded so a day number
+   can never be mistaken for noise. */
 function monthHeader(line){
-  const m = line.match(/^([A-Za-z]{3,9})\.?\s*(\d{4})?\s*[~v^⌄\-_]*$/);
+  const m = line.match(/^([A-Za-z]{3,9})\.?\s*(\d{4})?(?:\s*(?:[~v^⌄\-_.,:;]+|[A-Za-z]{1,2}\b))*\s*$/);
   if(!m) return null;
   const mo = MONTHS[m[1].slice(0,3).toLowerCase()];
   if(mo === undefined) return null;

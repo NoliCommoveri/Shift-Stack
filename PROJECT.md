@@ -5,7 +5,10 @@ Homebase's own Calendar Sync turned out to exist and is now an import path (§12
 and the app became the normalising step between two calendars rather than a
 second source of the same events (§13). The Worker that closes the import gap
 is specified in §14 and audited against Ray's three existing Cloudflare apps
-in §15. Build order for the agreed-but-unbuilt work is in §11.
+in §15. Build order for the agreed-but-unbuilt work is in §11. The first real
+OCR pass ran the same day (§16): TrackTik came through it, Homebase did not,
+and the two jobs turned out to be the opposite way round from what §8 assumed —
+DSI is the fixed one, Trupoint is PRN.
 
 A record of what has been built, why the design went the way it did, and what
 is still undecided.
@@ -464,6 +467,14 @@ human is what stops bad data becoming authority.
 One job is PRN and moves constantly. The other is fixed for days and times, with
 only the location changing — so most weeks it needs no screenshot at all.
 
+**Which job is which, corrected 3 September 2026.** This section and §8.2 and
+§8.4 were written without naming them, and §8.4's line about the PRN job reads
+as though the PRN one is the job on screenshots. It is the other way round.
+**DSI on TrackTik is the fixed job**; **Trupoint on Homebase is the PRN one.**
+§16 has the evidence and what the swap costs each of the three sections. The
+short version is that it is good news: the fixed job is the one with no
+calendar feed, so generation lands on exactly the input that is expensive.
+
 "Fill week of ___" emits rows into the existing `pending` array, so it reuses the
 whole review screen, its flags, the commit path, and the diff in §8.4. Location
 defaults to the most recent site for that pattern — a convenience default is
@@ -579,9 +590,11 @@ all, which now renders correctly.
 
 Carried forward, plus what today added.
 
-1. **Do the parsers work at all on his real screens?** Everything in §8 assumes
-   usable rows come out. Screenshots are being collected; the capture list is in
-   `tests/fixtures/README.md`. This gates §8.1's site/role split.
+1. ~~**Do the parsers work at all on his real screens?**~~ Answered, and
+   differently for each: TrackTik parses a real OCR pass exactly once the month
+   header tolerates its debris; Homebase reads the layout but mangles the times
+   badly enough to be unusable. §16 has both, and the Homebase result opens a
+   decision rather than a bug list, since that job has a feed.
 2. **The TrackTik distribution email.** Still one message to his scheduler. If
    it lands, email parsing beats screenshots on every axis and much of §8.4
    becomes unnecessary. Worth asking before investing further in OCR.
@@ -1567,3 +1580,152 @@ more I/O and less compute than a KV blob read plus a JSON parse, and DB waiting
 does not count against the 10 ms ceiling — Heritage-Hooves §3 makes that point
 explicitly. So the move to D1 probably helps. "Probably" is still doing work in
 that sentence, and the first real poll is still what answers it.
+
+---
+
+## 16. The first real OCR pass, 3 September 2026
+
+§10.1 asked whether the parsers work at all on his real screens, and §11.2 made
+a real Tesseract pass the gate on §8.2's design. It has now run, on one
+screenshot from each app, and the answer is different for each.
+
+### 16.1 TrackTik survives it
+
+One fault, and it was not in the layout. The month header came off the screen
+as `September Vv os` — the collapse chevron and a stray icon read as short
+letter tokens — and `monthHeader()` allowed only `[~v^⌄\-_]` after the month
+name. So `month` stayed null, and since a TrackTik date is a bare day number
+that needs a month to mean anything, **every row on the screen came back
+`nodate`**. Three shifts, all correct times, all correct labels, no date on any
+of them. One over-tight character class, the entire screen unusable.
+
+Widened to tolerate punctuation runs and one- or two-letter tokens, with digits
+still excluded so a day number can never be eaten as noise. The week now parses
+exactly: 9, 11 and 14 September, all 15:00–23:00, weekday cross-check clean, no
+flags. `tests/fixtures/tracktik-2026-09-week2.txt` is the first fixture in the
+repo that is neither PROVISIONAL nor TRANSCRIBED — it is what Tesseract
+actually produced.
+
+Three things worth recording beyond the fix:
+
+- **The dark-mode path works.** `prep()`'s auto-invert had never executed
+  against a real input (§11.2). It has now, on the dark TrackTik screen, and
+  the text came back clean enough that am/pm survived on every row — which is
+  the failure §6 names as most likely to cost him a shift.
+- **The line order is not what the transcription guessed.** The TRANSCRIBED
+  fixture has the weekday-and-time line above the day-number-and-site line, and
+  so does the real OCR — but the real capture opens mid-row, so the first line
+  on screen is a site with its times above the fold. The parser already handles
+  that; it is worth knowing the transcriptions guessed the shape right.
+- **§11.1's pipe finding is confirmed on real data.** The label arrives as
+  `Cook Plant ASO | SOUTHERN HENS, I...` and reaches the review screen as
+  `Cook Plant ASO - SOUTHERN HENS, I`, the separator already flattened by
+  `normalise()`. §8.1 needs that boundary and it is destroyed before anything
+  can read it.
+
+### 16.2 Homebase does not survive it
+
+The layout was read correctly and the dates are right. The times are not.
+Ground truth for these exact days was already in the repo as a TRANSCRIBED
+fixture, so the comparison is direct:
+
+| | transcribed truth | from the real OCR |
+|---|---|---|
+| Thu 3 | 00:15–04:15 Training — Headquarters | 19:15–04:15, "Headquarters" |
+| Thu 3 | 20:00–00:00 Training — F.O.C | **08:00**–00:00, "cc Training i - F.O.C" |
+| Fri 4 | 00:15–08:15 Security Agent — Headquarters | 19:15–08:15, "Headquarters" |
+| Sat 5 | 19:15–07:15 Security Officer — F.O.C | **dropped entirely** |
+
+Three of four start times wrong, one shift silently missing, and the roles gone
+from two of the three that survived. `12:15 am` came through as `19:15`, which
+no downstream check can undo — the information is not in the text. `8:00 pm`
+lost its meridiem onto the following line as `00pm .` and parsed as 08:00,
+twelve hours out, which is §6's documented top risk happening on real input.
+The Saturday row had one legible time where the two-single-times rule needs
+two, so it did not become a flagged row — it became no row.
+
+The `ampm` and `split` flags did fire on all three, so the app is not lying
+quietly; the review screen says "no am/pm was printed — check the times". But a
+fallback that needs every row's start time corrected by hand, and that can drop
+a shift without saying so, is not much of a fallback.
+
+The raw text is parked in `tests/fixtures/pending/` with no golden file. Its
+current output is wrong, and `tests/fixtures/README.md`'s own rule is that a generated
+golden records what the parser does rather than what it should, so committing one
+would enshrine a twelve-hour error as the expected result.
+
+**This is a decision, not a bug queue.** Homebase is the job with Calendar Sync
+(§12), which delivers exact times with no reading step at all. The Homebase OCR
+path is a fallback for the one job that does not need it. Three options, and
+the third is probably right:
+
+1. Fix it — debris filtering, meridiem recovery from adjacent lines, and a
+   single-time row that flags rather than vanishes. Real work on a redundant
+   path.
+2. Leave it as it is. Cheapest, and wrong: it can drop a shift in silence.
+3. **Retire it.** Refuse a Homebase screenshot import with "this job comes from
+   the calendar — import the feed instead", and keep OCR for TrackTik. One
+   input per job, each on the path that suits it.
+
+One bug found here is worth fixing whichever way that goes, because it is a
+plain defect rather than a judgement call: lines *between* the start-time line
+and the end-time line are never gathered into the label, which is the whole
+reason "Training" and "Security Agent" disappeared.
+
+### 16.3 What the jobs actually look like
+
+The screenshots settle the correction in §8.3, and they settle it with data.
+
+**DSI on TrackTik is fixed.** Every shift seen, across both captures, is
+15:00–23:00 at one site. The days across 3–14 September:
+
+| Sept | 3 Thu | 4 Fri | 5 Sat | 6 Sun | 7 Mon | 8 Tue | 9 Wed | 10 Thu | 11 Fri | 12 Sat | 13 Sun | 14 Mon |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| shift | — | ✓ | — | — | **hol.** | ✓ | ✓ | — | ✓ | — | — | ✓ |
+
+Monday, Tuesday, Wednesday, Friday. Thursday and weekends off. The one Monday
+without a shift is 7 September — Labour Day, the first Monday of the month —
+which Ray confirmed is a holiday rather than a change of rota. So the pattern
+is `{ days:[1,2,3,5], start:'15:00', end:'23:00' }`, exactly §8.2's shape,
+including the `days` field that makes a pattern generative.
+
+**Trupoint on Homebase is PRN.** Four shifts in three days: 00:15–04:15,
+20:00–00:00, 00:15–08:15, 19:15–07:15. Three different roles — Training,
+Security Agent, Security Officer — across two sites. Nothing here repeats.
+
+### 16.4 What the correction costs each section
+
+- **§8.2 gains.** The declared-pattern check is worth most on the job whose
+  times are stable, and that is the job on OCR. DSI's pattern is one line and
+  is already known. The am/pm control lands where am/pm is actually read.
+- **§8.3 gains a great deal.** Generation applies to the job with no feed, so
+  "most weeks it needs no screenshot at all" now means most weeks the *only*
+  OCR path in the product goes unused. That is the largest single reduction in
+  manual effort available anywhere in §8, and §11.3 rates it an evening's work.
+- **§8.3 also gains a named risk.** Its warning that "pretty fixed is not
+  fixed" has a concrete instance on the very first fortnight of real data:
+  Labour Day. Statutory holidays are the predictable exception, and a generated
+  week that emits a shift on one would fire alarms for work that does not
+  exist. Generation should skip them or mark them for confirmation — and since
+  they are known years ahead, this is a lookup, not a guess.
+- **§8.4 loses its headline.** Its most-valuable third bucket, "on file but not
+  in this screenshot", was justified for a PRN job. The PRN job is Homebase,
+  which arrives by feed — where §12 and §13 already detect cancellations,
+  because a feed has stable identity and OCR does not. What §8.4 is left with
+  on the TrackTik side is narrower and easier: catching the week that deviates
+  from a known rota.
+
+### 16.5 What this does to the order in §11.3
+
+Step 1 is done for TrackTik and has answered its question for Homebase. What
+follows moves:
+
+- **§8.2 and §8.3 are now cheap and high-value**, and both depend on a pattern
+  that today's data hands over for free. Neither needs the site table first.
+- **§8.4 shrinks**, and its hardest part is already built on the feed side.
+- **The Homebase decision in §16.2 should be taken before anything else**,
+  because option 3 deletes work rather than adding it.
+- **Step 1's remaining OCR tuning** — page-segmentation mode and a character
+  whitelist (§10.7) — should be judged on TrackTik alone now. TrackTik came
+  through clean, so the case for touching Tesseract's settings is weaker than
+  §11.2 assumed.
