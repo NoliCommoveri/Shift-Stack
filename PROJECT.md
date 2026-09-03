@@ -2071,10 +2071,10 @@ means something different now. §11.4's check therefore still stands unspent for
 | | Work | Why here |
 |---|---|---|
 | ~~1~~ | ~~**§8.2 patterns** for DSI~~ | Done — this section |
-| 1 | **§8.3 generation**, with holidays | Next, and now unblocked. The pattern it generates from exists, is declared, and `days` already means "can fill a week" |
-| 2 | `METHOD:CANCEL` (§10.6) | No schema |
-| 3 | **§8.1 site table** | Still the heaviest; everything after assumes `siteId` |
-| 4 | **§8.4 change detection** | Wants stable site identity first |
+| ~~2~~ | ~~**§8.3 generation**, with holidays~~ | Done — §21, after the reading in §20 |
+| 1 | `METHOD:CANCEL` (§10.6) | No schema |
+| 2 | **§8.1 site table** | Still the heaviest; everything after assumes `siteId` |
+| 3 | **§8.4 change detection** | Wants stable site identity first |
 
 §8.3 needs three things from here and has all three: a pattern with `days`,
 `source:'pattern'` to render a proposal differently from a fact, and the
@@ -2385,3 +2385,132 @@ One thing the reading is worth on its own: three of those four are places where
 a generated shift would have been silently indistinguishable from a confirmed
 one. `source` has been on the record since the beginning and, until §8.3, only
 ever gated one early return.
+
+**Built the same day: §21.** Everything settled above went in as settled, and
+the reading held — the four places were the work, and the generator itself came
+to about forty lines.
+
+---
+
+## 21. Built: filling a week from the rota, 3 September 2026
+
+§8.3, as corrected by the reading in §20. The fixed job has no feed and no
+email, so its normal input is now the rota itself proposed into the review
+screen, with screenshots demoted to catching the weeks that deviate — which is
+what §17.2 asked for and the largest single reduction in manual effort
+available anywhere in §8.
+
+**Add → Fill a week from the rota**, per job, per week. The rows land in
+`pending` and everything downstream was already built: the review screen, its
+flags, the length check, §19's overlap check, the site snapping and the commit
+path all treat them like any other import.
+
+### 21.1 Where it lives
+
+- **`patterns.js` gains the generator**, beside the checks, as §20.8 said it
+  should: `weekDates()` hands back the dates of a week and `generateWeek()`
+  turns validated patterns and a list of dates into rows. Pure, and tested the
+  way §18 and §19 are — dates in, rows out, no DOM and no storage. Two small
+  helpers came with it, `isoFromDayNum()` and `dowOf()`, which walk the
+  calendar on the same integer number line the overlap check already uses
+  rather than through a local-time `Date`.
+- **`holidays.js` is new**, for the same reason `patterns.js` was in §18.1: it
+  is a different kind of knowledge. It answers one question — what, if
+  anything, falls on this date in this jurisdiction — and it answers it by rule
+  rather than from a typed-out table, because a table of dates runs out in a
+  few years and then goes quietly wrong, which is the exact failure the file
+  exists to prevent. Québec and the US federal list, both checked against the
+  calendar in `tests/holidays.test.js`, including the two dates hand-rolled
+  date maths usually gets wrong: Easter, and the Monday preceding 25 May in a
+  year when 25 May is itself a Monday.
+- **`app.js` does what a pattern cannot say**: which dates, which site, which
+  address, and whether the slot is already taken.
+
+The first test written was the one from §16.3: DSI's `{ days:[1,2,3,5],
+start:'15:00', end:'23:00' }` over the week of 7 September 2026 gives Monday,
+Tuesday, Wednesday and Friday at 15:00–23:00. That is the fortnight of real
+data, generated.
+
+### 21.2 The four places that learned the difference
+
+§20's finding was that generation is small and the four places that had to tell
+an assumption from a fact are the work. That was right, and each is one small
+change:
+
+| Where | Before | Now |
+|---|---|---|
+| `bySlot()` | Dropped a screenshot row matching a filed shift exactly | A match against a `source:'pattern'` record carries `replaceId` and goes to review as a **confirmation**. The commit path replaces in place keeping the id, so the calendar sees an update, not a second event. The site is not compared: the label on a generated row was invented here, so the screenshot's is the first real information about it |
+| Horizon note (§17.3) | Counted every shift, so a filled week switched the prompt off | Counts confirmed shifts, and a filled week gets a quieter note of its own naming how many are unconfirmed. A separate note fires on proposals whose **date has passed** unconfirmed — the state that means the screenshots stopped arriving |
+| Pay tab | Summed everything and printed a gross to the cent | A week holding proposals says so: "8.00 h from the rota, unconfirmed". The figure is not suppressed — a forecast is useful — but it says what it rests on |
+| `buildICS()` | Every event identical | `DSI- De la Montagne (from the rota)`, which the alarm body reuses. The hollow tick is in the app; the 05:00 alarm is where §8.3's stated risk actually lands |
+
+Two smaller ones from §20.8. `editShift()` promotes a proposal to `manual` on
+save, because going through the shift by hand is the strongest confirmation
+there is. And §8.3's "hollow tick" turned out to be a 3px colour stripe, so it
+goes outlined rather than filled, with the words *from the rota* on the line
+that already names the job and the site — colour alone cannot carry a
+distinction on a 3px rule.
+
+### 21.3 Holidays, marked and never skipped
+
+§20.7's decision, built as decided. A generated shift landing on a statutory
+holiday arrives flagged — "A statutory holiday falls on this day — remove this
+row if he is not working it. Labour Day." — and one tap removes it.
+
+The flag is deliberately generous: a holiday falling on a weekend also marks
+the weekday it is taken on. An extra flagged row costs a tap; a missed one
+costs an alarm at five in the morning.
+
+It is also re-run when a row's date or job changes, the same way the pattern
+check is (§18.5). A verdict about the 7th has nothing to say about the 8th, and
+a holiday flag left standing over a date it no longer describes is exactly the
+stale amber that teaches him to ignore the amber that means something.
+
+The jurisdiction is a per-company field and its default is **off**. The two
+employers need not share one, and a wrong holiday list would flag ordinary
+weeks — §19.1 is the record of what a warning that fires on the ordinary case
+does to every warning beside it.
+
+### 21.4 What it refuses to do
+
+- **It never fills backwards.** Dates before today are dropped before anything
+  is generated, and a week wholly in the past says so and disables the button:
+  a rota is not evidence about a week that has already happened, and filling
+  one would put unverified hours in the pay tab and events in the feed whose
+  alarms have already gone off.
+- **It never fills a slot twice.** Already on file, or already sitting in the
+  same batch, and the row is dropped — whatever site is standing there, because
+  the site on a generated row was invented by the app.
+- **It never generates from a pattern with no `days`.** That has meant
+  "checking only" since §18.2 and it still does. A half-typed rota is dropped
+  by `validPatterns()` rather than half-believed, and the same rota declared
+  twice fills the week once.
+- **It never confirms itself.** `applyPatterns()` already refused to check a
+  non-OCR row, which is what stops a generated row being checked against the
+  pattern it came from — a test that would always pass, and the app agreeing
+  with its own assumption. §20.1 flagged that guard as load-bearing before
+  anyone could tidy it away.
+- **It never removes a shift.** Not on a holiday, not on a clash. §8.4's rule
+  holds and §19.4's does too: the app names what it cannot know and stops.
+
+### 21.5 §7 is intact
+
+`co.holidays` is an additive optional field on the company record and every
+read of it is guarded, so a job saved before today behaves exactly as it did —
+no jurisdiction, no holiday flags. `source:'pattern'` is a new value in a field
+that has been on the shift record since the beginning, and every existing
+record's `source` still means what it meant. §11.4's check therefore still
+stands unspent for §8.1, which remains the step that will actually need it.
+
+### 21.6 Where this leaves the order
+
+`METHOD:CANCEL` (§10.6) is next by default, then §8.1's site table, then §8.4 —
+unchanged from §18.8 except that generation is off it.
+
+The thing worth watching is not on the list: **whether the promotion in §21.2
+actually fires**. Everything about the proposal/fact distinction rests on a
+screenshot arriving one week in three and quietly turning last week's
+assumptions into facts. If that stops happening, the app says so — the
+unconfirmed note in §21.2 exists for exactly that — but the sentence has never
+been read in anger. The first month of real use is what tests it, not the test
+suite.

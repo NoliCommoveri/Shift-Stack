@@ -216,6 +216,83 @@ function suggestPatterns(shifts){
 }
 
 /* ==========================================================================
+   Generating a week from a declared rota.
+   PROJECT.md §8.3, with the corrections in §20.
+
+   `days` is what makes a pattern generative, and it has meant that since §18.2
+   — a pattern with days describes which days the job runs and can therefore
+   fill a week; one without is only ever compared against. So this is the whole
+   of the generator: the days he ticked, over the dates he asked for.
+
+   Everything a generated row still needs — the site label, the address, the
+   holiday flag, whether the slot is already filled — is the app's, because
+   every one of those is a lookup into stored shifts or a company field. What
+   is here takes patterns and dates and nothing else, which is what makes it
+   testable the way §18 and §19 are.
+   ========================================================================== */
+
+/* An ISO date back from a day number. `dayNum` above is the other direction,
+   and both are UTC for the reason given there. */
+function isoFromDayNum(n){
+  if(!Number.isFinite(n)) return null;
+  const d = new Date(n * 86400000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${
+    String(d.getUTCDate()).padStart(2,'0')}`;
+}
+
+/* getDay() numbers, 0 = Sunday, straight off the number line rather than out
+   of a local-time Date: 1 January 1970 was a Thursday, which is the 4. */
+function dowOf(isoDate){
+  const n = dayNum(isoDate);
+  return n === null ? null : ((n + 4) % 7 + 7) % 7;
+}
+
+/* `len` dates from `startISO`. A week by default, and the caller decides which
+   day a week starts on — this file has no opinion and app.js takes the pay
+   week, which is the one he chose a meaning for (§20.8). */
+function weekDates(startISO, len = 7){
+  const n = dayNum(startISO);
+  if(n === null || !(len > 0)) return [];
+  return Array.from({ length: Math.floor(len) }, (_, i) => isoFromDayNum(n + i));
+}
+
+/* The rows a rota puts on those dates: { date, start, end }, in order.
+
+   Only patterns with `days` generate. A half-typed one is dropped first by
+   validPatterns(), so a rota being entered while a week is filled cannot emit
+   a shift with no times in it, and the same pattern declared twice emits one
+   row rather than two — nothing stops him adding it twice, and two identical
+   rows in review would look like two shifts he is expected to work.
+
+   `days` name the day the shift *starts*, so a Saturday 19:15-07:15 pattern
+   fills Saturday and is filed under Saturday. That is where the record goes
+   and what absSpan() below already expects, so the overlap check sees a
+   generated night running into the next morning exactly as it sees a real one. */
+function generateWeek(patterns, dates){
+  const pats = validPatterns(patterns).filter(p => p.days);
+  const seen = new Set();
+  const out = [];
+  for(const date of (dates || [])){
+    const dow = dowOf(date);
+    if(dow === null) continue;
+    for(const p of pats){
+      if(!p.days.includes(dow)) continue;
+      const k = `${date} ${p.start} ${p.end}`;
+      if(seen.has(k)) continue;
+      seen.add(k);
+      out.push({ date, start: p.start, end: p.end });
+    }
+  }
+  return out.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+}
+
+/* Whether a job can fill a week at all. The button says so before it is
+   pressed rather than filling nothing and leaving him wondering. */
+function canGenerate(patterns){
+  return validPatterns(patterns).some(p => p.days);
+}
+
+/* ==========================================================================
    Overlap, the other half of §8.2's no-config row.
 
    This is the one failure in the app with no recovery. A misread time is
@@ -302,5 +379,6 @@ if(typeof module !== 'undefined' && module.exports){
   module.exports = { PAT_FLAG, SNAP_MINS, FLIP_MINS, MIN_SHIFT_MINS, MAX_SHIFT_MINS,
                      clockGap, spanMins, validPatterns, patternsFor, endFit,
                      checkShift, suggestPatterns,
+                     isoFromDayNum, dowOf, weekDates, generateWeek, canGenerate,
                      dayNum, absSpan, clashMins, findClashes, clashPairs };
 }

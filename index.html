@@ -102,6 +102,10 @@ label.f input,label.f select{width:100%}
 }
 .shift{display:flex;gap:.6rem;align-items:flex-start;padding:.3rem 0;cursor:pointer}
 .tick{width:3px;border-radius:2px;align-self:stretch;min-height:2.2rem;background:var(--rule);flex:none}
+/* A shift proposed from the rota, which nothing has confirmed yet: the stripe
+   is outlined rather than filled, and the word says what the outline means. */
+.rota{font-style:italic}
+tr.assumed td:first-child{color:var(--ink)}
 .shift .when{font-weight:500;font-family:"IBM Plex Mono",monospace;font-size:.9rem}
 .shift .where{font-size:.86rem;color:var(--soft)}
 .shift .len{margin-left:auto;font-size:.82rem;color:var(--soft);font-family:"IBM Plex Mono",monospace;padding-top:.15rem}
@@ -254,7 +258,10 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
     <button class="ghost" id="discard">Discard</button>
   </div>
 
-  <div class="rowbtns"><button class="ghost" id="manual">Enter one by hand</button></div>
+  <div class="rowbtns">
+    <button class="ghost" id="fillweek">Fill a week from the rota</button>
+    <button class="ghost" id="manual">Enter one by hand</button>
+  </div>
 
   <details>
     <summary>Show the raw text that was read</summary>
@@ -342,6 +349,7 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
 <script src="parser.js"></script>
 <script src="ics.js"></script>
 <script src="patterns.js"></script>
+<script src="holidays.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
