@@ -507,6 +507,41 @@ rather than a solid one — so assumption is visually distinct from fact. A
 screenshot import then promotes them to confirmed, or flags them via §8.4. If
 unconfirmed shifts pile up past some horizon, the app should say so.
 
+**Read against the code, 3 September 2026.** The three things this section needs
+exist and are named in §18.8. Four things it assumed do not, and §20 has the
+reading; what it settles belongs here, because this is the section that gets
+built from:
+
+- **A screenshot cannot promote anything today.** `bySlot()` drops a row that
+  matches a filed shift exactly, which is precisely what a confirming screenshot
+  is, so a generated shift would stay an assumption for ever and the hollow tick
+  would never fill in. A match against a `source:'pattern'` record is a
+  confirmation rather than a duplicate: it carries `replaceId`, and the commit
+  path replaces in place and keeps the id, so the calendar sees an update. A
+  site that disagrees is not a location change either — the label was invented
+  here, and the screenshot is the first real information about it (§20.2).
+- **A filled week must not silence the horizon note.** §17.3's "nothing on file
+  after Friday" counts every shift regardless of source, so generation would
+  switch off the one standing prompt to act. The note counts confirmed shifts,
+  and a filled week gets a line of its own naming how many are unconfirmed. The
+  pile-up warning asked for above fires on a generated shift whose date has
+  passed unconfirmed — not on one merely still in the future, which is the
+  ordinary case (§20.3).
+- **Pay must not present an assumption as earnings.** The pay tab sums every
+  shift and prints a gross figure with overtime. A week holding generated shifts
+  says so and names the assumed hours separately (§20.4).
+- **The calendar event carries the mark too.** The hollow tick is in the app;
+  the 05:00 alarm is on the phone, and that is where this section's stated risk
+  actually lands. A generated shift exports with "(from the rota)" in the title,
+  which the alarm body reuses (§20.5).
+- **Holidays are marked, never skipped.** A silent skip generalises from one
+  observed Labour Day and produces a missing shift on the holiday he does work,
+  which is the more expensive failure by this section's own ranking. The
+  generated row arrives flagged and he removes it in one tap (§20.7).
+- **Generation never fills backwards, and a hand edit confirms.** Past dates are
+  never generated, and `editShift()` promotes what he has corrected himself
+  (§20.8).
+
 ### 8.4 Change detection on import
 
 Partly addressed today (see §9) but the full version is still to build. Match
@@ -2136,3 +2171,217 @@ and drop focus mid-edit, the same reason §9's review screen refreshes in place.
 Nothing about the order in §18.8 changes. §8.3 generation is still next, and
 now inherits an overlap check that a generated week will be run through like
 any other import.
+
+---
+
+## 20. §8.3 read against the code, 3 September 2026
+
+§18 and §19 left generation as the next thing to build, and §18.8 recorded that
+it needs three things and has all three: a pattern with `days`, `source` on the
+shift record, and the `pending` array to emit into. That much is true. Reading
+§8.3 against the file it will be built in turns up four things it assumed which
+are not there, and one risk it never mentions that is worse than the one it
+does.
+
+None of this changes the plan. It changes what "an evening's work" contains.
+
+### 20.1 What §8.3 gets right
+
+The load-bearing decisions survive the reading, and two of them are better than
+they looked when they were written.
+
+- **Emitting into `pending` is exactly right.** The review screen already runs
+  the length check, the overlap check (§19.3), the per-row date and job editors,
+  and the commit path that keeps `place`, snaps the site name and files the
+  record. A generated week costs none of that twice.
+- **`source:'pattern'` already flows through the commit path** unchanged —
+  `source: p.source || 'ocr'` on `app.js:1310` — so nothing has to be added to
+  store it.
+- **`applyPatterns()` already refuses to touch a generated row.** It returns
+  early for any row whose `source` is not `ocr` (`app.js:876`), written for
+  calendar and hand-entered rows. That guard is what stops a generated row from
+  being checked against the pattern it was generated from, which would always
+  pass and would mean the app confirming its own assumption. It needs no change,
+  and it is worth saying so before someone tidies it.
+- **`days` naming the day the shift *starts*** (`patterns.js`) is the rule that
+  makes an overnight rota generable at all. A Saturday 19:15–07:15 pattern fills
+  Saturday and files under Saturday, which is where the record already goes and
+  what `absSpan()` already expects.
+
+### 20.2 The promotion §8.3 depends on cannot happen
+
+This is the one that breaks the section's own mitigation.
+
+§8.3 says a generated shift is an assumption until "a screenshot import then
+promotes them to confirmed". Today it cannot. `bySlot()` (`app.js:850`) drops an
+incoming row that matches a filed shift on job, date, start, end and site — and
+a generated shift is precisely the thing a later screenshot matches exactly. The
+confirming row is discarded as a duplicate, nothing is written, and the record
+stays `source:'pattern'` for ever.
+
+The hollow tick therefore never fills in. Every week he actually worked stays on
+screen as an assumption, which is the fastest possible way to teach him that the
+distinction means nothing — and the distinction is the whole mitigation.
+
+Worse in the same function: when the times match but the site does not, the row
+gets `FLAG_MOVED` — "a shift is already on file at this time in a different
+place — adding this will not replace it". Against a generated row that is a
+false statement dressed as a warning. The site on a generated row was never read
+off anything; §8.3 itself calls it a convenience default. A screenshot
+disagreeing with an invented label is not a location change, it is the first
+real information anyone has had about that label.
+
+**Settled:** `bySlot()` gains one case. When the matching filed record is
+`source:'pattern'`, the incoming screenshot row is not a duplicate and not a
+move — it is the confirmation. It keeps `p.replaceId = existing.id` and goes
+through to review like any other row, and the commit path already does the rest:
+`replaceId` replaces in place and **keeps the record’s id** (`app.js:1322`),
+which keeps the calendar UID stable, so the phone sees an update rather than a
+second event. The replacement is written with the incoming row's `source`, so
+promotion is a consequence of the existing code rather than a new mechanism.
+
+That also gives the screenshot its proper job on this route, the one §17.2
+described: it corrects the proposal instead of originating the week.
+
+### 20.3 A filled week silences the one prompt to act
+
+`horizonNotes()` (`app.js:255`) finds the last date on file per job and says
+"nothing on file after Fri 11 Sep — nothing is coming automatically for this
+job, add next week". It counts every shift regardless of `source`.
+
+So generating a week turns that warning off. The app then says nothing at all
+about the week, and what it is silent about is four assumptions. §17.2 already
+asked for the opposite — "unconfirmed proposals must not pile up silently" — and
+named §17.3's note as the place it belongs. It has to actually go there, or
+generation quietly converts the only standing prompt in the app into a
+reassurance.
+
+**Settled:** the horizon note is computed over confirmed shifts, and a filled
+week gets a note of its own rather than no note:
+
+> Next week is filled from the rota — 4 shifts, none confirmed against a
+> screenshot.
+
+And the pile-up rule §8.3 asked for, made concrete: a `source:'pattern'` shift
+whose **date has passed** and which was never promoted is the signal worth
+raising, because it means the screenshots stopped arriving and nobody noticed.
+Counting unconfirmed shifts in the future would fire on the ordinary case the
+day after he generates, which is §19.1's mistake exactly.
+
+### 20.4 Pay counts an assumption as earnings
+
+§8.3 does not mention the pay tab, and the pay tab is where a wrong assumption
+costs the most.
+
+`weeksFor()` and `weekTotals()` (`app.js:154`, `app.js:163`) sum every shift on
+file for the week, work the overtime threshold across them and print a gross
+figure. Nothing in that path reads `source`. A generated week therefore shows up
+as money — with overtime, to the cent — before anyone has confirmed that any of
+it happened.
+
+This is a different failure from the one §8.3 names. An alarm for a cancelled
+shift wastes a morning; a pay figure built on assumptions is checked against a
+deposit weeks later, when the screenshot that would have settled it is gone.
+
+**Settled:** a week containing unconfirmed shifts says so on the pay row, with
+the assumed hours named separately — "32 h, of which 8 h is from the rota and
+unconfirmed". The figure is not suppressed: a forecast is useful and this app's
+whole posture is to show the number and say what it rests on.
+
+### 20.5 The alarm carries no mark, and the alarm is where the risk lands
+
+§8.3's stated risk is that the app "fires alarms for work that does not exist".
+The mitigation it offers — a hollow tick — is in the app. The alarm is in his
+calendar, which knows nothing.
+
+`buildICS()` (`app.js:1214`) writes every shift with the same `SUMMARY` and the
+same `VALARM` bodies, and generated shifts export like anything else: `sent` is
+unset on a new record, so in subscription mode the next feed rebuild carries
+them, unattended, exactly as §19.3 describes for clashes. At 05:00 on a Monday
+the phone cannot tell an assumption from a fact, and that is the moment §8.3 is
+actually about.
+
+**Settled:** for `source:'pattern'`, the event title and the alarm body carry
+the mark — `DSI- De la Montagne (from the rota)`. It costs one conditional in a
+string that is already built per shift, it survives into the alarm because the
+alarm reuses the title, and it turns a 05:00 alarm from a claim into a question.
+
+### 20.6 "A hollow tick" — what that is on this screen
+
+Worth pinning down before it is built, because the words do not match the
+markup. The schedule row's `.tick` is a 3 px vertical colour stripe
+(`index.html:104`), not a tick mark, and the class name is taken a second time
+by the review screen's checkbox label (`index.html:139`).
+
+**Settled:** the stripe stays the job's colour and goes hollow — outlined rather
+than filled — for `source:'pattern'`, plus the word *rota* in the row's second
+line beside the site. Colour alone is not enough on a 3 px rule, and the second
+line already carries "job · site" so there is a place to put a word.
+
+### 20.7 Holidays: mark them, never skip them
+
+§16.4 left this as "skip them or mark them for confirmation". It should be
+settled now, because the two behave very differently on the week he does work.
+
+Skipping silently is wrong on the evidence available. There is exactly one
+observation — DSI ran no shift on Labour Day (§16.3) — and a silent skip
+generalises from it to every statutory holiday for ever. On the holiday he does
+work, a skip produces a missing shift with nothing on screen to notice, which is
+the one failure this app exists to prevent; §8.3's own ranking says a wrong
+shift is cheaper than a missed one.
+
+Marking has none of that asymmetry. A generated row is a proposal in a review
+screen, so the holiday question gets asked where it costs one tap, before
+anything is filed and long before anything rings:
+
+> 7 Sep is Labour Day. The rota says Monday — remove this if he is not working
+> it.
+
+He removes it or he leaves it. The app never has to decide, which is the right
+posture for a fact it cannot know and he can.
+
+The lookup itself stays what §16.4 said it was — a table, not a guess, and for
+this app a small static one. No runtime dependencies (§9) and no network, so it
+is a list of dates per jurisdiction in a file, and the jurisdiction is a
+per-company field because the two employers need not share one.
+
+### 20.8 The smaller things generation still has to settle
+
+| Question | Settled |
+|---|---|
+| Which week is "a week"? | The pay week, `co.weekStart ?? 0`. Note the app is already inconsistent: `renderSchedule()` hardcodes Sunday (`app.js:362`) while `weeksFor()` uses `co.weekStart`. Generation follows pay, which is the one with a meaning he chose |
+| Can it fill backwards? | No. Dates before today are never generated — past hours land in the pay tab as earnings nobody verified, and in the feed as events whose alarms have already gone off |
+| What is the site default? | Label **and `place`** from the most recent filed shift for that job matching the pattern's times. Carrying `place` is what keeps the alarm's address tappable (`app.js:1236`); label without it is a downgrade from every other route into the app |
+| Filling the same week twice? | The generated rows go through `bySlot()` like any import, with §20.2's promotion case. An exact repeat drops; a day already holding a different shift generates and the §19 overlap check flags it, which is correct — the employer moving a shift is exactly what should be visible |
+| Two patterns, same times, same day? | Deduplicate on (day, start, end) before emitting. `validPatterns()` does not deduplicate, and nothing stops the same rota being declared twice |
+| A half-typed pattern? | Never generates. Generation goes through `validPatterns()`, which already drops a pattern with an unreadable time and drops empty `days` so "no days ticked" reads as checking-only everywhere |
+| Editing a generated shift by hand? | Promotes it. `editShift()` (`app.js:685`) writes every field and leaves `source` alone, so a shift he corrected himself would stay drawn as an assumption and keep counting as unconfirmed. A hand edit is the strongest confirmation there is |
+| Where does the code live? | The date arithmetic goes in `patterns.js` as a pure function beside the rest — dates and validated patterns in, rows out, no DOM and no storage — so it is tested like §18 and §19. `app.js` picks the week, resolves the label and `place`, and pushes into `pending` |
+
+### 20.9 What changed in §8.3
+
+Folded in above the fold, so the spec is what gets built:
+
+- The promotion path is named rather than assumed (§20.2).
+- The horizon note and the pay tab are named as places that must learn to read
+  `source` (§20.3, §20.4).
+- The mark follows the shift into the calendar (§20.5).
+- Holidays are marked, never skipped (§20.7).
+- Generation never fills backwards, and a hand edit confirms (§20.8).
+
+Nothing in §8.3's shape changed. Its two load-bearing sentences — emit into
+`pending`, and a convenience default is fine for a label where it would not be
+for a time — are both still exactly right.
+
+### 20.10 Where this leaves the order
+
+Unchanged from §18.8. §8.3 is still next and still an evening, with the reading
+above deciding what that evening contains: the generator itself is small, and
+the four places that have to learn the difference between an assumption and a
+fact — `bySlot()`, the horizon note, the pay tab and the `.ics` title — are the
+work.
+
+One thing the reading is worth on its own: three of those four are places where
+a generated shift would have been silently indistinguishable from a confirmed
+one. `source` has been on the record since the beginning and, until §8.3, only
+ever gated one early return.
