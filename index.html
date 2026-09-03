@@ -142,6 +142,22 @@ input[type=file]{display:none}
 .revf input[type=time]{width:6.4rem}
 .revf input[type=text]{flex:1 1 8rem}
 .flag{font-size:.8rem;color:var(--signal);margin:.4rem 0 0}
+/* Declared shifts (§8.2). Seven toggles rather than a day picker: the whole
+   rota has to be readable and changeable with a thumb, on a phone. */
+.subhead{font-size:.85rem;font-weight:600;margin:1rem 0 .15rem}
+.pat{border-top:1px solid var(--hair);padding:.55rem 0}
+.pat:first-child{border-top:none}
+.days{display:flex;gap:.25rem;margin-bottom:.4rem}
+.day-t{
+  flex:1 1 0;background:var(--card);border:1px solid var(--rule);color:var(--soft);
+  font-family:inherit;font-size:.82rem;padding:.35rem 0;border-radius:2px;cursor:pointer;
+}
+.day-t[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--paper);font-weight:600}
+.patt{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
+.patt input[type=time]{width:6.4rem}
+.patwhat{font-size:.8rem;color:var(--soft);margin:.35rem 0 0}
+.sug{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--hair)}
+.sug button{margin-left:auto}
 /* The horizon warnings sit above the week list. A job that feeds itself gets
    the quieter treatment: worth knowing, but not a job to do. */
 .horizon{margin:0 0 .6rem;padding:.5rem .6rem;border-left:2px solid var(--signal);background:var(--card)}
@@ -322,6 +338,7 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
 
 <script src="parser.js"></script>
 <script src="ics.js"></script>
+<script src="patterns.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

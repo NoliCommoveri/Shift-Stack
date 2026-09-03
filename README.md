@@ -176,17 +176,47 @@ row and nothing is lost.
 Site names are fuzzy matched against ones already on file, so the same site
 spelled three different ways by OCR collapses to one.
 
+## Declared shifts
+
+am/pm rides on a single character, and a misread puts a shift twelve hours out
+looking perfectly plausible. Under each job in **Setup** you can declare the
+shifts it normally runs — tick the days, set the two times. Screenshot rows are
+then checked against them:
+
+- **Exactly twelve hours out** is an am/pm misread. It is corrected, and the
+  row goes amber saying what was read, because a silent correction is no better
+  than a silent error.
+- **A few minutes out** is the reader being untidy. Snapped, quietly.
+- **An hour or two out** is left alone and flagged. The employer may genuinely
+  have moved the shift, and snapping that back would make him late with nothing
+  left to notice.
+- **A day the job does not run** is flagged the same way, never moved.
+
+Nothing is inferred from shifts already on file — that history is the reader's
+own output, so one bad import would become evidence and the check would get
+quieter every time it failed. **Build from what's on file** offers the pairs
+already filed as a list to pick from; you choosing them is the point.
+
+Ticking days also says the pattern can fill a week; leave every day unticked
+and it is only ever used for checking. Whether or not any are declared, a shift
+under an hour or over fourteen is flagged as an unlikely length.
+
+Calendar rows and shifts typed by hand are never corrected this way. Those
+times are the employer's own numbers, or yours.
+
 ## Development
 
-Two readers, both pure functions — no DOM, no storage. `parser.js` turns OCR
-text into shift rows; `ics.js` does the same for a calendar file. They share
-nothing but the row shape, so both land in the same review screen with the
-same flags and the same commit path. Each loads as a plain script in the
-browser and is required directly by the tests. There is still no build step
-and the app has no runtime dependencies.
+Three modules, all pure functions — no DOM, no storage. `parser.js` turns OCR
+text into shift rows and `ics.js` does the same for a calendar file; they share
+nothing but the row shape, so both land in the same review screen with the same
+flags and the same commit path. `patterns.js` reads nothing at all — it takes a
+finished row and the shifts declared for its job and decides what to do about
+the difference. Each loads as a plain script in the browser and is required
+directly by the tests. There is still no build step and the app has no runtime
+dependencies.
 
 ```
-npm test              # run both readers' tests
+npm test              # run all three modules' tests
 npm run test:update   # regenerate golden files, then read them before committing
 ```
 
@@ -197,7 +227,8 @@ do not depend on where the tests are run.
 Fixtures marked PROVISIONAL are typed from the vendors' user guides; ones
 marked TRANSCRIBED are real schedules read off screenshots by eye rather than
 by OCR. Neither kind proves the reading of the text, only the understanding of
-the layout. An unmarked fixture is pasted OCR output; there are none yet.
+the layout. An unmarked fixture is pasted OCR output. `patterns.js` has no
+fixtures — it reads nothing, so its tests are stated cases rather than samples.
 
 The app is not carrying live data yet, so there are no schema migrations. When
 the stored shape changes, use **Setup → Danger zone → Delete everything and
@@ -206,8 +237,11 @@ start over**. See PROJECT.md §7.
 ## Known limits
 
 - am/pm rides on a single character. A misread puts a shift twelve hours out
-  and it will look plausible. Glance at the times before exporting. This is a
-  screenshot problem only — a calendar import cannot get a time wrong this way.
+  and it will look plausible. Declaring the job's shifts (above) catches the
+  ones that land on a job with a fixed rota, and an unlikely length catches
+  some of the rest, but neither is complete — glance at the times before
+  exporting. This is a screenshot problem only: a calendar import cannot get a
+  time wrong this way.
 - A calendar import never removes anything on its own. Cancellations are
   proposed with a tick-box and wait for you.
 - In manual-import mode, removing a shift here does not withdraw an event

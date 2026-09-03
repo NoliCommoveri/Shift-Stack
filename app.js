@@ -103,6 +103,9 @@ const FLAG_TEXT = {
   [FLAG.WEEKDAY]: 'The weekday on screen does not match this date.',
   [FLAG.ONETIME]: 'Only one time could be read \u2014 set the missing one below.',
   [FLAG.FIXEDAP]: 'The am/pm was printed on its own line and has been applied \u2014 check it.',
+  [PAT_FLAG.FLIPPED]: 'Twelve hours out from a shift declared for this job, and corrected \u2014 check it.',
+  [PAT_FLAG.OFFPAT]:  'This is not a shift declared for this job \u2014 check the day and the times.',
+  [PAT_FLAG.ODDLEN]:  'That is an unusual length for a shift \u2014 check the times.',
   [FLAG_MOVED]:   'A shift is already on file at this time in a different place \u2014 adding this will not replace it.',
   [FLAG_CHANGED]: 'The calendar has moved a shift already on file.',
   [ICS_FLAG.NOEND]: 'The calendar gave no end time \u2014 set one below.',
@@ -417,6 +420,124 @@ function renderPay(){
   }
 }
 
+/* -- declared shifts, in the job card (§8.2) --
+   Seven toggles and two clocks. The whole point of §8.2 is that the rota is
+   something he states once rather than something the app infers from its own
+   output, so stating it has to be quicker than the misreads it prevents.
+
+   Ticking days is also the only switch between the two kinds of pattern: with
+   days it describes when the job runs and can fill a week (§8.3); without, it
+   is only ever compared against. */
+function patternDays(p){
+  return (p.days || []).slice().sort((a,b) => a-b).map(d => DAYNAMES[d]).join(' ');
+}
+function renderPatterns(co, host, sugHost){
+  host.innerHTML = '';
+  if(!co.patterns) co.patterns = [];
+  if(!co.patterns.length)
+    host.appendChild(el('p','tiny soft','None declared. Times are then only checked for a plausible length.'));
+
+  co.patterns.forEach((pat, i) => {
+    const row = el('div','pat');
+    row.innerHTML = `
+      <div class="days">${DAYNAMES.map((d, dow) =>
+        `<button type="button" class="day-t" data-dow="${dow}" aria-label="${d}"
+                 aria-pressed="${(pat.days||[]).includes(dow) ? 'true' : 'false'}">${d[0]}</button>`
+      ).join('')}</div>
+      <div class="patt">
+        <input type="time" aria-label="Starts" value="${esc(pat.start||'')}">
+        <span class="soft mono">to</span>
+        <input type="time" aria-label="Ends" value="${esc(pat.end||'')}">
+        <button class="kill" type="button" aria-label="Remove this shift">&times;</button>
+      </div>
+      <p class="patwhat"></p>`;
+
+    const what = row.querySelector('.patwhat');
+    const say = () => {
+      what.textContent =
+        (!pat.start || !pat.end) ? 'Set both times \u2014 an unfinished shift is ignored.'
+        : (pat.days && pat.days.length)
+          ? `Runs ${patternDays(pat)}, ${pat.start}\u2013${pat.end}. A week can be filled from this.`
+          : `${pat.start}\u2013${pat.end}, any day. Checked against, never used to fill a week.`;
+    };
+    say();
+
+    row.querySelectorAll('.day-t').forEach(b => {
+      b.onclick = () => {
+        const dow = +b.dataset.dow, on = b.getAttribute('aria-pressed') === 'true';
+        const days = new Set(pat.days || []);
+        if(on) days.delete(dow); else days.add(dow);
+        b.setAttribute('aria-pressed', String(!on));
+        pat.days = [...days].sort((a,b) => a-b);
+        if(!pat.days.length) delete pat.days;
+        say(); save();
+      };
+    });
+    const [st, en] = row.querySelectorAll('input');
+    st.oninput = () => { pat.start = st.value; say(); save(); };
+    en.oninput = () => { pat.end = en.value; say(); save(); };
+    row.querySelector('.kill').onclick = () => {
+      co.patterns.splice(i, 1);
+      save(); renderPatterns(co, host, sugHost);
+    };
+    host.appendChild(row);
+  });
+
+  const btns = el('div','rowbtns');
+  const add = el('button','ghost','Add a shift');
+  add.onclick = () => {
+    // Deliberately blank. A made-up default left in by accident would flag
+    // every real shift as off-pattern, and a pattern with no times is dropped
+    // by validPatterns() rather than half-believed.
+    co.patterns.push({ start:'', end:'' });
+    save(); renderPatterns(co, host, sugHost);
+  };
+  const build = el('button','ghost','Build from what\u2019s on file');
+  build.onclick = () => renderSuggestions(co, host, sugHost);
+  btns.appendChild(add); btns.appendChild(build);
+  host.appendChild(btns);
+  sugHost.innerHTML = '';
+}
+
+/* §8.2's shortcut past the typing. This is not the rejected idea of learning
+   normal times from history — nothing here is applied to anything. It is a
+   list of candidates drawn from the reader's own unvalidated output, and the
+   human picking from it is exactly what stops that output becoming authority. */
+function renderSuggestions(co, patHost, host){
+  host.innerHTML = '';
+  const filed = S.shifts.filter(s => s.companyId === co.id);
+  const already = (co.patterns || []);
+  const sug = suggestPatterns(filed)
+    .filter(x => !already.some(p => p.start === x.start && p.end === x.end));
+
+  host.appendChild(el('p','tiny soft', !filed.length
+    ? 'Nothing on file for this job yet.'
+    : !sug.length
+      ? 'Every start and end pair on file is already declared.'
+      : 'Pairs already on file, most common first. These came off screenshots, ' +
+        'so add only the ones you know are real \u2014 that check is the point of them.'));
+
+  sug.forEach(x => {
+    const r = el('div','sug');
+    r.innerHTML = `<span class="mono">${esc(x.start)}\u2013${esc(x.end)}</span>
+      <span class="tiny soft">${x.count} shift${x.count===1?'':'s'}${
+        x.days.length ? ' &middot; ' + esc(x.days.map(d => DAYNAMES[d]).join(' ')) : ''}</span>`;
+    const use = el('button','ghost','Add this');
+    use.onclick = () => {
+      // The days it was actually filed on are a starting tick, not a claim.
+      // He unticks the ones that were one-offs.
+      co.patterns.push({ days: x.days.slice(), start: x.start, end: x.end });
+      save();
+      // Re-render both: the list is a menu he may take more than one thing
+      // from, and what he has just taken drops off it.
+      renderPatterns(co, patHost, host);
+      renderSuggestions(co, patHost, host);
+    };
+    r.appendChild(use);
+    host.appendChild(r);
+  });
+}
+
 /* -- setup tab -- */
 function renderSetup(){
   const box = $('#colist');
@@ -449,7 +570,15 @@ function renderSetup(){
       <p class="tiny soft" style="margin:-.35rem 0 0">An employer's calendar sync writes into a
         whole Google account, so his own appointments arrive with the shifts. A word that appears
         on every shift and nothing else — a site name, the role — keeps them out. Leave it
-        empty to take everything.</p>`;
+        empty to take everything.</p>
+
+      <h3 class="subhead">Shifts this job normally runs</h3>
+      <p class="tiny soft" style="margin:0 0 .4rem">Times read off a screenshot are checked
+        against these. One exactly twelve hours out is an am/pm misread and is corrected;
+        one a few minutes out is tidied up; one an hour or two out is left alone and
+        flagged, because the employer may have moved it.</p>
+      <div class="patbox"></div>
+      <div class="sugbox"></div>`;
     card.querySelectorAll('[data-k]').forEach(inp => {
       inp.oninput = () => {
         const k = inp.dataset.k;
@@ -461,6 +590,8 @@ function renderSetup(){
         if(k === 'name' || k === 'color'){ renderLaunchers(); }
       };
     });
+    renderPatterns(co, card.querySelector('.patbox'), card.querySelector('.sugbox'));
+
     const btns = el('div','rowbtns');
     const del = el('button','ghost danger','Remove this job');
     del.onclick = () => {
@@ -649,6 +780,9 @@ async function readFiles(files){
   $('#raw').textContent = chunks.join('\n\n');
   fill.style.width = '100%';
 
+  // Before the duplicate filter, not after: a row twelve hours out is a
+  // duplicate of nothing until it has been put right.
+  pending.forEach(applyPatterns);
   pending = pending.filter(bySlot);
 
   txt.textContent = pending.length
@@ -671,6 +805,42 @@ function bySlot(p){
   if(sameSlot.some(s => key(s.label) === snapped)) return false;     // exact repeat
   p.flags = [...p.flags, FLAG_MOVED];
   return true;
+}
+
+/* ---------- declared patterns (§8.2) --------------------------------------
+   patterns.js does the deciding. This is where the app says which rows it is
+   allowed to decide about, and turns what comes back into something the review
+   screen already knows how to show.
+
+   Screenshot rows only. A calendar row carries the employer's own numbers and
+   a hand-entered row carries his, so correcting either against a declared rota
+   would be overwriting fact with assumption — which is the same mistake as
+   snapping a shift the employer really moved, pointed the other way.
+   ---------------------------------------------------------------------- */
+const PAT_FLAGS = [PAT_FLAG.FLIPPED, PAT_FLAG.OFFPAT, PAT_FLAG.ODDLEN];
+
+function applyPatterns(p){
+  if(p.removeId) return;
+  if(p.source && p.source !== 'ocr') return;
+  if(p.edited) return;                       // he has taken the times over
+
+  // Judge what was read, never what a previous run of this left behind.
+  // Otherwise the second run finds its own correction sitting there looking
+  // exactly right, and drops the warning that came with it.
+  if(!p.read) p.read = { start: p.start, end: p.end };
+
+  const co = coById(p.companyId);
+  const got = checkShift({ date: p.date, start: p.read.start, end: p.read.end },
+                         co && co.patterns);
+  p.start = got.start;
+  p.end   = got.end;
+  p.flags = [...p.flags.filter(f => !PAT_FLAGS.includes(f)), ...got.flags];
+  // Only a flip gets a sentence. A snap of a few minutes is deliberately
+  // silent, and a note on every one of those is how a review screen stops
+  // being read at all.
+  p.patNote = (got.read && got.flags.includes(PAT_FLAG.FLIPPED))
+    ? `Read as ${fmtTime(got.read.start)}\u2013${fmtTime(got.read.end)}.`
+    : '';
 }
 
 /* ---------- calendar import ----------------------------------------------
@@ -820,7 +990,8 @@ async function fetchCalendar(url){
 }
 
 function flagText(p){
-  return [...p.flags.map(f => FLAG_TEXT[f] || f), p.note || ''].filter(Boolean).join(' ');
+  return [...p.flags.map(f => FLAG_TEXT[f] || f), p.patNote || '', p.note || '']
+    .filter(Boolean).join(' ');
 }
 
 function renderReview(){
@@ -875,19 +1046,39 @@ function renderReview(){
     // keystroke would reorder rows and drop focus mid-edit.
     const touch = () => {
       note.textContent = flagText(p);
-      note.hidden = !p.flags.length;
+      note.hidden = !(p.flags.length || p.patNote);
       row.classList.toggle('flagged', !p.date || p.flags.length > 0);
+    };
+    // The date and the job are what decide which declared shifts a row is
+    // judged against, so changing either re-runs the check — and a TrackTik
+    // screen where every row came back undated (§16.1) is exactly when it is
+    // worth most. The times are not on that list: once he has typed one it is
+    // his, and §8.2's rule that a real change must never be snapped away
+    // applies most of all when the change came from him.
+    const recheck = () => {
+      applyPatterns(p);
+      if(!p.edited){ s.value = p.start; e.value = p.end; }
+      touch();
+    };
+    const byHand = () => {
+      p.edited = true;
+      // A verdict about what was read says nothing about what he has since
+      // typed, so it goes rather than sitting there amber over a number that
+      // is no longer on the row.
+      p.flags = p.flags.filter(f => !PAT_FLAGS.includes(f));
+      p.patNote = '';
     };
     d.oninput = () => {
       p.date = d.value;
       // Only the missing-date warning is answered by setting a date. The am/pm
       // and split-line warnings are about the times and must survive.
       if(p.date) p.flags = p.flags.filter(f => f !== FLAG.NODATE);
-      touch();
+      recheck();
     };
-    s.oninput = () => { p.start = s.value; };
+    s.oninput = () => { p.start = s.value; byHand(); touch(); };
     e.oninput = () => {
       p.end = e.value;
+      byHand();
       // Supplying the end answers the one-time warning and nothing else. The
       // am/pm warning is about a value that was read, not one that was absent,
       // so it survives being given the other half of the pair.
@@ -896,7 +1087,7 @@ function renderReview(){
     };
     l.oninput = () => { p.label = l.value; };
     const job = row.querySelector('select');
-    if(job) job.onchange = () => { p.companyId = job.value; };
+    if(job) job.onchange = () => { p.companyId = job.value; recheck(); };
     row.querySelector('.kill').onclick = () => {
       pending = pending.filter(x => x.rid !== p.rid);
       renderReview();
@@ -1074,7 +1265,7 @@ $('#addco').onclick = () => {
   S.companies.push({
     id: uid(), name: 'New job', color: palette[S.companies.length % palette.length],
     rate: null, weekStart: 0, otAfterHrs: null, breakMins: null, breakAfterHrs: null,
-    pkg: '', icsMatch: ''
+    pkg: '', icsMatch: '', patterns: []
   });
   save(); renderAll();
 };

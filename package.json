@@ -3,7 +3,10 @@
   "private": true,
   "description": "Tests only. The app itself has no dependencies and no build step — the files in the repo root are what gets served.",
   "scripts": {
-    "test": "node --test tests/parser.test.js tests/ics.test.js",
-    "test:update": "UPDATE=1 node --test tests/parser.test.js tests/ics.test.js"
+    "test": "node --test tests/parser.test.js tests/ics.test.js tests/patterns.test.js",
+    "test:update": "UPDATE=1 node --test tests/parser.test.js tests/ics.test.js tests/patterns.test.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.1"
   }
 }
