@@ -57,16 +57,14 @@ function save(){
 const uid = () => (crypto.randomUUID ? crypto.randomUUID()
   : 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2,9));
 
-/* ---------- date helpers ------------------------------------------------- */
-const MONTHS = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
-const WEEKDAYS = {sun:0,mon:1,tue:2,wed:3,thu:4,fri:5,sat:6};
+/* ---------- date helpers -------------------------------------------------
+   MONTHS, WEEKDAYS, iso() and asDate() live in parser.js, which loads first.
+   ---------------------------------------------------------------------- */
 const DAYNAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const MONTHNAMES = ['January','February','March','April','May','June','July',
                     'August','September','October','November','December'];
 
-const iso = (y,m,d) => `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
 const todayISO = () => { const n = new Date(); return iso(n.getFullYear(), n.getMonth(), n.getDate()); };
-const asDate = s => new Date(s + 'T12:00:00');
 function shiftDays(s, n){ const d = asDate(s); d.setDate(d.getDate()+n); return iso(d.getFullYear(), d.getMonth(), d.getDate()); }
 function mins(t){ const [h,m] = t.split(':').map(Number); return h*60+m; }
 function fmtTime(t){
@@ -91,212 +89,18 @@ function weekStart(dateStr, startDow){
   return shiftDays(dateStr, -back);
 }
 
-/* ---------- OCR text normalising ---------------------------------------- */
-function normalise(t){
-  return t
-    .replace(/[\u2010-\u2015\u2212]/g, '-')
-    .replace(/\s*\|\s*/g, ' - ')
-    .replace(/(\d)\s*[.;](\d{2})/g, '$1:$2')
-    .replace(/(\d)\s*:\s*(\d{2})/g, '$1:$2')
-    .replace(/[ \t]{2,}/g, ' ');
-}
-
-function guessYear(month, day){
-  const now = new Date();
-  const floor = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 45);
-  const years = [now.getFullYear()-1, now.getFullYear(), now.getFullYear()+1];
-  for(const y of years) if(new Date(y, month, day) >= floor) return y;
-  let best = null, gap = Infinity;
-  for(const y of years){
-    const g = Math.abs(new Date(y, month, day) - now);
-    if(g < gap){ gap = g; best = y; }
-  }
-  return best;
-}
-
-/* A line that is only a month name — TrackTik's section header. */
-function monthHeader(line){
-  const m = line.match(/^([A-Za-z]{3,9})\.?\s*(\d{4})?\s*[~v^\u2304\-_]*$/);
-  if(!m) return null;
-  const mo = MONTHS[m[1].slice(0,3).toLowerCase()];
-  if(mo === undefined) return null;
-  return { month: mo, year: m[2] ? +m[2] : null };
-}
-
-/* A full written date — Homebase's day header, e.g. "Sunday, July 27, 2025". */
-function fullDate(line){
-  let m = line.match(/\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?/);
-  if(m && MONTHS[m[1].slice(0,3).toLowerCase()] !== undefined){
-    const mo = MONTHS[m[1].slice(0,3).toLowerCase()], d = +m[2];
-    if(d >= 1 && d <= 31) return iso(m[3] ? +m[3] : guessYear(mo,d), mo, d);
-  }
-  m = line.match(/\b(\d{1,2})\s+([A-Za-z]{3,9})\.?(?:,?\s*(\d{4}))?/);
-  if(m && MONTHS[m[2].slice(0,3).toLowerCase()] !== undefined){
-    const mo = MONTHS[m[2].slice(0,3).toLowerCase()], d = +m[1];
-    if(d >= 1 && d <= 31) return iso(m[3] ? +m[3] : guessYear(mo,d), mo, d);
-  }
-  m = line.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
-  if(m) return `${m[1]}-${m[2]}-${m[3]}`;
-  m = line.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
-  if(m){
-    const mo = +m[1]-1, d = +m[2];
-    if(mo >= 0 && mo <= 11 && d >= 1 && d <= 31){
-      let y = m[3] ? +m[3] : guessYear(mo,d);
-      if(y < 100) y += 2000;
-      return iso(y, mo, d);
-    }
-  }
-  return null;
-}
-
-function leadingDay(line){
-  const m = line.match(/^[\(\[\{]?\s*(\d{1,2})\s*[\)\]\}]?[\s.:-]+(.*)$/);
-  if(!m) return null;
-  const d = +m[1];
-  if(d < 1 || d > 31) return null;
-  return { day: d, rest: m[2].trim() };
-}
-
-function to24(h, m, ap){
-  h = +h;
-  if(ap){
-    ap = ap.toUpperCase();
-    if(ap === 'PM' && h !== 12) h += 12;
-    if(ap === 'AM' && h === 12) h = 0;
-  }
-  if(h > 23) return null;
-  return `${String(h).padStart(2,'0')}:${m}`;
-}
-const RANGE  = /(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?\s*(?:-|to|until|\u2013)\s*(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?/;
-const SINGLE = /(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?/;
-
-function findRange(line){
-  const m = line.match(RANGE);
-  if(!m) return null;
-  const a = m[3] || m[6], b = m[6] || m[3];
-  const start = to24(m[1], m[2], a), end = to24(m[4], m[5], b);
-  if(!start || !end) return null;
-  return { start, end, ambiguous: !m[3] && !m[6], text: m[0] };
-}
-function findSingle(line){
-  const m = line.match(SINGLE);
-  if(!m) return null;
-  const t = to24(m[1], m[2], m[3]);
-  if(!t) return null;
-  return { time: t, ambiguous: !m[3], text: m[0] };
-}
-
-function tidy(s){
-  return String(s||'')
-    .replace(/[^A-Za-z0-9\u00C0-\u017F &'/.,-]/g,' ')
-    .replace(/\s{2,}/g,' ')
-    .replace(/^[\s,.\-]+|[\s,.\-]+$/g,'')
-    .slice(0,60);
-}
-// Lines that are chrome, not data.
-const NOISE = /^(schedule|my shifts|open shifts|all shifts|today|table of contents|browsing|your hours|scheduled|actual|home|money|messages|more|clock)/i;
-
-/* ---------- the parser --------------------------------------------------
-   Handles both layouts seen so far:
-     TrackTik  month header, then "WED 9:00am - 11:00am" / "(03) Site"
-     Homebase  "Sunday, July 27, 2025", then a start time and an end time
-               on separate lines with the role beside them
-   -------------------------------------------------------------------- */
-function parse(text){
-  const lines = normalise(text).split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-  const out = [];
-  let month = null, year = null, lastDay = null, dateNow = null;
-
-  for(let i = 0; i < lines.length; i++){
-    const line = lines[i];
-
-    const mh = monthHeader(line);
-    if(mh){ month = mh.month; if(mh.year) year = mh.year; lastDay = null; continue; }
-
-    // A header line carrying a full date resets the current day.
-    if(!findSingle(line)){
-      const fd = fullDate(line);
-      if(fd){ dateNow = fd; continue; }
-    }
-
-    if(NOISE.test(line)) continue;
-
-    const r = findRange(line);
-    let start, end, ambiguous, consumed = 0, label = '';
-
-    if(r){
-      start = r.start; end = r.end; ambiguous = r.ambiguous;
-      const cut = line.indexOf(r.text);
-      const before = line.slice(0, cut).trim();
-      const after  = line.slice(cut + r.text.length).trim();
-      if(after.length > 2) label = after;
-
-      var dayFromBefore = /^[\(\[]?\s*\d{1,2}\s*[\)\]]?$/.test(before)
-        ? +before.replace(/\D/g,'') : null;
-      var wdTok = before.match(/^([A-Za-z]{3})\b/);
-    } else {
-      // Two single times on consecutive lines = one shift (Homebase).
-      const a = findSingle(line);
-      if(!a) continue;
-      let j = i + 1, b = null;
-      while(j < lines.length && j <= i + 2){
-        if(findRange(lines[j])) break;
-        const cand = findSingle(lines[j]);
-        if(cand){ b = cand; break; }
-        j++;
-      }
-      if(!b) continue;
-      start = a.time; end = b.time; ambiguous = a.ambiguous || b.ambiguous;
-      consumed = j - i;
-      const restA = line.replace(a.text,'').trim();
-      const restB = lines[j].replace(b.text,'').trim();
-      label = [restA, restB].filter(x => x.length > 2 && !NOISE.test(x)).join(' ');
-      if(lines[j+1] && !findSingle(lines[j+1]) && !NOISE.test(lines[j+1]) && !fullDate(lines[j+1])){
-        if(label.length < 3) label = lines[j+1];
-        consumed = j + 1 - i;
-      }
-      var dayFromBefore = null, wdTok = null;
-    }
-
-    // Work out the date.
-    let day = (typeof dayFromBefore === 'number') ? dayFromBefore : null;
-    if(r){
-      const nxt = lines[i+1];
-      if(nxt && !findRange(nxt) && !findSingle(nxt)){
-        const nd = leadingDay(nxt);
-        if(nd){
-          if(day === null) day = nd.day;
-          if(!label) label = nd.rest;
-        } else if(!label && !NOISE.test(nxt)) label = nxt;
-      }
-    }
-
-    let date = '';
-    if(day !== null && month !== null){
-      if(lastDay !== null && day < lastDay - 10){
-        month++; if(month > 11){ month = 0; if(year) year++; }
-      }
-      lastDay = day;
-      date = iso(year || guessYear(month, day), month, day);
-    } else if(dateNow){
-      date = dateNow;
-    }
-
-    const flags = [];
-    if(!date)     flags.push('No date found — set it below.');
-    if(ambiguous) flags.push('No am/pm was printed — check the times.');
-    if(!r)        flags.push('Times were read from two separate lines — check them.');
-    if(date && wdTok){
-      const want = WEEKDAYS[wdTok[1].toLowerCase()];
-      if(want !== undefined && asDate(date).getDay() !== want)
-        flags.push('The weekday on screen does not match this date.');
-    }
-
-    out.push({ date, start, end, label: tidy(label) || 'Shift', flags });
-    i += consumed;
-  }
-  return out;
-}
+/* ---------- review flags -------------------------------------------------
+   parser.js emits codes; the wording lives here so changing it never breaks
+   a test fixture. FLAG_MOVED is raised by the importer, not the parser.
+   ---------------------------------------------------------------------- */
+const FLAG_MOVED = 'moved';
+const FLAG_TEXT = {
+  [FLAG.NODATE]:  'No date found \u2014 set it below.',
+  [FLAG.AMPM]:    'No am/pm was printed \u2014 check the times.',
+  [FLAG.SPLIT]:   'Times were read from two separate lines \u2014 check them.',
+  [FLAG.WEEKDAY]: 'The weekday on screen does not match this date.',
+  [FLAG_MOVED]:   'A shift is already on file at this time in a different place \u2014 adding this will not replace it.'
+};
 
 /* ---------- site name matching ------------------------------------------
    OCR spells the same site three different ways. Snap to one we already know.
@@ -687,6 +491,25 @@ function prep(img){
   x.putImageData(d,0,0);
   return c;
 }
+/* The OCR engine is ~10MB and only the Add tab needs it, so it is fetched on
+   first use rather than from <head>. A script tag in <head> is parser-blocking:
+   with the CDN unreachable the whole app failed to open, which is the opposite
+   of what an offline-first PWA should do. The service worker caches it after
+   the first successful load, so this costs nothing on later imports. */
+let readerPromise = null;
+function loadReader(){
+  if(typeof Tesseract !== 'undefined') return Promise.resolve();
+  if(readerPromise) return readerPromise;
+  readerPromise = new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js';
+    s.onload = () => res();
+    s.onerror = () => { readerPromise = null; rej(new Error('reader unavailable')); };
+    document.head.appendChild(s);
+  });
+  return readerPromise;
+}
+
 const loadImg = file => new Promise((res,rej) => {
   const i = new Image();
   i.onload = () => res(i);
@@ -699,6 +522,9 @@ async function readFiles(files){
   if(!imgs.length) return;
   if(!S.companies.length){ alert('Add a job in Setup first, so the shifts have somewhere to go.'); return; }
 
+  const batchCo = $('#impco').value;
+  if(!batchCo){ alert('Pick which job these screenshots are from first.'); return; }
+
   const prog = $('#prog'), fill = $('#barfill'), txt = $('#progtext');
   prog.classList.add('on');
   fill.style.width = '2%';
@@ -706,6 +532,7 @@ async function readFiles(files){
 
   let worker;
   try{
+    await loadReader();
     worker = await Tesseract.createWorker('eng', 1, {
       logger: m => { if(m.status === 'recognizing text') fill.style.width = (10 + m.progress*85) + '%'; }
     });
@@ -720,7 +547,9 @@ async function readFiles(files){
     try{
       const { data:{ text } } = await worker.recognize(prep(await loadImg(imgs[i])));
       chunks.push(`--- ${imgs[i].name} ---\n${text}`);
-      parse(text).forEach(p => pending.push(p));
+      // Stamp the job now, not at commit time — the picker may be changed
+      // between batches, and each row belongs to the job it was read under.
+      parse(text).forEach(p => pending.push({ ...p, rid: uid(), companyId: batchCo }));
     }catch(e){ chunks.push(`--- ${imgs[i].name} ---\n[unreadable]`); }
   }
   await worker.terminate();
@@ -728,15 +557,29 @@ async function readFiles(files){
   $('#raw').textContent = chunks.join('\n\n');
   fill.style.width = '100%';
 
-  // Drop anything already on file.
-  const co = $('#impco').value;
-  pending = pending.filter(p => !(p.date && S.shifts.some(s =>
-    s.companyId === co && s.date === p.date && s.start === p.start && s.end === p.end)));
+  // Drop only exact repeats — same job, same date, same times, same place.
+  // A row matching on time but not on place is a location change, not a
+  // duplicate, so it stays and gets flagged for review.
+  pending = pending.filter(p => {
+    if(!p.date) return true;
+    const sameSlot = S.shifts.filter(s =>
+      s.companyId === p.companyId && s.date === p.date &&
+      s.start === p.start && s.end === p.end);
+    if(!sameSlot.length) return true;
+    const snapped = key(snapSite(p.label, p.companyId));
+    if(sameSlot.some(s => key(s.label) === snapped)) return false;   // exact repeat
+    p.flags = [...p.flags, FLAG_MOVED];
+    return true;
+  });
 
   txt.textContent = pending.length
     ? `Found ${pending.length} shift${pending.length===1?'':'s'}. Check them, then add.`
     : 'Nothing new found. Open the raw text below to see what was read.';
   renderReview();
+}
+
+function flagText(p){
+  return p.flags.map(f => FLAG_TEXT[f] || f).join(' ');
 }
 
 function renderReview(){
@@ -745,10 +588,10 @@ function renderReview(){
   $('#revbtns').hidden = !pending.length;
   if(!pending.length) return;
 
-  pending.sort((a,b) => (a.date+a.start).localeCompare(b.date+b.start));
-  pending.forEach((p, i) => {
-    const bad = !p.date || p.flags.length;
-    const row = el('div','rev' + (bad ? ' flagged' : ''));
+  const manyJobs = S.companies.length > 1;
+
+  pending.forEach(p => {
+    const row = el('div','rev' + ((!p.date || p.flags.length) ? ' flagged' : ''));
     row.innerHTML = `
       <div class="revf">
         <input type="date" value="${p.date}">
@@ -756,15 +599,38 @@ function renderReview(){
         <span class="soft mono">to</span>
         <input type="time" value="${p.end}">
         <input type="text" value="${esc(p.label)}">
+        ${manyJobs ? `<select>${S.companies.map(c =>
+          `<option value="${c.id}"${c.id===p.companyId?' selected':''}>${esc(c.name)}</option>`
+        ).join('')}</select>` : ''}
         <button class="kill" aria-label="Remove">&times;</button>
       </div>
-      ${p.flags.length ? `<p class="flag">${esc(p.flags.join(' '))}</p>` : ''}`;
+      <p class="flag"${p.flags.length ? '' : ' hidden'}>${esc(flagText(p))}</p>`;
+
     const [d,s,e,l] = row.querySelectorAll('input');
-    d.oninput = () => { p.date = d.value; p.flags = []; renderReview(); };
+    const note = row.querySelector('.flag');
+    // Refresh this row in place. Re-rendering the whole list on every
+    // keystroke would reorder rows and drop focus mid-edit.
+    const touch = () => {
+      note.textContent = flagText(p);
+      note.hidden = !p.flags.length;
+      row.classList.toggle('flagged', !p.date || p.flags.length > 0);
+    };
+    d.oninput = () => {
+      p.date = d.value;
+      // Only the missing-date warning is answered by setting a date. The am/pm
+      // and split-line warnings are about the times and must survive.
+      if(p.date) p.flags = p.flags.filter(f => f !== FLAG.NODATE);
+      touch();
+    };
     s.oninput = () => { p.start = s.value; };
     e.oninput = () => { p.end = e.value; };
     l.oninput = () => { p.label = l.value; };
-    row.querySelector('.kill').onclick = () => { pending.splice(i,1); renderReview(); };
+    const job = row.querySelector('select');
+    if(job) job.onchange = () => { p.companyId = job.value; };
+    row.querySelector('.kill').onclick = () => {
+      pending = pending.filter(x => x.rid !== p.rid);
+      renderReview();
+    };
     box.appendChild(row);
   });
 }
@@ -839,13 +705,11 @@ document.addEventListener('paste', e => {
 });
 
 $('#commit').onclick = () => {
-  const co = $('#impco').value;
-  if(!co) return;
   let n = 0;
-  pending.filter(p => p.date && p.start && p.end).forEach(p => {
+  pending.filter(p => p.date && p.start && p.end && p.companyId).forEach(p => {
     S.shifts.push({
-      id: uid(), companyId: co, date: p.date, start: p.start, end: p.end,
-      label: snapSite(p.label, co), source: 'ocr'
+      id: uid(), companyId: p.companyId, date: p.date, start: p.start, end: p.end,
+      label: snapSite(p.label, p.companyId), source: p.source || 'ocr'
     });
     n++;
   });
@@ -858,7 +722,8 @@ $('#discard').onclick = () => { pending = []; renderReview(); $('#progtext').tex
 $('#manual').onclick = () => {
   const co = $('#impco').value;
   if(!co){ alert('Add a job in Setup first.'); return; }
-  pending.push({ date: todayISO(), start: '09:00', end: '17:00', label: 'Shift', flags: [] });
+  pending.push({ rid: uid(), companyId: co, date: todayISO(), start: '09:00',
+                 end: '17:00', label: 'Shift', flags: [], source: 'manual' });
   renderReview();
   $('#prog').classList.add('on');
 };
@@ -923,6 +788,24 @@ $('#jsonpick').onchange = async () => {
 $('#wipeshifts').onclick = () => {
   if(!confirm('Delete every shift? Jobs and rates are kept.')) return;
   S.shifts = []; save(); renderAll();
+};
+$('#wipeall').onclick = async () => {
+  if(!confirm('Delete jobs, shifts and settings? Everything on this device goes.')) return;
+  if(!confirm('Last check — this cannot be undone. Save a backup first if you want one.')) return;
+  pending = [];
+  S = structuredClone(DEFAULTS);
+  clearTimeout(saveTimer);
+  try{ await idb.put(S); }catch(e){}
+  renderAll(); renderReview();
+  alert('Cleared. The app is back to a fresh install.');
+};
+$('#flushcache').onclick = async () => {
+  try{
+    if('caches' in window) await Promise.all((await caches.keys()).map(k => caches.delete(k)));
+    const regs = await navigator.serviceWorker?.getRegistrations?.() || [];
+    await Promise.all(regs.map(r => r.unregister()));
+  }catch(e){}
+  location.reload();
 };
 
 /* ---------- boot --------------------------------------------------------- */

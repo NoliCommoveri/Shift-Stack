@@ -9,8 +9,12 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+<!-- Loaded without blocking: a stylesheet in <head> holds up script execution,
+     so an unreachable fonts.googleapis.com left the app on a blank page. Every
+     font stack below falls back to system-ui, so text shows immediately and
+     swaps to Plex when it arrives. -->
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet" media="print" onload="this.media='all'">
 <style>
 :root{
   --paper:#EDEEE9;
@@ -247,7 +251,19 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
     <summary>Danger zone</summary>
     <div class="rowbtns">
       <button class="ghost danger" id="wipeshifts">Delete all shifts</button>
+      <button class="ghost danger" id="wipeall">Delete everything and start over</button>
     </div>
+    <p class="tiny soft" style="margin-top:.5rem">
+      Start over clears jobs, shifts and settings — the whole store. While the app
+      is still being built this is the intended way to move to a new data shape.
+    </p>
+    <div class="rowbtns">
+      <button class="ghost" id="flushcache">Reload the app files</button>
+    </div>
+    <p class="tiny soft" style="margin-top:.5rem">
+      Drops the cached copy of the app and reloads, so a new version is picked up
+      straight away instead of on the next open. Your data is not touched.
+    </p>
   </details>
 
   <p class="tiny soft" id="storenote" style="margin-top:1.5rem"></p>
@@ -266,6 +282,7 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
 
 <dialog id="dlg"><div id="dlgbody"></div></dialog>
 
+<script src="parser.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -69,6 +69,25 @@ case where the weekday on screen disagrees with the date it worked out.
 Site names are fuzzy matched against ones already on file, so the same site
 spelled three different ways by OCR collapses to one.
 
+## Development
+
+The parser is `parser.js` — pure functions, no DOM, no storage. It loads as a
+plain script in the browser and is required directly by the tests. There is
+still no build step and the app has no runtime dependencies.
+
+```
+npm test              # run the parser tests
+npm run test:update   # regenerate golden files, then read them before committing
+```
+
+`tests/fixtures/README.md` explains how to turn a screenshot into a test case.
+Fixtures marked PROVISIONAL are typed from the vendors' user guides, not from
+real schedules — they catch regressions, they do not prove correctness.
+
+The app is not carrying live data yet, so there are no schema migrations. When
+the stored shape changes, use **Setup → Danger zone → Delete everything and
+start over**. See PROJECT.md §7.
+
 ## Known limits
 
 - am/pm rides on a single character. A misread puts a shift twelve hours out
@@ -78,3 +97,6 @@ spelled three different ways by OCR collapses to one.
   and premiums, stat holidays and retro pay are not modelled.
 - Android can clear the storage of a web app under pressure. Save a backup
   from Setup now and then.
+- Neither screenshot layout has been tested against a real capture yet. Both
+  profiles come from the employers' user guides. Check the first few imports
+  closely.

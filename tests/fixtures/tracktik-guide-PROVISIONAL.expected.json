@@ -1,0 +1,23 @@
+[
+  {
+    "date": "2027-02-03",
+    "start": "09:00",
+    "end": "11:00",
+    "label": "Mobile Guard - De la Montagne",
+    "flags": []
+  },
+  {
+    "date": "2027-02-04",
+    "start": "07:00",
+    "end": "15:00",
+    "label": "Static Guard - De la Montagne",
+    "flags": []
+  },
+  {
+    "date": "2027-02-06",
+    "start": "23:00",
+    "end": "07:00",
+    "label": "Mobile Guard - De la Montagne",
+    "flags": []
+  }
+]
