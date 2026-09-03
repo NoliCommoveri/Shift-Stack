@@ -1,0 +1,38 @@
+[
+  {
+    "date": "2026-09-03",
+    "start": "00:15",
+    "end": "04:15",
+    "label": "Training - Headquarters",
+    "flags": [
+      "split"
+    ]
+  },
+  {
+    "date": "2026-09-03",
+    "start": "20:00",
+    "end": "00:00",
+    "label": "Training - F.O.C",
+    "flags": [
+      "split"
+    ]
+  },
+  {
+    "date": "2026-09-04",
+    "start": "00:15",
+    "end": "08:15",
+    "label": "Security Agent - Headquarters",
+    "flags": [
+      "split"
+    ]
+  },
+  {
+    "date": "2026-09-05",
+    "start": "19:15",
+    "end": "07:15",
+    "label": "Security Officer - F.O.C",
+    "flags": [
+      "split"
+    ]
+  }
+]

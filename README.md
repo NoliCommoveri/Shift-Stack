@@ -55,16 +55,28 @@ Alarm lead times are set in Setup, in hours before each shift.
 
 ## Reading screenshots
 
-Two layouts are handled:
+Two layouts are handled, both confirmed against real screenshots of his
+schedule from September 2026:
 
 - **TrackTik** — a month header, then a weekday and time range on one line with
-  the day number on the line below.
-- **Homebase** — a full written date header, then start and end times on
-  separate lines.
+  the day number and the site on the line below.
+- **Homebase** — a written date header carrying no year, then start and end
+  times on separate lines, with his own name, the role and the site alongside.
+  The name is the same on every row, so it is dropped and the label keeps the
+  role and the site.
 
 Rows the reader is unsure about are highlighted. It flags a missing date, times
 with no am/pm printed, times that had to be paired across two lines, and any
 case where the weekday on screen disagrees with the date it worked out.
+
+Neither app prints a year, so the year is inferred. The weekday printed beside
+the date is the only thing that can contradict that guess, and it is checked on
+both layouts.
+
+A row cut off by the top or bottom of the screen loses either its times or its
+date. Times without a date are flagged for review rather than guessed at; a
+site line whose times scrolled away is dropped. Overlap the screenshots by a
+row and nothing is lost.
 
 Site names are fuzzy matched against ones already on file, so the same site
 spelled three different ways by OCR collapses to one.
@@ -81,8 +93,10 @@ npm run test:update   # regenerate golden files, then read them before committin
 ```
 
 `tests/fixtures/README.md` explains how to turn a screenshot into a test case.
-Fixtures marked PROVISIONAL are typed from the vendors' user guides, not from
-real schedules — they catch regressions, they do not prove correctness.
+Fixtures marked PROVISIONAL are typed from the vendors' user guides; ones
+marked TRANSCRIBED are real schedules read off screenshots by eye rather than
+by OCR. Neither kind proves the reading of the text, only the understanding of
+the layout. An unmarked fixture is pasted OCR output; there are none yet.
 
 The app is not carrying live data yet, so there are no schema migrations. When
 the stored shape changes, use **Setup → Danger zone → Delete everything and
@@ -97,6 +111,6 @@ start over**. See PROJECT.md §7.
   and premiums, stat holidays and retro pay are not modelled.
 - Android can clear the storage of a web app under pressure. Save a backup
   from Setup now and then.
-- Neither screenshot layout has been tested against a real capture yet. Both
-  profiles come from the employers' user guides. Check the first few imports
-  closely.
+- Both layouts have been checked against real screenshots, but not yet against
+  real OCR output — the test fixtures were transcribed by eye. The reading of
+  the text is the part still unproven. Check the first few imports closely.

@@ -1,6 +1,6 @@
 # Shift Deck — project state
 
-_Last updated 3 September 2026_
+_Last updated 3 September 2026_ — real screenshots of both apps landed; see §3.1 and §5.
 
 A record of what has been built, why the design went the way it did, and what
 is still undecided.
@@ -88,29 +88,57 @@ upscaled to roughly 1800px wide, converted to greyscale, auto-inverted if the
 mean luminance says it is a dark screenshot, then contrast-stretched. This is
 the difference between clean text and garbage.
 
-**Two layout profiles are handled.** Both were derived from screenshots in the
-vendors' own user guides — *not* from real captures of his schedules. Nothing in
-the parser has yet been shown to work on his actual screens. Correcting an
-earlier version of this document, which claimed the TrackTik profile came from
-real OCR output:
+**Two layout profiles are handled.** Both were originally derived from
+screenshots in the vendors' own user guides. Real captures of his schedule —
+four screenshots, both apps, the week of 3 September 2026 — have since arrived
+and confirmed the shape of both profiles. The guides got the structure right.
+What they got wrong is everything around it.
 
 _TrackTik_ — a bare month name as a section header, then the weekday and time
-range on one line with the day number on the line below:
+range on one line with the day number on the line below. Dark mode, as
+expected:
 
 ```
-February
-WED 9:00am - 11:00am
-(03) Mobile Guard | De la Montagne
+September
+FRI 3:00pm - 11:00pm
+04 Cook Plant ASO | SOUTHERN HENS, I...
 ```
 
-_Homebase_ — a full written date header, then start and end times on separate
-lines with the role alongside:
+Days he is not working print `NO SHIFTS SCHEDULED` in place of the times, and
+the site name is truncated with an ellipsis at the width of the screen. The
+truncation is stable week to week, so it fuzzy matches against itself and does
+not need solving.
+
+_Homebase_ — a written date header, then start and end times on separate lines
+with the role alongside. Light mode, purple:
 
 ```
-Sunday, July 27, 2025
-9:00 am
-5:00 pm Cook
+Thursday, September 03 Today
+12:15 am CC (You) Cerion C.
+4:15 am Training
+Headquarters
 ```
+
+Three differences from the guide, all of which needed parser changes:
+
+- **The header carries no year at all.** The guide's did.
+- **His own name is on every row**, with the avatar initials beside it, above
+  the role. It is identical on every shift and says nothing, so the parser
+  drops any fragment marked `(You)` rather than letting it become the label.
+- **The site is on a third line** below the role. The label wants both, so the
+  parser now gathers the lines following a split pair and picks the useful ones
+  out by content instead of by position — which grouping the OCR chooses for
+  the rows is not something to depend on.
+
+One thing to note from the captures, since it contradicts §1: the roles on the
+_Homebase_ screen are Training, Security Agent and Security Officer, at
+Headquarters and F.O.C. §1 has Homebase down as the hospitality job "role-based,
+e.g. Cook". That description came from the role in Homebase's own user guide,
+not from his account. The only Cook in his actual data is on the _TrackTik_
+side — `Cook Plant ASO | SOUTHERN HENS, INC`, which reads as a guard post at a
+plant rather than a kitchen shift. On the evidence of four screenshots both
+jobs look like security work. Nothing in the code turns on this; §1 is left as
+written, with this correction against it.
 
 The parser tracks month and year as state, pairs times either as a range on one
 line or across two consecutive lines, and pulls the day number from the
@@ -122,6 +150,12 @@ constructed. On the guide screenshot this resolved February to 2027 rather than
 2026 — Feb 3 2027 is a Wednesday, Feb 3 2026 was not. That is a fact about a
 vendor demo, not evidence about his data, but the check itself is sound and has
 since caught a wrong weekday in a hand-written test fixture.
+
+The real screenshots made this matter more than it did. Neither app prints a
+year, so on both layouts the year is invented by `guessYear` and the weekday is
+the only thing on screen that can contradict it. The check ran only on the
+TrackTik line format; it now also reads the weekday off the Homebase date
+header, which is where the year is least constrained.
 
 **Flags raised for review**, shown as amber rows:
 
@@ -234,17 +268,27 @@ before investing further in OCR.
 Homebase needs no OCR at all — subscribe to it directly and only TrackTik needs
 screenshots. Never confirmed.
 
-**Neither parser has seen a real screenshot.** Both profiles come from vendor
-user guides. Guide screenshots are close to the worst available proxy: light
-mode, ideal resolution, uncompressed, never cropped mid-scroll, demo names. His
-are dark mode, compressed, cut off at both ends of a scroll, with real site
-names. Concretely, the auto-invert branch in `prep()` has almost certainly never
-executed against a real input, and `NOISE` was written against guide chrome
-rather than the chrome he will actually capture.
+**No parser output has been seen from a real OCR pass.** This was "neither
+parser has seen a real screenshot"; that half is now closed. Real screenshots
+of both apps arrived and both layout profiles survived them, with the label
+handling described in §3.1 rewritten to suit. `NOISE` was rewritten too — the
+guide chrome was not his chrome, which is `Day view`, `Week view`,
+`NO SHIFTS SCHEDULED`, `7 new shifts` and a five-item bottom nav.
 
-Real screenshots are being collected. Until they land, every fixture in
-`tests/fixtures/` is marked PROVISIONAL and proves only that the parser has not
-changed behaviour — not that the behaviour is right.
+What remains open is the step in between. The fixtures taken from those
+screenshots are marked TRANSCRIBED, not PROVISIONAL: the layout, dates, times,
+roles and sites in them are real, but they were read off the images by eye
+rather than run through Tesseract. So the parser is now known to understand the
+layout and is still unproven against the mangling. The auto-invert branch in
+`prep()` has still never executed against a real input, and the am/pm risk in
+§6 lands squarely here — a real pass on the dark TrackTik screen is the next
+thing to get.
+
+The scroll boundary is now understood at least. A row cut off at the bottom
+keeps its times and loses its date; it is flagged `nodate` and stopped at
+review. A row cut off at the top keeps its site and loses its times; it is
+dropped silently, which is right, because the shift is only recoverable from
+the overlapping screenshot anyway. Overlap the captures by one row.
 
 **The unlock popup.** Not achievable from the web — there is no unlock event
 exposed to browsers, and PWA widgets on Android do not exist (the manifest
