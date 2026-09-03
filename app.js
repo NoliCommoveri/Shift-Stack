@@ -7,7 +7,7 @@
 const DEFAULTS = {
   companies: [],
   shifts: [],
-  settings: { leads: [12, 2], feedMode: 'subscribe' }
+  settings: { leads: [12, 2], feedMode: 'subscribe', icsUrl: '' }
 };
 let S = structuredClone(DEFAULTS);
 
@@ -95,12 +95,18 @@ function weekStart(dateStr, startDow){
    a test fixture. FLAG_MOVED is raised by the importer, not the parser.
    ---------------------------------------------------------------------- */
 const FLAG_MOVED = 'moved';
+const FLAG_CHANGED = 'changed';
 const FLAG_TEXT = {
   [FLAG.NODATE]:  'No date found \u2014 set it below.',
   [FLAG.AMPM]:    'No am/pm was printed \u2014 check the times.',
   [FLAG.SPLIT]:   'Times were read from two separate lines \u2014 check them.',
   [FLAG.WEEKDAY]: 'The weekday on screen does not match this date.',
-  [FLAG_MOVED]:   'A shift is already on file at this time in a different place \u2014 adding this will not replace it.'
+  [FLAG_MOVED]:   'A shift is already on file at this time in a different place \u2014 adding this will not replace it.',
+  [FLAG_CHANGED]: 'The calendar has moved a shift already on file.',
+  [ICS_FLAG.NOEND]: 'The calendar gave no end time \u2014 set one below.',
+  [ICS_FLAG.RECUR]: 'A repeating event \u2014 only the first was read.',
+  [ICS_FLAG.ZONE]:  'The time zone was not recognised \u2014 times taken as written.',
+  [ICS_FLAG.LONG]:  'This runs for more than a day, which no shift should.'
 };
 
 /* ---------- site name matching ------------------------------------------
@@ -372,7 +378,13 @@ function renderSetup(){
         <label class="f"><span>…on shifts over (hrs)</span><input data-k="breakAfterHrs" type="number" step="0.5" value="${co.breakAfterHrs ?? ''}"></label>
       </div>
       <label class="f"><span>Android app package, for the open button</span>
-        <input data-k="pkg" type="text" placeholder="com.tracktik.shift" value="${esc(co.pkg||'')}"></label>`;
+        <input data-k="pkg" type="text" placeholder="com.tracktik.shift" value="${esc(co.pkg||'')}"></label>
+      <label class="f"><span>Calendar import: only events mentioning…</span>
+        <input data-k="icsMatch" type="text" placeholder="Station" value="${esc(co.icsMatch||'')}"></label>
+      <p class="tiny soft" style="margin:-.35rem 0 0">An employer's calendar sync writes into a
+        whole Google account, so his own appointments arrive with the shifts. A word that appears
+        on every shift and nothing else — a site name, the role — keeps them out. Leave it
+        empty to take everything.</p>`;
     card.querySelectorAll('[data-k]').forEach(inp => {
       inp.oninput = () => {
         const k = inp.dataset.k;
@@ -518,6 +530,17 @@ const loadImg = file => new Promise((res,rej) => {
   i.src = URL.createObjectURL(file);
 });
 
+/* One door for everything dropped, picked or pasted. Screenshots go to the
+   OCR path, .ics files to the calendar reader; a phone often reports no MIME
+   type at all for an .ics, so the extension is checked too. */
+function handleFiles(files){
+  const all = [...files];
+  const cal = all.filter(f => /\.ics$/i.test(f.name || '') || f.type === 'text/calendar');
+  const imgs = all.filter(f => f.type.startsWith('image/'));
+  if(cal.length) readCalendarFiles(cal);
+  if(imgs.length) readFiles(imgs);
+}
+
 async function readFiles(files){
   const imgs = [...files].filter(f => f.type.startsWith('image/'));
   if(!imgs.length) return;
@@ -558,20 +581,7 @@ async function readFiles(files){
   $('#raw').textContent = chunks.join('\n\n');
   fill.style.width = '100%';
 
-  // Drop only exact repeats — same job, same date, same times, same place.
-  // A row matching on time but not on place is a location change, not a
-  // duplicate, so it stays and gets flagged for review.
-  pending = pending.filter(p => {
-    if(!p.date) return true;
-    const sameSlot = S.shifts.filter(s =>
-      s.companyId === p.companyId && s.date === p.date &&
-      s.start === p.start && s.end === p.end);
-    if(!sameSlot.length) return true;
-    const snapped = key(snapSite(p.label, p.companyId));
-    if(sameSlot.some(s => key(s.label) === snapped)) return false;   // exact repeat
-    p.flags = [...p.flags, FLAG_MOVED];
-    return true;
-  });
+  pending = pending.filter(bySlot);
 
   txt.textContent = pending.length
     ? `Found ${pending.length} shift${pending.length===1?'':'s'}. Check them, then add.`
@@ -579,8 +589,160 @@ async function readFiles(files){
   renderReview();
 }
 
+/* Drop only exact repeats — same job, same date, same times, same place. A row
+   matching on time but not on place is a location change, not a duplicate, so
+   it stays and gets flagged for review. This is all a screenshot row can be
+   matched on; a calendar row has a UID and is matched on that first. */
+function bySlot(p){
+  if(!p.date) return true;
+  const sameSlot = S.shifts.filter(s =>
+    s.companyId === p.companyId && s.date === p.date &&
+    s.start === p.start && s.end === p.end);
+  if(!sameSlot.length) return true;
+  const snapped = key(snapSite(p.label, p.companyId));
+  if(sameSlot.some(s => key(s.label) === snapped)) return false;     // exact repeat
+  p.flags = [...p.flags, FLAG_MOVED];
+  return true;
+}
+
+/* ---------- calendar import ----------------------------------------------
+   Homebase's own Calendar Sync writes his shifts into a Google calendar. That
+   is a better source than a screenshot in every way that matters — the times
+   are the employer's numbers rather than characters read off a dark screen —
+   but nothing in a browser can reach into the phone's calendar to get them.
+   An .ics file is the bridge, whether saved from the feed, exported out of
+   Google Calendar, or pasted in as text.
+
+   What a calendar row has and a screenshot row does not is the event's UID.
+   That is a stable identity, so importing the same feed twice updates the
+   shift it made the first time instead of adding a second one, and a shift
+   the employer has moved shows as a change rather than a duplicate.
+   ------------------------------------------------------------------------ */
+
+/* Kept in one place because the same window has to be honest in the report:
+   a Google export holds years of history and none of it is news. */
+const ICS_FROM = () => shiftDays(todayISO(), -7);
+
+function icsSame(a, b){
+  return a.date === b.date && a.start === b.start && a.end === b.end &&
+         key(a.label) === key(b.label);
+}
+
+function calendarRows(text){
+  const co = coById($('#impco').value);
+  const { rows, report } = parseICS(text, {
+    from: ICS_FROM(),
+    match: co ? co.icsMatch : ''
+  });
+  if(report.notCalendar) return { report };
+
+  let unchanged = 0;
+  const fresh = [];
+  for(const r of rows){
+    const row = { ...r, rid: uid(), companyId: co.id, extUid: r.uid };
+
+    // Matched on UID: this is a shift the feed has already given us once.
+    const onFile = r.uid && S.shifts.find(s => s.extUid === r.uid && s.companyId === co.id);
+    if(onFile){
+      if(icsSame(onFile, row)){ unchanged++; continue; }
+      row.flags = [...row.flags, FLAG_CHANGED];
+      row.note = `Was ${fmtTime(onFile.start)}\u2013${fmtTime(onFile.end)} ${onFile.label}.`;
+      row.replaceId = onFile.id;          // commit replaces rather than adds
+      fresh.push(row);
+      continue;
+    }
+    if(bySlot(row)) fresh.push(row);
+  }
+  return { rows: fresh, report, unchanged };
+}
+
+/* A cancelled event names a shift on file that is not happening. Nothing else
+   in this app can tell him that — a screenshot of a schedule cannot show what
+   is missing from it — so it is said plainly rather than acted on quietly.
+   Removal stays his: the calendar he synced may not cover every job. */
+function cancelledNote(report){
+  const hits = (report.cancelledRows || [])
+    .map(c => S.shifts.find(s => s.extUid === c.uid))
+    .filter(Boolean);
+  if(!hits.length) return '';
+  const list = hits.slice(0, 4)
+    .map(s => `${s.date} ${fmtTime(s.start)} ${s.label}`).join(', ');
+  return ` Cancelled in the calendar but still on file: ${list}${hits.length > 4 ? ', …' : ''}. ` +
+         `Open Schedule and delete ${hits.length === 1 ? 'it' : 'them'}.`;
+}
+
+function readCalendarText(text, sourceName){
+  if(!S.companies.length){ alert('Add a job in Setup first, so the shifts have somewhere to go.'); return; }
+  if(!$('#impco').value){ alert('Pick which job this calendar is for first.'); return; }
+
+  const prog = $('#prog'), fill = $('#barfill'), txt = $('#progtext');
+  prog.classList.add('on');
+  fill.style.width = '100%';
+
+  // The raw text is the artefact, same as with a screenshot — but a Google
+  // export runs to megabytes, and the panel only has to show the shape.
+  $('#raw').textContent = `--- ${sourceName} ---\n` +
+    (text.length > 20000 ? text.slice(0, 20000) + '\n\n[…truncated]' : text);
+
+  const got = calendarRows(text);
+  if(got.report.notCalendar){
+    txt.textContent = 'That is not a calendar file. A saved feed starts with BEGIN:VCALENDAR — ' +
+                      'a link that needs signing in gives back a web page instead.';
+    return;
+  }
+  const r = got.report;
+  got.rows.forEach(row => pending.push(row));
+
+  const skipped = [];
+  if(got.unchanged) skipped.push(`${got.unchanged} already on file`);
+  if(r.past)     skipped.push(`${r.past} before ${ICS_FROM()}`);
+  if(r.filtered) skipped.push(`${r.filtered} not matching the job's filter`);
+  if(r.allDay)   skipped.push(`${r.allDay} all-day`);
+  if(r.cancelled)skipped.push(`${r.cancelled} cancelled`);
+  if(r.unreadable) skipped.push(`${r.unreadable} unreadable`);
+
+  txt.textContent =
+    (got.rows.length
+      ? `${got.rows.length} shift${got.rows.length===1?'':'s'} to check, from ${r.events} events`
+      : `Nothing new in ${r.events} events`) +
+    (skipped.length ? ` (skipped: ${skipped.join(', ')}).` : '.') +
+    cancelledNote(r);
+  renderReview();
+}
+
+async function readCalendarFiles(files){
+  for(const f of files){
+    try{ readCalendarText(await f.text(), f.name); }
+    catch(e){ $('#progtext').textContent = `${f.name} could not be read.`; }
+  }
+}
+
+/* Fetching the feed directly would remove the saving step altogether, and for
+   a feed that allows it this is the whole win. Most do not: Google's iCal
+   addresses send no CORS headers, so the browser refuses to hand this page the
+   response. That failure is indistinguishable from being offline, so say what
+   is actually likely rather than guessing at a cause. */
+async function fetchCalendar(url){
+  const clean = String(url).trim().replace(/^webcal:/i, 'https:');
+  if(!/^https?:\/\//i.test(clean)){ alert('That does not look like a link.'); return; }
+  const txt = $('#progtext');
+  $('#prog').classList.add('on');
+  txt.textContent = 'Fetching the calendar…';
+  try{
+    const res = await fetch(clean, { redirect: 'follow' });
+    if(!res.ok) throw new Error(String(res.status));
+    const body = await res.text();
+    S.settings.icsUrl = clean; save();
+    readCalendarText(body, clean);
+  }catch(e){
+    txt.textContent = 'That link could not be read from here. Most calendar feeds — ' +
+      "Google's included — refuse to hand their contents to a web page. " +
+      'Open the link in Chrome to save the .ics, then add the file above.';
+  }
+}
+
 function flagText(p){
-  return p.flags.map(f => FLAG_TEXT[f] || f).join(' ');
+  return [...p.flags.map(f => FLAG_TEXT[f] || f), p.note || ''].filter(Boolean).join(' ');
 }
 
 function renderReview(){
@@ -694,29 +856,65 @@ document.querySelectorAll('nav button').forEach(b => {
 
 $('#intake').onclick = () => $('#picker').click();
 $('#intake').onkeydown = e => { if(e.key==='Enter'||e.key===' '){ e.preventDefault(); $('#picker').click(); } };
-$('#picker').onchange = () => { readFiles($('#picker').files); $('#picker').value = ''; };
+$('#picker').onchange = () => { handleFiles($('#picker').files); $('#picker').value = ''; };
+
+$('#icsintake').onclick = () => $('#icspick').click();
+$('#icsintake').onkeydown = e => { if(e.key==='Enter'||e.key===' '){ e.preventDefault(); $('#icspick').click(); } };
+$('#icspick').onchange = () => { handleFiles($('#icspick').files); $('#icspick').value = ''; };
+['dragenter','dragover'].forEach(ev => $('#icsintake').addEventListener(ev, e => {
+  e.preventDefault(); $('#icsintake').classList.add('hot'); }));
+['dragleave','drop'].forEach(ev => $('#icsintake').addEventListener(ev, e => {
+  e.preventDefault(); $('#icsintake').classList.remove('hot'); }));
+$('#icsintake').addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+
+$('#icslink').onclick = () => {
+  const url = prompt('Link to the calendar feed', S.settings.icsUrl || '');
+  if(url) fetchCalendar(url);
+};
+$('#icspaste').onclick = async () => {
+  const text = prompt('Paste the calendar text, starting at BEGIN:VCALENDAR');
+  if(text && text.trim()) readCalendarText(text, 'pasted text');
+};
 ['dragenter','dragover'].forEach(ev => $('#intake').addEventListener(ev, e => {
   e.preventDefault(); $('#intake').classList.add('hot'); }));
 ['dragleave','drop'].forEach(ev => $('#intake').addEventListener(ev, e => {
   e.preventDefault(); $('#intake').classList.remove('hot'); }));
-$('#intake').addEventListener('drop', e => readFiles(e.dataTransfer.files));
+$('#intake').addEventListener('drop', e => handleFiles(e.dataTransfer.files));
 document.addEventListener('paste', e => {
   const f = [...(e.clipboardData?.files||[])];
-  if(f.length && !document.getElementById('tab-import').hidden) readFiles(f);
+  if(f.length && !document.getElementById('tab-import').hidden) handleFiles(f);
 });
 
 $('#commit').onclick = () => {
-  let n = 0;
+  let added = 0, replaced = 0;
   pending.filter(p => p.date && p.start && p.end && p.companyId).forEach(p => {
-    S.shifts.push({
+    const rec = {
       id: uid(), companyId: p.companyId, date: p.date, start: p.start, end: p.end,
       label: snapSite(p.label, p.companyId), source: p.source || 'ocr'
-    });
-    n++;
+    };
+    // A calendar row carries the event's UID. Keeping it is what makes the
+    // next import of the same feed an update rather than a second copy.
+    if(p.extUid) rec.extUid = p.extUid;
+    if(p.replaceId){
+      // The employer moved a shift already on file. Replace it in place and
+      // keep its id, so a calendar built in manual-import mode rewrites the
+      // event it already sent rather than leaving the old time sitting there.
+      const i = S.shifts.findIndex(x => x.id === p.replaceId);
+      if(i >= 0){
+        rec.id = S.shifts[i].id;
+        S.shifts[i] = rec;
+        replaced++;
+        return;
+      }
+    }
+    S.shifts.push(rec);
+    added++;
   });
   pending = [];
   save(); renderReview(); renderAll();
-  $('#progtext').textContent = `Added ${n} shift${n===1?'':'s'}.`;
+  $('#progtext').textContent =
+    `Added ${added} shift${added===1?'':'s'}` +
+    (replaced ? `, updated ${replaced}.` : '.');
 };
 $('#discard').onclick = () => { pending = []; renderReview(); $('#progtext').textContent = 'Discarded.'; };
 
@@ -733,7 +931,8 @@ $('#addco').onclick = () => {
   const palette = ['#2F4B7C','#B0631A','#2F6B4F','#7A3B69','#8A2E2E'];
   S.companies.push({
     id: uid(), name: 'New job', color: palette[S.companies.length % palette.length],
-    rate: null, weekStart: 0, otAfterHrs: null, breakMins: null, breakAfterHrs: null, pkg: ''
+    rate: null, weekStart: 0, otAfterHrs: null, breakMins: null, breakAfterHrs: null,
+    pkg: '', icsMatch: ''
   });
   save(); renderAll();
 };

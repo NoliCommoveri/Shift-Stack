@@ -1,7 +1,13 @@
-# Parser fixtures
+# Fixtures
 
-Each `NAME.txt` is raw text exactly as the OCR produced it. Each
+Each `NAME.txt` here is raw text exactly as the OCR produced it. Each
 `NAME.expected.json` is what the parser should make of that text.
+
+`calendar/` holds the same arrangement for `ics.js`: a `NAME.ics` as a real
+feed wrote it, beside the `NAME.expected.json` the reader should produce from
+it. Those are read with the output time zone pinned to `America/Chicago` and
+the window pinned to 1 September 2026, so a fixture's answers do not depend on
+where or when the tests run.
 
 Fixtures carry their epistemic status in the filename.
 
@@ -16,9 +22,14 @@ noise: a genuine OCR pass would mangle spellings, split or merge lines
 differently, and drop the odd character. So these prove the parser understands
 the layout; they do not prove it survives the reading of it.
 
-**Neither** — plain OCR output pasted from the app, which is the real thing.
-There are none yet. Replace the TRANSCRIBED files with these when the first
-import runs.
+**SYNTHETIC** — for calendar feeds: written by hand to the shape a real
+exporter produces, not captured from an account. Same standing as PROVISIONAL.
+It proves the reader understands the format; it does not prove that Homebase's
+events say what the fixture assumes they say.
+
+**Neither** — plain OCR output pasted from the app, or an untouched `.ics`
+saved from the real feed. That is the real thing, and there is none of it yet.
+Replace the TRANSCRIBED and SYNTHETIC files with these as they arrive.
 
 ## Adding a real fixture
 
@@ -51,3 +62,17 @@ none of it is covered by a real OCR pass yet.
   and 7:15pm-7:15am are in the transcribed fixture.
 - The same week captured twice, which is the input the change detection will
   eventually have to handle.
+
+## Adding a real calendar fixture
+
+1. Save the `.ics` from the feed — Google Calendar → Settings → the calendar
+   Homebase writes to → secret address in iCal format, opened in a browser.
+2. **Read it before committing it.** It is his real schedule, and it may carry
+   personal events from the same account. Cut anything that is not a shift, and
+   change the site names if they should not be in the repo.
+3. Save it in `calendar/`, run `npm run test:update`, and read the generated
+   JSON as above.
+
+Worth capturing: what Homebase actually puts in `SUMMARY` and `LOCATION` — the
+label depends entirely on it — and whether the events carry anything naming
+Homebase that the job filter could match on instead of a site name.
