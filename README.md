@@ -78,7 +78,7 @@ Two things follow from it.
 
 **Every event says which job it is.** Homebase writes `Security Officer` and
 nothing else — put two employers' shifts on one calendar that way and it is
-unreadable. What Shift Deck exports is `DSI- Security Officer - Headquarters`,
+unreadable. What Shift Deck exports is `Trupoint- Security Officer - Headquarters`,
 using the job name from Setup, for both jobs and whichever way the shift came
 in. That normalising step is the reason to route through here at all.
 

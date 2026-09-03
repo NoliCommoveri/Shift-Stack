@@ -16,11 +16,19 @@ is still undecided.
 Ray's husband works two jobs whose schedules live in two separate employer
 apps. Neither talks to the other, and there is no single place to see the week.
 
-- **TrackTik SHIFT** (`com.tracktik.shift`) — security guard scheduling.
-  Sites seen so far include De la Montagne. Referred to on the home screen
-  calendar as DSI.
-- **Homebase** (`com.joinhomebase.homebase`) — hospitality scheduling.
-  Role-based, e.g. Cook. Referred to as Trupoint.
+Two names for each job, and they are not interchangeable. The app is the
+scheduling software the employer happens to buy; the employer is what the job
+is called, what goes in Setup, and what prefixes every exported event. Which
+app a job uses decides how its shifts are *read*; which employer it is decides
+what they are *labelled*.
+
+- **TrackTik SHIFT** (`com.tracktik.shift`) — the scheduling app used by
+  **DSI**, security guarding. Sites seen so far include De la Montagne. No
+  calendar feed, so this job is screenshots only.
+- **Homebase** (`com.joinhomebase.homebase`) — the scheduling app used by
+  **Trupoint**. Described in the original brief as hospitality, role-based e.g.
+  Cook; §3.1 corrects that against his actual screenshots. Homebase has a
+  Calendar Sync, which is why this is the job §14 can automate.
 
 Goals, as stated:
 
@@ -223,6 +231,9 @@ files at all. Samsung Calendar can, via My Files.
 ---
 
 ## 4. The open question: getting the feed to ICSx⁵
+
+> Settled in §14, which specifies the Worker below and extends it to the import
+> side as well. This section stands as the reasoning that chose it.
 
 **This is the live blocker.** Subscription mode is the right design — it
 removes the manual import step and makes duplicates impossible. But it depends
@@ -864,8 +875,13 @@ TrackTik  ──screenshots────▶  S H I F T   D E C K
 sync writes `Security Officer` with nothing to say whose shift it is. Two jobs
 on one calendar that way is unreadable, which is §1's complaint restated: the
 problem was never that the shifts were unavailable, it was that nothing put
-them in one place in one language. What goes out is `DSI- Security Officer -
-Headquarters`, from the job name in Setup, whichever way the shift arrived.
+them in one place in one language. What goes out is `Trupoint- Security Officer
+- Headquarters`, from the job name in Setup, whichever way the shift arrived.
+
+The prefix is the *employer*, never the app. Homebase is Trupoint's scheduling
+software, so a shift that arrives through Homebase's Calendar Sync goes out
+labelled Trupoint. Getting that backwards would defeat the one thing this step
+exists to do.
 
 **The staging calendar is a data channel, not a view.** Hidden in the phone's
 calendar app, so nothing renders it and there are no duplicates. This also
@@ -919,3 +935,313 @@ two months, and the Work Schedule calendar is the only one he looks at, then
 anything past that horizon is missing from the only place he checks. §10.5's
 "nothing on file after Friday" warning was already worth building; this makes
 it the next thing.
+---
+
+## 14. The Worker, specified
+
+§13 ended by naming the §4 Worker as the one thing that closes the import gap,
+"now with a reason on both ends". This section is that Worker written down
+before any of it is built. It settles §4 and it goes past it: §4 was only ever
+about getting the feed *out* to ICSx⁵, and this does the way in as well.
+
+The decision that makes it worth building: **calendar-sourced shifts apply
+without review.** That reverses §8.4's rule for this one source, and the
+argument is in §14.6. Everything else follows from it.
+
+### 14.1 Why this is small, and why that was not obvious
+
+The reason to build it now is a property of the code that already exists.
+`ics.js` is pure — no DOM, no storage, no clock, not one browser global, and it
+already exports through `module.exports` for the tests. Its entry point takes
+its whole world as an argument:
+
+```
+parseICS(text, { zone, from, match })  →  { rows, report }
+```
+
+It is also, by its own header, deliberately standalone from `parser.js`. So the
+reader runs unmodified inside a Worker, against the golden files it is already
+tested with. The server-side importer is not a rewrite; it is the file already
+in the repo, required from somewhere else.
+
+The obstacle was never Google and never CORS. CORS is a rule browsers apply to
+themselves. A Worker fetching the secret `.ics` address server-side is not
+subject to it, which is why `fetchCalendar`'s failure at `app.js:738` is
+permanent in the page and absent in the Worker.
+
+What is *not* portable yet is the writer. `buildICS` reads `S` and `coById`
+from module scope, so it cannot leave the page as it stands. That is the one
+real refactor here, and §14.7 makes it a prerequisite rather than a detail: if
+the phone and the Worker each keep their own writer, the two will drift, and
+the failure mode is a calendar that is subtly wrong rather than obviously
+broken.
+
+### 14.2 The shape
+
+```
+Homebase ──Calendar Sync──▶ "Homebase Raw" (Google) ──secret .ics──┐
+                                                                    │
+                                          Worker, cron every 15 min │
+                                          fetch → parseICS → merge  │
+                                                                    │
+TrackTik ──screenshots──▶ phone ──POST──▶  KV  ◀────────────────────┘
+                                            │
+                                     GET, feed rebuilt whole
+                                            ▼
+                                   ICSx⁵, every 15 min
+                                            ▼
+                                 device calendar store
+                                            ▼
+                              Google Calendar app + widget
+```
+
+Homebase shifts reach his phone with the app never opened. TrackTik shifts
+still need screenshots, because there is no feed to poll — that remains §5's
+distribution-email question, and no amount of Worker closes it.
+
+### 14.3 Storage, and the reason it is split
+
+KV has no transactions and no compare-and-set. One key with two writers loses
+writes, and here there genuinely are two: the phone pushing TrackTik shifts and
+the cron applying Homebase's. So the store is split by provenance, and **no key
+has more than one writer**:
+
+| Key | Written by | Holds |
+|---|---|---|
+| `cfg` | phone | companies, settings, alarm lead times |
+| `shifts/manual` | phone | every OCR and hand-entered shift |
+| `shifts/feed/<jobId>` | cron | that job's calendar-sourced shifts |
+| `raw/<jobId>` | cron | last known-good `.ics`, for diffing and for looking at when something is wrong |
+| `polls` | cron | ring buffer, last 50 poll records (§14.8) |
+
+The feed served to ICSx⁵ is built at read time from the union. Nothing merges
+the two stores into a third, because a third would need a writer and we are out
+of writers.
+
+This also answers a question §4 never had to: the phone stops being the source
+of truth. It owns its half, the Worker owns the other, and neither is complete
+alone. That is the real cost of automatic import, and it is larger than §4's
+stated privacy cost — the shift data is not merely *copied* to Cloudflare, part
+of it now *lives* there.
+
+### 14.4 Endpoints
+
+Three, all on one Worker.
+
+**`POST /push`** — the phone sends `cfg` and `shifts/manual`. Bearer token in
+`Authorization`, compared against the `PUSH_TOKEN` secret. Rejects anything
+that is not the expected shape rather than storing it, because a half-written
+`cfg` breaks the cron on its next tick and the phone would not hear about it.
+
+This one is cross-origin and the Worker has to say so. The app is served from
+`nolicommoveri.github.io` and there is no reason to move it — §4 rejected Pages
+for hosting the *feed*, where a world-readable schedule was the objection, and
+the app itself carries no data at all. So the page lives on Pages, the Worker
+lives on Cloudflare, and every request between them is cross-origin. The Worker
+answers the `OPTIONS` preflight and returns `Access-Control-Allow-Origin` for
+the Pages origin exactly — not `*`, which would let any page that learned the
+push token write to the store — along with `Allow-Headers: Authorization,
+Content-Type`. `GET /feed` needs none of this: ICSx⁵ is not a browser and does
+not ask.
+
+The irony is worth recording. The same rule that makes the import impossible
+from the page is the one the export has to satisfy to leave it, and both are
+the browser's, not Google's.
+
+**`GET /feed/<FEED_TOKEN>.ics`** — what ICSx⁵ subscribes to. Rebuilt whole on
+every request from the union of the stores, so a removal reaches the phone by
+itself and duplicates stay structurally impossible. `text/calendar; charset=utf-8`.
+
+A different token from `PUSH_TOKEN`, and it must be: the feed token travels in
+a URL that sits in ICSx⁵'s settings and in request logs, while the push token
+is what authorises writes. One leaking should not cost the other.
+
+If ICSx⁵'s "requires authentication" option is real — I could not confirm it
+from a primary source, and it is a ten-second look on the phone — the feed
+should take Basic auth as well, and the unguessable path becomes the second
+lock rather than the only one. Nothing else subscribes, so there is no Google
+fetcher to keep unauthenticated for.
+
+**`GET /status`** — the poll ring buffer and the current counts, for the app's
+Setup screen. Same token as the feed.
+
+### 14.5 The cron
+
+`*/15 * * * *`. For each job with an `icsUrl` configured:
+
+1. fetch the secret `.ics` address
+2. `parseICS(text, { from: today − 7d, match: co.icsMatch, zone })`
+3. match each row against `shifts/feed/<jobId>` on `extUid`, exactly as
+   `calendarRows` does today: same UID and same times means unchanged, same UID
+   and different times means replace in place keeping the shift's `id`, no UID
+   on file means add
+4. `report.cancelledRows` name shifts to remove
+5. run the guards in §14.6; if any refuses, write nothing and record why
+6. write `shifts/feed/<jobId>` and `raw/<jobId>`, append a poll record
+
+Free plan fits: 3 cron triggers per Worker against the one needed, 96 polls a
+day against 1,000 KV writes, and writes only happen when something changed. The
+number to actually measure is CPU — 10 ms per invocation on the free plan, and
+a few dozen events of regex line-parsing should sit well inside it, but "should"
+is doing work in that sentence. If it does not fit, the paid plan is $5 a month
+and the alternative is not building this.
+
+### 14.6 The guards, which replace the tick-box
+
+§8.4 says a partial view of a schedule is indistinguishable from a week of
+cancellations, and that is why removal is a proposal. Applying automatically
+means answering it in code instead of asking him.
+
+The rule holds for screenshots and does not transfer to a feed. Its evidence is
+OCR's: a row scrolled off the top, a screenshot not taken, a page half-read. A
+feed does not fail that way. It fails by being unreachable, by returning
+nothing, or by returning something that is not a calendar — and every one of
+those is detectable, which a missing screenshot is not.
+
+So, refuse to apply anything and keep serving the last good feed when:
+
+- the fetch is not a 200, or throws, or times out
+- the body does not parse as a calendar (`report.notCalendar`)
+- the calendar holds zero events
+- a single pass would remove more than `max(3, 25%)` of that job's shifts
+- a single pass would remove *every* future shift
+
+Each refusal writes a poll record with its reason. Two consecutive refusals, or
+any six hours without a successful poll, and the app's Setup screen says so in
+a way that is hard to miss — the failure this project exists to prevent is not
+a wrong shift, it is a calendar that has quietly stopped changing.
+
+A machine that checks the feed parsed, is non-empty, and is not proposing a
+massacre is a better safeguard than a tired man tapping "yes" through a review
+list at eleven at night. That is the trade, stated so that reversing it later is
+a decision rather than a discovery.
+
+**What stays reviewed:** everything from a screenshot. The review screen does
+not go away, it stops being on the Homebase path.
+
+### 14.7 What has to change in the app first
+
+Three extractions, each following the `parser.js` / `ics.js` pattern already
+established — pure functions, `module.exports` at the bottom, plain script tag
+in the browser, required directly by tests:
+
+**`feed.js`** — `buildICS(shifts, companies, settings)`, plus `icsEscape` and
+`fold` moved intact. Currently `app.js:859` and reads module scope. Both the
+page and the Worker call this one, or they drift.
+
+**`merge.js`** — the UID matching now inside `calendarRows` and
+`cancellationRows`, lifted to `mergeCalendar(existing, rows, report, jobId)`
+returning `{ add, replace, remove, unchanged }`. The page turns that into
+review rows; the Worker applies it. One implementation, so the two paths cannot
+disagree about what "already on file" means.
+
+**`app.js`** — `doExport` POSTs in subscription mode instead of downloading;
+Setup grows the Worker URL, the tokens, and the status panel from `/status`;
+the manual `.ics` download stays as the fallback for when the Worker is
+unreachable.
+
+Both new modules get tests before the Worker is written, because they are the
+part where a bug is silent.
+
+Pass two, not required for the calendar to work: the phone reading
+`shifts/feed/*` back down so its own hours and pay views count the Homebase
+shifts it no longer holds. Until that lands the calendar is right and the pay
+screen is short — worth saying out loud on the screen rather than letting the
+numbers just be wrong.
+
+### 14.8 Measuring the part that cannot be promised
+
+Four hops, and only two are ours: Homebase to Google, Google serving its own
+`.ics`, the cron's 15 minutes, ICSx⁵'s 15 minutes. Google publishes neither of
+its two numbers. They are not the 8–24 hour problem — that is Google *polling*
+someone else's feed, and this is Google *serving* its own — but "faster than
+that" is not a figure.
+
+So measure rather than claim. Every poll record carries the fetch time, the
+event count, what changed, and the age of the newest `DTSTAMP` in the feed.
+After a week of that, the true end-to-end delay is a number on the Setup screen
+instead of an assumption in this document. It also answers §13's horizon
+question for free: the Worker knows the date of the last event Calendar Sync is
+publishing, so "nothing on file after Friday" (§10.5) becomes something it can
+say without being asked.
+
+### 14.9 What he sets up before any of this deploys
+
+Six of these are one-time and none of them are in the code. Three need a
+computer; the rest are on the phone.
+
+**Not on the list: moving the app.** It stays on GitHub Pages where it already
+runs. Only the Worker is new, and it is the only thing that needs a Cloudflare
+account.
+
+**On a computer, before deploying:**
+
+1. **Google Calendar → create a calendar named `Homebase Raw`.** Staging, per
+   §13 — machine-readable, never rendered.
+2. **Homebase → Settings → Calendar Sync → point the Calendar field at the
+   staging calendar.** ✅ **Done, and it takes a named calendar.** The field
+   offers any named calendar from the synced phone calendar app, and Homebase
+   is already scoped to a staging calendar created for it. The §13 split holds
+   as designed, which settles the one open question that could have changed
+   what gets built:
+
+   - `co.icsMatch` stays **empty** for Trupoint. `parseICS` skips filtering
+     entirely on an empty needle (`ics.js:313`), so this costs nothing and
+     needs no special case. It remains in the schema as the fallback for a
+     future job whose app will only write to a whole account.
+   - The guards get *stricter*, not looser. A calendar written to by one app
+     and nothing else contains shifts and only shifts, so a row that will not
+     parse is no longer noise to be skipped quietly — it is a signal that
+     Homebase has changed its format or that something else has started
+     writing there. The cron records unreadable rows as a distinct condition
+     and says so on the Setup screen, rather than folding them into
+     `report.unreadable` and moving on.
+
+   Worth confirming once: the exact calendar name, since §14.9's next step
+   needs that specific calendar's address and Google will happily hand over a
+   different one's.
+3. **Google Calendar → `Homebase Raw` → Settings → Integrate calendar → Secret
+   address in iCal format.** Copy it. That string is the whole import.
+4. **Cloudflare** — a KV namespace, and `wrangler secret put` for `PUSH_TOKEN`,
+   `FEED_TOKEN` and the secret iCal address. The address is a credential: it
+   grants read of the calendar to anyone holding it, so it belongs in a secret
+   and not in `wrangler.toml`.
+
+**On the phone, after deploying:**
+
+0. **Untick the staging calendar in the Google Calendar app.** It syncs down
+   like any other calendar, and if it draws, every Trupoint shift appears
+   twice — once raw from Homebase and once from the Work Schedule feed. §13
+   calls it a data channel, not a view, and this is the step that makes that
+   true on the device.
+
+5. **ICSx⁵ → subscribe to `https://<worker>/feed/<FEED_TOKEN>.ics`**, sync
+   interval 15 minutes.
+6. **Google Calendar app → tick the new calendar visible** in its calendar
+   list. It does not appear on its own, and this is the most common "it isn't
+   working" that is not a fault.
+7. **Settings → Battery → Background usage limits → Never sleeping apps → add
+   ICSx⁵**, and stay off Maximum power saving, which disables sync adapters and
+   does not re-enable them on the way out. Without this the 15-minute interval
+   quietly becomes "whenever he next opens ICSx⁵", which is precisely the
+   silent staleness §4 refused to accept.
+
+**Then, once:** open the app, paste the Worker URL and the push token into
+Setup, export once to seed the feed, and confirm a shift appears in the Google
+Calendar app within half an hour.
+
+### 14.10 Still open
+
+- ~~Whether Homebase will write to a named calendar~~ — settled, it does
+  (§14.9). The staging split is on and the import filter is not needed.
+- **ICSx⁵'s authentication support** is unconfirmed (§14.4). Ten seconds on the
+  phone decides whether the feed gets a second lock.
+- **Worker CPU on the free plan** against a real Google export (§14.5). The
+  first poll answers it.
+- **Where `zone` comes from.** `parseICS` takes one and the tests pin it; the
+  Worker has no locale and must be told. Simplest is a per-job setting
+  defaulting to `America/Toronto`, but it should be explicit, not inferred from
+  a runtime that has no business having an opinion.
+- **The pay screen is short until pass two** (§14.7), and it should say so.
+- **Nothing here helps TrackTik**, which stays on screenshots until §5's email
+  gets sent.
