@@ -7,6 +7,10 @@
 const DEFAULTS = {
   companies: [],
   shifts: [],
+  // Shifts that were deleted after a calendar had already been told about
+  // them. Not history — a to-do list with one item on it: say the event is
+  // off. Emptied the moment that has been said (§22).
+  tombstones: [],
   settings: { leads: [12, 2], feedMode: 'subscribe', icsUrl: '' }
 };
 let S = structuredClone(DEFAULTS);
@@ -95,6 +99,62 @@ function weekStart(dateStr, startDow){
    — the schedule, the pay tab, the horizon note and the calendar file — and
    §20 is the record of what each of them did before it could. */
 const isProposed = s => !!s && s.source === 'pattern';
+
+/* ---------- deleting a shift the calendar already has (§10.6, §22) --------
+   Subscription mode is immune: the file is the whole calendar, so a shift
+   removed from the store is removed from the next rebuild and the event goes
+   with it. Manual import has no such moment — it only ever adds — so a shift
+   deleted here keeps its event and its alarms on the phone forever, and the
+   app had no idea it had done that.
+
+   So every removal of a shift goes through here first. A shift that was never
+   sent leaves nothing behind and is dropped silently; one that was sent leaves
+   a record naming the event it left on the phone, which is the only thing a
+   cancellation can be built from once the shift — and often the job — is gone.
+
+   The sequence number goes up. RFC 5545 lets a calendar ignore a revision no
+   newer than the one it holds, so a cancellation counting from the same number
+   as the publication can legitimately be thrown away.
+   ---------------------------------------------------------------------- */
+function retire(list){
+  if(!S.tombstones) S.tombstones = [];        // a backup restored from before §22
+  (list || []).forEach(sh => {
+    if(!sh || !sh.sent) return;                 // no event out there to cancel
+    const co = coById(sh.companyId);
+    // An overnight shift's event ends on the next day. Guarded, because this
+    // runs on the way out and a delete that throws is a delete that does not
+    // happen — a filed shift always has both times, but nothing here needs to
+    // depend on that being true.
+    const overnight = sh.start && sh.end && mins(sh.end) <= mins(sh.start);
+    S.tombstones.push({
+      uid: shiftUID(sh.id),
+      seq: (sh.seq || 0) + 1,
+      date: sh.date, start: sh.start, end: sh.end,
+      endDate: overnight ? shiftDays(sh.date, 1) : sh.date,
+      // Baked now rather than looked up later: by the time this is written to
+      // a file the job may have been removed too, and an event the importer
+      // shows as "cancelled: Shift" tells him nothing.
+      title: `${co ? co.name : 'Shift'}- ${sh.label}`,
+      at: todayISO()
+    });
+  });
+}
+
+/* Removes shifts and records what the calendar still needs telling about.
+   Every delete path in the app goes through this one, because a path that
+   forgets is a shift that rings at five in the morning for a job he no longer
+   has, and nothing on any screen would say why. */
+function dropShifts(pred){
+  const going = S.shifts.filter(pred);
+  if(!going.length) return 0;
+  retire(going);
+  S.shifts = S.shifts.filter(x => !pred(x));
+  return going.length;
+}
+
+/* Cancellations still owed to the calendar. Empty in subscription mode by
+   construction — see doExport. */
+const owedCancels = () => (S.tombstones || []);
 
 /* ---------- review flags -------------------------------------------------
    parser.js emits codes; the wording lives here so changing it never breaks
@@ -725,7 +785,7 @@ function renderSetup(){
     del.onclick = () => {
       const n = S.shifts.filter(s => s.companyId === co.id).length;
       if(!confirm(`Remove ${co.name}? ${n} shift${n===1?'':'s'} will be deleted too.`)) return;
-      S.shifts = S.shifts.filter(s => s.companyId !== co.id);
+      dropShifts(s => s.companyId === co.id);
       S.companies = S.companies.filter(c => c.id !== co.id);
       save(); renderAll();
     };
@@ -751,6 +811,24 @@ function renderSetup(){
   if(note) note.textContent = sub
     ? `${S.shifts.length} shift${S.shifts.length===1?'':'s'} in the feed.`
     : (un ? `${un} shift${un===1?'':'s'} not yet in the calendar.` : 'The calendar is up to date.');
+
+  // Deleted shifts the calendar has not been told about. Only in manual-import
+  // mode: subscription rebuilds the whole file and the event goes with it.
+  // Hidden when the count is zero rather than saying "0 cancellations", which
+  // would be one more permanently amber thing to learn to ignore (§19.1).
+  const owed = sub ? 0 : owedCancels().length;
+  const cbtn = document.getElementById('cancelics');
+  if(cbtn) cbtn.hidden = !owed;
+  const cnote = document.getElementById('cancelnote');
+  if(cnote){
+    cnote.hidden = !owed;
+    cnote.textContent = owed
+      ? `${owed} deleted shift${owed===1?'':'s'} still in the calendar, with alarms. `
+        + 'Save the cancellations and open that file the same way. '
+        + 'If the event is still there afterwards, delete it in the calendar by hand — '
+        + 'some importers ignore the file\u2019s identifiers.'
+      : '';
+  }
 }
 
 function renderAll(){
@@ -793,11 +871,15 @@ function editShift(id){
     // own numbers as an assumption and keep counting them as unconfirmed
     // (§20.8).
     if(isProposed(s)) s.source = 'manual';
-    s.sent = false;              // changed, so send it to the calendar again
+    // Changed, so send it to the calendar again — and as a *newer* revision of
+    // the event it already has, or a calendar is within its rights to keep
+    // showing the old time (§22).
+    if(s.sent) s.seq = (s.seq || 0) + 1;
+    s.sent = false;
     save(); dlg.close(); renderAll();
   };
   $('#e-del').onclick = () => {
-    S.shifts = S.shifts.filter(x => x.id !== id);
+    dropShifts(x => x.id === id);
     save(); dlg.close(); renderAll();
   };
 }
@@ -1389,31 +1471,13 @@ function renderReview(){
   });
 }
 
-/* ---------- calendar file ------------------------------------------------ */
-function icsEscape(s){ return String(s).replace(/([,;\\])/g,'\\$1').replace(/\n/g,'\\n'); }
-/* The spec folds at 75 octets, not 75 characters. Slicing by character wrote
-   over-long lines for anything non-ASCII, which some calendar apps reject
-   outright — live now that real addresses go in the file, since a Montréal
-   site name is two bytes a letter in the accents. Splitting on code points
-   keeps a character whole; counting their UTF-8 length keeps the line legal. */
-function fold(l){
-  const enc = new TextEncoder();
-  if(enc.encode(l).length <= 74) return l;
-  const out = [];
-  let line = '', limit = 74;               // continuation lines carry a space
-  for(const ch of l){
-    const n = enc.encode(ch).length;
-    if(enc.encode(line).length + n > limit){
-      out.push(line);
-      line = ' ' + ch;
-      limit = 74;
-    } else line += ch;
-  }
-  if(line) out.push(line);
-  return out.join('\r\n');
-}
+/* ---------- calendar file ------------------------------------------------
+   `fold`, `icsEscape`, `icsStamp` and `shiftUID` come from ics.js, which is
+   loaded first and now owns the file format in both directions. What is left
+   here is the half that needs the store: which shifts, whose job, what title.
+   ---------------------------------------------------------------------- */
 function buildICS(only){
-  const now = new Date().toISOString().replace(/[-:]/g,'').split('.')[0] + 'Z';
+  const now = icsStamp();
   const leads = (S.settings.leads || []).filter(n => n > 0);
   const L = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Shift Deck//EN','CALSCALE:GREGORIAN',
              'METHOD:PUBLISH','X-WR-CALNAME:Work Schedule'];
@@ -1427,8 +1491,12 @@ function buildICS(only){
     const title = `${co ? co.name : 'Shift'}- ${s.label}` +
                   (isProposed(s) ? ' (from the rota)' : '');
     L.push('BEGIN:VEVENT',
-      fold(`UID:${s.id}@shiftdeck`),
+      fold(`UID:${shiftUID(s.id)}`),
       `DTSTAMP:${now}`,
+      // A calendar may ignore a revision no newer than the one it holds, so a
+      // shift that has been moved or retimed since it was sent has to say so.
+      // The cancellation in ics.js counts from the same number (§22).
+      `SEQUENCE:${s.seq || 0}`,
       `DTSTART:${s.date.replace(/-/g,'')}T${s.start.replace(':','')}00`,
       `DTEND:${endDate.replace(/-/g,'')}T${s.end.replace(':','')}00`,
       // Every event says which job it is. That is the whole point of the
@@ -1505,9 +1573,7 @@ $('#commit').onclick = () => {
   let added = 0, replaced = 0, removed = 0;
 
   pending.filter(p => p.removeId && !p.keep).forEach(p => {
-    const before = S.shifts.length;
-    S.shifts = S.shifts.filter(x => x.id !== p.removeId);
-    if(S.shifts.length < before) removed++;
+    removed += dropShifts(x => x.id === p.removeId);
   });
 
   pending.filter(p => !p.removeId && p.date && p.start && p.end && p.companyId).forEach(p => {
@@ -1525,7 +1591,12 @@ $('#commit').onclick = () => {
       // event it already sent rather than leaving the old time sitting there.
       const i = S.shifts.findIndex(x => x.id === p.replaceId);
       if(i >= 0){
-        rec.id = S.shifts[i].id;
+        const was = S.shifts[i];
+        rec.id = was.id;
+        // Same event, later revision. Without this the rewrite carries the
+        // same SEQUENCE as the version the calendar already holds, which it
+        // may ignore — the old time would sit there with its alarms (§22).
+        rec.seq = was.sent ? (was.seq || 0) + 1 : (was.seq || 0);
         S.shifts[i] = rec;
         replaced++;
         return;
@@ -1648,6 +1719,11 @@ function doExport(all){
     if(!S.shifts.length){ alert('No shifts to export yet.'); return; }
     download('shifts.ics', buildICS(S.shifts), 'text/calendar;charset=utf-8');
     S.shifts.forEach(s => s.sent = true);
+    // The rebuild *is* the cancellation here: a deleted shift is simply not in
+    // the file, so the subscription drops the event on the next sync. Nothing
+    // is owed, and leaving the records to pile up would nag about work the
+    // export just did (§22).
+    S.tombstones = [];
     save(); renderSetup();
     return;
   }
@@ -1661,7 +1737,21 @@ function doExport(all){
   list.forEach(s => s.sent = true);
   save(); renderSetup();
 }
+/* §10.6, built in §22. A separate file, and it has to be: METHOD is a property
+   of the calendar, not the event, so cancellations cannot ride along inside a
+   file that says PUBLISH. Two saves is the price of an unambiguous file, and
+   it is only paid on the weeks something was actually deleted. */
+function doCancelExport(){
+  const dead = owedCancels();
+  if(!dead.length){ alert('Nothing has been deleted since the last export.'); return; }
+  download(`shifts-cancelled-${todayISO()}.ics`,
+           buildCancelICS(dead), 'text/calendar;charset=utf-8');
+  S.tombstones = [];
+  save(); renderSetup();
+}
+
 $('#exportics').onclick = () => doExport(false);
+$('#cancelics').onclick = doCancelExport;
 $('#exportall').onclick = () => {
   if(!confirm('Export every shift again? Only do this after clearing the shift calendar, or you will get duplicates.')) return;
   doExport(true);
@@ -1683,7 +1773,7 @@ $('#jsonpick').onchange = async () => {
 };
 $('#wipeshifts').onclick = () => {
   if(!confirm('Delete every shift? Jobs and rates are kept.')) return;
-  S.shifts = []; save(); renderAll();
+  dropShifts(() => true); save(); renderAll();
 };
 $('#wipeall').onclick = async () => {
   if(!confirm('Delete jobs, shifts and settings? Everything on this device goes.')) return;

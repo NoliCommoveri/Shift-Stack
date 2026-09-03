@@ -677,9 +677,11 @@ Carried forward, plus what today added.
      is really for. A job counts as feed-backed when its `icsMatch` is set,
      which is already how a calendar event finds its job, so this needed no new
      field and nothing to migrate.
-6. **Manual-import mode orphans deleted shifts.** No `METHOD:CANCEL` is emitted,
-   so a deleted shift keeps its calendar event and its alarms forever.
-   Subscription mode is immune.
+6. ~~**Manual-import mode orphans deleted shifts.**~~ Built, §22. A deleted
+   shift that had been sent now leaves a record, and Setup offers a
+   `METHOD:CANCEL` file that withdraws the event. What the section could not
+   close is whether the importer on the far end acts on it — §22.5 is the
+   record of why that is not this app's to promise, and what it says instead.
 7. **Smaller, unowned.** Shift rows are `div`s with `onclick`, so editing is
    touch-only and unavailable to a screen reader. `fold()` slices ICS lines by
    character where the spec is byte-based, so an accented site name can produce
@@ -770,9 +772,9 @@ was written before Homebase's Calendar Sync was found, and four rows moved:
   path carries TrackTik alone — the dark screen, which is exactly where the
   am/pm risk in §6 lives. A real Tesseract pass is now the only unproven part
   of the input side rather than one of two.
-- **Step 2's `fold()` is done**, forced by §13 emitting real addresses. The
-  §10.5 staleness warnings and §10.6's `METHOD:CANCEL` are still open, and
-  §13 sharpened the first of them: if Calendar Sync publishes only two months
+- **Step 2's `fold()` is done**, forced by §13 emitting real addresses.
+  §10.6's `METHOD:CANCEL` is done too (§22). The §10.5 staleness warnings are
+  what is left of step 2, and §13 sharpened them: if Calendar Sync publishes only two months
   and the exported calendar is the one he reads, the horizon is a silent gap
   in the only place he looks.
 - **Steps 3 and 6 are partly delivered on the calendar side.** §8.1's
@@ -2514,3 +2516,131 @@ assumptions into facts. If that stops happening, the app says so — the
 unconfirmed note in §21.2 exists for exactly that — but the sentence has never
 been read in anger. The first month of real use is what tests it, not the test
 suite.
+
+---
+
+## 22. Built: withdrawing a shift from the calendar, 3 September 2026
+
+§10.6, and the last of §11.3's step 2 that needed code. In manual-import mode
+the export only ever adds — that is the whole design, because Samsung's
+importer appends rather than replaces — so a shift deleted in the app kept its
+event and its alarms on the phone forever, and nothing anywhere said so. RFC
+5545 has one way to take an event back, and this builds it.
+
+### 22.1 Why it could not be one more line in the export
+
+The obvious version is a `STATUS:CANCELLED` event added to the file the export
+already writes. It cannot be: `METHOD` is a property of the *calendar*, not of
+the event, so one iCalendar object carries one instruction. A file announcing
+`METHOD:PUBLISH` while holding cancelled events is asking the importer to
+guess, and the whole point of a withdrawal is that nothing is left to guess.
+
+So it is a second file, `shifts-cancelled-<date>.ics`, behind its own button,
+and the button only appears on the weeks something was actually deleted. Two
+saves is the price of an unambiguous file.
+
+### 22.2 What a deletion has to leave behind
+
+A cancellation names an event that no longer has a shift record — and often no
+longer has a *job* record either, since removing a job deletes its shifts. So
+the deletion is what writes the note, not the export:
+
+```js
+S.tombstones = [{ uid, seq, date, start, end, endDate, title, at }]
+```
+
+Not history, and not a bin to restore from. A to-do list with one item on it:
+say this event is off. It empties the moment that has been said.
+
+Only a shift with `sent` set leaves one. A shift deleted before any export was
+never on the phone, and a cancellation for it would be a file about nothing.
+
+Every delete path in the app now goes through one function. That was the actual
+work — there were four, and three of them are the ones easy to forget: removing
+a job, accepting a cancellation from the feed in the review screen, and
+**Delete every shift** in the danger zone. A path that forgets is an alarm at
+five in the morning for a job he no longer has, with nothing on any screen to
+explain it.
+
+The one path deliberately left out is the danger zone's *other* button, which
+resets the whole device state. Nothing survives it to act on — including the
+list of what would need cancelling — and it already says so in as many words.
+Clearing the events it leaves behind is a calendar job, not this app's.
+
+### 22.3 `SEQUENCE`, which was missing from the publish side too
+
+A calendar may ignore a revision no newer than the one it holds, and every
+event this app has ever written carried no `SEQUENCE` at all — which is to say
+`0`, forever. That made the cancellation impossible on its own terms, and it
+turned out to be a live bug in something already built: §21.2's `replaceId`
+path rewrites an event in place when the employer moves a shift, and in
+manual-import mode that rewrite was going out as the same revision the calendar
+already had. The old time could legitimately have stayed put, alarms and all.
+
+So the shift record carries `seq`, it goes up whenever a sent shift is changed
+— by hand in the edit dialog, or by a screenshot moving it — and the
+cancellation counts from one above the publication. Additive and optional:
+absent means `0`, which is exactly what every existing record meant.
+
+### 22.4 The writer moved into `ics.js`
+
+`ics.js` was the reader and `buildICS` lived in `app.js`, where no test could
+reach it. Line folding, text escaping and UID identity are one body of
+knowledge about one file format, and the half of it that mattered most was the
+untested half. `fold`, `icsEscape`, `icsStamp`, `shiftUID` and the cancellation
+builder are all in `ics.js` now; `app.js` keeps only what needs the store —
+which shifts, whose job, what title.
+
+`shiftUID()` exists because both sides call it. A cancellation whose UID does
+not match the publication *to the character* cancels nothing and reports
+nothing, and there is a test asserting the two agree — so if they ever drift,
+the suite fails rather than the phone.
+
+Ten tests, in the style of §18 and §19: records in, text out. The last one
+reads the file back through the reader in the same repo and checks it lands as
+`report.cancelled`, which is cheaper proof that the file is well formed than
+any amount of matching on raw lines.
+
+### 22.5 What it refuses to promise
+
+**That the calendar will act on it.** §3.3 has said since it was written that
+Samsung's importer "tends to ignore UIDs", and a withdrawal is nothing *but* a
+UID and a sequence number. If that is true of cancellations as well as of
+publications, this file imports cleanly and removes nothing.
+
+That is not a reason to build nothing — the file is correct, and any importer
+that follows the spec will honour it — but it is a reason not to let the app
+claim the shift is gone. So the note in Setup says what was done and what to
+check:
+
+> 1 deleted shift still in the calendar, with alarms. Save the cancellations
+> and open that file the same way. If the event is still there afterwards,
+> delete it in the calendar by hand — some importers ignore the file's
+> identifiers.
+
+That is the honest sentence. The app knows a shift was deleted after being
+sent; it does not know what the phone did about it; and the one thing it can
+always do is make sure he knows too, which is more than the silence it
+replaced. Confirming it either way costs one deletion and one look at the
+calendar, and that is worth doing before this is trusted.
+
+**And no VALARM goes in the cancellation.** The alarms are the thing being
+taken away. An importer that half-reads the file must not be handed a fresh set.
+
+### 22.6 §7 is intact
+
+`S.tombstones` is a new top-level array and `seq` is a new optional field on the
+shift record; both arrive through `Object.assign(structuredClone(DEFAULTS), v)`,
+which is the one path both `loadState()` and the backup restore already share.
+A state saved before today loads with an empty list and no sequence numbers,
+and behaves exactly as it did. Additive optional, no migration — §11.4's check
+still stands unspent for §8.1, which remains the step that will actually need it.
+
+### 22.7 Where this leaves the order
+
+§10.5's two staleness warnings are now the whole of §11.3's step 2, then §8.1's
+site table, then §8.4. The one thing worth doing before any of it is the
+five-minute test in §22.5: delete a shift, save the cancellation, open it, and
+see whether the event goes. If it does not, the note is doing the work and the
+§14 Worker — where the feed is rebuilt whole and this problem does not exist —
+gets a little more urgent.

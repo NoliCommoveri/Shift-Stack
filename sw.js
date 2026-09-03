@@ -1,7 +1,7 @@
 /* Shift Deck service worker.
    App shell is cached so it opens offline. The OCR engine is cached on first
    use, which is why the second import is much faster than the first. */
-const SHELL = 'shiftdeck-shell-v5';
+const SHELL = 'shiftdeck-shell-v6';
 const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs a 10MB re-download
 const FILES = ['./', './index.html', './parser.js', './ics.js', './patterns.js', './holidays.js', './app.js', './manifest.webmanifest'];
 

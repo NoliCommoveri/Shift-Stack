@@ -53,6 +53,20 @@ the Google Calendar app on Android cannot import files at all — Samsung
 Calendar can, via My Files. In this mode the export only includes shifts not
 sent before, since importing appends rather than replaces.
 
+Because it only ever adds, deleting a shift has to be said out loud. When a
+shift that has already been sent is deleted, Setup shows how many events the
+calendar has not been told about and offers **Save the cancellations** — a
+second file that names those events and withdraws them. Open it the same way as
+any other export. It is a separate file on purpose: a calendar file carries one
+instruction, and one claiming to publish while holding cancelled events is
+asking the importer to guess.
+
+Whether it takes is the importer's decision, not this app's. Samsung's is known
+to be loose about the identifiers a withdrawal depends on, so check the event
+afterwards; if it is still there, delete it in the calendar by hand. This is
+the mode's known cost, and the reason subscription is the recommended one —
+there the feed is rebuilt whole and a deleted shift simply is not in it.
+
 Alarm lead times are set in Setup, in hours before each shift.
 
 ## How the two calendars fit together
@@ -291,9 +305,11 @@ start over**. See PROJECT.md §7.
 - A calendar import never removes anything on its own. Cancellations are
   proposed with a tick-box and wait for you. An import that overlaps a shift
   already on file is flagged, not blocked.
-- In manual-import mode, removing a shift here does not withdraw an event
-  already sent to the phone's calendar — delete it there too. Subscription
-  mode has no such problem: the feed is rebuilt whole every time.
+- In manual-import mode, removing a shift here does not withdraw the event by
+  itself: Setup offers a cancellation file, and whether the calendar app acts
+  on it is out of this app's hands. Check the event afterwards and delete it
+  there if it survived. Subscription mode has no such problem — the feed is
+  rebuilt whole every time.
 - Pay figures are gross estimates for spotting a missing shift on a paystub,
   not a prediction of the deposit. Overtime is counted separately per employer,
   and premiums, stat holidays and retro pay are not modelled. A week holding
