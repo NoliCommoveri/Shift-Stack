@@ -67,11 +67,12 @@ const MONTHNAMES = ['January','February','March','April','May','June','July',
 const todayISO = () => { const n = new Date(); return iso(n.getFullYear(), n.getMonth(), n.getDate()); };
 function shiftDays(s, n){ const d = asDate(s); d.setDate(d.getDate()+n); return iso(d.getFullYear(), d.getMonth(), d.getDate()); }
 function mins(t){ const [h,m] = t.split(':').map(Number); return h*60+m; }
+// 24-hour throughout. am/pm is the single most dangerous character in this
+// app -- 23:00 cannot be misread the way 11:00pm can, so the display never
+// uses it. The parser still reads am/pm off screenshots; that is input.
 function fmtTime(t){
-  let [h,m] = t.split(':').map(Number);
-  const ap = h < 12 ? 'am' : 'pm';
-  h = h % 12; if(h === 0) h = 12;
-  return `${h}:${String(m).padStart(2,'0')}${ap}`;
+  const [h,m] = t.split(':').map(Number);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
 }
 function durMins(sh){
   let d = mins(sh.end) - mins(sh.start);
