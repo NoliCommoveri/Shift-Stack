@@ -101,6 +101,8 @@ const FLAG_TEXT = {
   [FLAG.AMPM]:    'No am/pm was printed \u2014 check the times.',
   [FLAG.SPLIT]:   'Times were read from two separate lines \u2014 check them.',
   [FLAG.WEEKDAY]: 'The weekday on screen does not match this date.',
+  [FLAG.ONETIME]: 'Only one time could be read \u2014 set the missing one below.',
+  [FLAG.FIXEDAP]: 'The am/pm was printed on its own line and has been applied \u2014 check it.',
   [FLAG_MOVED]:   'A shift is already on file at this time in a different place \u2014 adding this will not replace it.',
   [FLAG_CHANGED]: 'The calendar has moved a shift already on file.',
   [ICS_FLAG.NOEND]: 'The calendar gave no end time \u2014 set one below.',
@@ -821,7 +823,14 @@ function renderReview(){
       touch();
     };
     s.oninput = () => { p.start = s.value; };
-    e.oninput = () => { p.end = e.value; };
+    e.oninput = () => {
+      p.end = e.value;
+      // Supplying the end answers the one-time warning and nothing else. The
+      // am/pm warning is about a value that was read, not one that was absent,
+      // so it survives being given the other half of the pair.
+      if(p.end) p.flags = p.flags.filter(f => f !== FLAG.ONETIME);
+      touch();
+    };
     l.oninput = () => { p.label = l.value; };
     const job = row.querySelector('select');
     if(job) job.onchange = () => { p.companyId = job.value; };

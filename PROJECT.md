@@ -1649,28 +1649,51 @@ quietly; the review screen says "no am/pm was printed — check the times". But 
 fallback that needs every row's start time corrected by hand, and that can drop
 a shift without saying so, is not much of a fallback.
 
-The raw text is parked in `tests/fixtures/pending/` with no golden file. Its
-current output is wrong, and `tests/fixtures/README.md`'s own rule is that a generated
-golden records what the parser does rather than what it should, so committing one
-would enshrine a twelve-hour error as the expected result.
+### 16.2a Decided: the OCR path stays, on both jobs
 
-**This is a decision, not a bug queue.** Homebase is the job with Calendar Sync
-(§12), which delivers exact times with no reading step at all. The Homebase OCR
-path is a fallback for the one job that does not need it. Three options, and
-the third is probably right:
+Retiring the Homebase reader was on the table — Calendar Sync already delivers
+that job's exact times, so the screenshot path is redundant on a good day. Ray
+decided against it, and the reasoning holds: a feed that can be switched off,
+fall behind or lose a location is not a reason to have no second way in. So the
+faults above are a work list rather than an argument, and three of the four
+have been fixed.
 
-1. Fix it — debris filtering, meridiem recovery from adjacent lines, and a
-   single-time row that flags rather than vanishes. Real work on a redundant
-   path.
-2. Leave it as it is. Cheapest, and wrong: it can drop a shift in silence.
-3. **Retire it.** Refuse a Homebase screenshot import with "this job comes from
-   the calendar — import the feed instead", and keep OCR for TrackTik. One
-   input per job, each on the path that suits it.
+**The meridiem is recovered when it is legible.** `8:00 pm` lost its `pm` onto
+the next line as `00pm .`; a following line that carries an unmistakable
+meridiem and no time of its own now supplies it, and the row is flagged
+`fixedap` — "printed on its own line and has been applied, check it" — rather
+than passing itself off as a clean read. The bar is deliberately high:
+`00pm` gives up its `pm`, while `2adM` and `28M` give up nothing. Guessing from
+wreckage would reintroduce the twelve-hour error under a different name. That
+shift now parses **exactly right**: 20:00–00:00, Training — F.O.C.
 
-One bug found here is worth fixing whichever way that goes, because it is a
-plain defect rather than a judgement call: lines *between* the start-time line
-and the end-time line are never gathered into the label, which is the whole
-reason "Training" and "Security Agent" disappeared.
+**The role is no longer stepped over.** The gather jumped from the start-time
+line to the end-time line, so anything between them was lost — which is
+precisely where Homebase puts the role. Together with a token-level debris
+filter (a token mixing digits with letters is a broken time, not a word; two
+letters or fewer is avatar debris) all four labels now come out right:
+`Training - Headquarters`, `Training - F.O.C`, `Security Agent - Headquarters`,
+`Security Officer - F.O.C`.
+
+**A half-read shift is flagged, not dropped.** The Saturday row had one legible
+time where the pairing rule wanted two, so it silently became nothing. It now
+emits with the end left empty and an `onetime` flag. Nothing had to be invented
+to make that safe: the review screen already renders an empty `type="time"` as
+a blank asking to be filled, and the commit path at `app.js:952` already
+refuses to file a row without an end. A shift that is *visibly incomplete*
+costs a correction; a shift that is *absent* reads as a day off, and that is
+the failure this project exists to prevent.
+
+**What is left is not fixable here.** `12:15 am` came through as `19:15`. The
+information is gone from the text and no amount of parsing recovers it, so two
+rows in the golden are knowingly wrong and carry the `ampm` flag, which is the
+honest limit of what the parser can say. Two things reduce that exposure and
+neither is parser work: §8.2's plausibility check, and the fact that for this
+job the feed is the primary path and OCR the fallback.
+
+The capture is a committed fixture now rather than parked evidence, because
+what it protects is real: the recovery, the gather, and the no-drop rule all
+have a regression test made of text a real phone actually produced.
 
 ### 16.3 What the jobs actually look like
 
@@ -1723,8 +1746,8 @@ follows moves:
 - **§8.2 and §8.3 are now cheap and high-value**, and both depend on a pattern
   that today's data hands over for free. Neither needs the site table first.
 - **§8.4 shrinks**, and its hardest part is already built on the feed side.
-- **The Homebase decision in §16.2 should be taken before anything else**,
-  because option 3 deletes work rather than adding it.
+- **The Homebase decision is taken** (§16.2a) and the work it implied is done.
+  What survives it is a parser limit, not a task.
 - **Step 1's remaining OCR tuning** — page-segmentation mode and a character
   whitelist (§10.7) — should be judged on TrackTik alone now. TrackTik came
   through clean, so the case for touching Tesseract's settings is weaker than

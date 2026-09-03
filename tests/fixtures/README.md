@@ -28,8 +28,24 @@ It proves the reader understands the format; it does not prove that Homebase's
 events say what the fixture assumes they say.
 
 **Neither** — plain OCR output pasted from the app, or an untouched `.ics`
-saved from the real feed. That is the real thing, and there is none of it yet.
+saved from the real feed. That is the real thing. Two of these arrived on
+3 September 2026: `tracktik-2026-09-week2.txt` and `homebase-2026-09-week1.txt`.
 Replace the TRANSCRIBED and SYNTHETIC files with these as they arrive.
+
+### `homebase-2026-09-week1.txt` holds two rows that are knowingly wrong
+
+Read its golden with that in mind. The Thursday and Friday shifts record a
+19:15 start where the screen said 12:15 am, because the OCR pass read `12:15
+am` as `19:15` and that information is not in the text for anything to
+recover. Both rows carry the `ampm` flag, which is the whole of what the parser
+can honestly do about it.
+
+That is not a bug waiting to be fixed, and the golden is not endorsing 19:15 as
+correct. What the file exists to protect is everything around it: the meridiem
+recovered from a stranded `00pm` line, the role gathered from between the two
+time lines, and the Saturday shift emitting a flagged row with an empty end
+rather than vanishing. The same days transcribed by eye are in
+`homebase-2026-09-week1-TRANSCRIBED.txt`, which is where ground truth lives.
 
 ## Adding a real fixture
 
@@ -49,9 +65,9 @@ Delete the PROVISIONAL fixtures once real ones cover the same ground.
 Struck through where the TRANSCRIBED fixtures now cover it by layout, though
 none of it is covered by a real OCR pass yet.
 
-- ~~Dark mode~~ — the TrackTik app is dark. The invert path in `prep()` still
-  has never run against a real screenshot, since these were transcribed rather
-  than read.
+- ~~Dark mode~~ — the TrackTik app is dark, and the invert path in `prep()`
+  has now run against a real screenshot of it. The text came back clean enough
+  that am/pm survived on every row, which is the read that matters most.
 - Uncropped and unedited.
 - ~~A scroll boundary~~ — `tracktik-2026-09-scrolled` opens on a site line
   whose times are above the fold, and `tracktik-2026-09` ends on a time whose
