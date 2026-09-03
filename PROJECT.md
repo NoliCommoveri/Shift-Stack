@@ -16,11 +16,19 @@ is still undecided.
 Ray's husband works two jobs whose schedules live in two separate employer
 apps. Neither talks to the other, and there is no single place to see the week.
 
-- **TrackTik SHIFT** (`com.tracktik.shift`) — security guard scheduling.
-  Sites seen so far include De la Montagne. Referred to on the home screen
-  calendar as DSI.
-- **Homebase** (`com.joinhomebase.homebase`) — hospitality scheduling.
-  Role-based, e.g. Cook. Referred to as Trupoint.
+Two names for each job, and they are not interchangeable. The app is the
+scheduling software the employer happens to buy; the employer is what the job
+is called, what goes in Setup, and what prefixes every exported event. Which
+app a job uses decides how its shifts are *read*; which employer it is decides
+what they are *labelled*.
+
+- **TrackTik SHIFT** (`com.tracktik.shift`) — the scheduling app used by
+  **DSI**, security guarding. Sites seen so far include De la Montagne. No
+  calendar feed, so this job is screenshots only.
+- **Homebase** (`com.joinhomebase.homebase`) — the scheduling app used by
+  **Trupoint**. Described in the original brief as hospitality, role-based e.g.
+  Cook; §3.1 corrects that against his actual screenshots. Homebase has a
+  Calendar Sync, which is why this is the job §14 can automate.
 
 Goals, as stated:
 
@@ -867,8 +875,13 @@ TrackTik  ──screenshots────▶  S H I F T   D E C K
 sync writes `Security Officer` with nothing to say whose shift it is. Two jobs
 on one calendar that way is unreadable, which is §1's complaint restated: the
 problem was never that the shifts were unavailable, it was that nothing put
-them in one place in one language. What goes out is `DSI- Security Officer -
-Headquarters`, from the job name in Setup, whichever way the shift arrived.
+them in one place in one language. What goes out is `Trupoint- Security Officer
+- Headquarters`, from the job name in Setup, whichever way the shift arrived.
+
+The prefix is the *employer*, never the app. Homebase is Trupoint's scheduling
+software, so a shift that arrives through Homebase's Calendar Sync goes out
+labelled Trupoint. Getting that backwards would defeat the one thing this step
+exists to do.
 
 **The staging calendar is a data channel, not a view.** Hidden in the phone's
 calendar app, so nothing renders it and there are no duplicates. This also
