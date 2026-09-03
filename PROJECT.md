@@ -1,6 +1,7 @@
 # Shift Deck — project state
 
 _Last updated 3 September 2026_ — real screenshots of both apps landed; see §3.1 and §5.
+Build order for the agreed-but-unbuilt work is in §11.
 
 A record of what has been built, why the design went the way it did, and what
 is still undecided.
@@ -584,3 +585,88 @@ Carried forward, plus what today added.
    an invalid line — in scope for Montréal addresses. OCR accuracy might improve
    cheaply from a page-segmentation mode and a character whitelist, currently
    left at Tesseract's defaults.
+
+---
+
+## 11. Roadmap — the order to build §8 in, and where to stop
+
+§8 already argues its own internal order and that argument holds: each of the
+four pieces changes the shape the next is written against. What this section
+adds is where the §10 loose ends slot in, what the code says about §8.1's
+stated blocker, and where to cut the work into sessions.
+
+### 11.1 Two findings from reading §8 against the code
+
+**§8.1's blocker is cleared.** §8.1 says the site/role split is "blocked on a
+real TrackTik screenshot" because the split assumes the line contains a `|`.
+It does — `tests/fixtures/tracktik-2026-09-TRANSCRIBED.txt` reads
+`Cook Plant ASO | SOUTHERN HENS, I...`. The separator is real and §8.1 can
+start.
+
+**But the separator is destroyed before anything could read it.**
+`normalise()` (`parser.js:38`) rewrites `|` to ` - ` on every line, and the
+Homebase branch (`parser.js:238`) joins its own gathered fragments with the
+same ` - `. So at the point a role/site split would want to read the boundary,
+a real separator and an arbitrary fragment join look identical. Either split on
+the pipe inside the TrackTik branch before `normalise()` flattens it, or keep
+the pipe and give the Homebase join a different marker. This is a small change
+but it has to be made deliberately, not discovered halfway through §8.1.
+
+Two things are also cheaper than §8 implies. `source` already exists on the
+shift record (`app.js:713`, `app.js:727`), so §8.3's hollow-tick rendering has
+its hook. And `pending` already carries `rid`, per-row job stamping and a
+review screen with flags, which is the scaffolding both §8.3 and §8.4 plug
+into.
+
+### 11.2 What comes before §8.1
+
+**Send the two emails first.** §10.2 and §10.3 are each one message and each
+can delete a large amount of the work below. If the TrackTik distribution email
+gets switched on, email parsing beats screenshots on every axis and most of
+§8.4 stops being necessary. If Homebase turns out to expose its feed, that job
+needs no OCR at all. Neither costs a line of code, and both are worth their
+answer before more is invested in OCR.
+
+**Then a real OCR pass.** §10.1 is still open: the fixtures are TRANSCRIBED,
+read off the images by eye, so the parser is known to understand the layout and
+is still unproven against the mangling. The auto-invert branch in `prep()` has
+never executed against a real input. §8.2 is a control designed specifically
+against am/pm misreads — designing it before seeing how am/pm actually fails on
+the dark TrackTik screen is designing against a guess. Run the four screenshots
+through Tesseract, commit the raw text as fixtures, fix what breaks. The
+page-segmentation mode and character whitelist in §10.7 belong in the same
+sitting, since that is the one time the OCR settings are being looked at
+anyway.
+
+**And pull §10.5 forward.** The two staleness warnings touch no schema, depend
+on no transport, and defend the exact failure the project exists to prevent —
+an empty calendar reading as a day off. There is no reason they should queue
+behind three schema changes.
+
+### 11.3 The order
+
+| | Work | Why here |
+|---|---|---|
+| 0 | The two emails (§10.2, §10.3) | No code; may delete work below |
+| 1 | Real Tesseract pass, fixtures from it, OCR tuning (§10.1, §10.7) | Gates §8.2's design |
+| 2 | Staleness warnings, `METHOD:CANCEL`, byte-based `fold()` (§10.5–§10.7) | No schema, ships value immediately |
+| 3 | **§8.1 site table** — schema, aliases, merge, `LOCATION:`, title convention, the parser split from §11.1 | Everything after assumes `siteId` |
+| 4 | **§8.2** patterns and am/pm plausibility | Needs step 1's evidence; independent of sites |
+| 5 | **§8.3** week generation | Small once patterns exist |
+| 6 | **§8.4** change detection | Needs stable site identity to tell "same shift, different place" |
+
+Steps 3 and 6 are the heavy ones. Step 5 is an evening.
+
+**§4 is a parallel track, not part of this.** Getting the feed to ICSx⁵ remains
+the live blocker for the product, but none of §8 depends on it and it is
+infrastructure rather than enhancement. Worth noting that the minimal-feed idea
+in §10.4 gets easier *after* §8.1: once role and site are separate fields,
+"which of these leaves the phone" is a real choice rather than a string split.
+
+### 11.4 One decision before step 3
+
+§7 defers schema migrations until the first live data point. Step 3 is a schema
+change. So before it starts, confirm §7 still holds — that nothing real is
+being relied on yet. If it no longer holds, `S.version` and the migration path
+are prerequisites of step 3 rather than something deferred, and §7 says exactly
+what that means: both `loadState()` and the backup-restore path have to run it.
