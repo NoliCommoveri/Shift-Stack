@@ -134,6 +134,10 @@ input[type=file]{display:none}
 
 .rev{padding:.75rem 0;border-bottom:1px solid var(--hair)}
 .rev.flagged{background:var(--wash);margin:0 -.5rem;padding-left:.5rem;padding-right:.5rem}
+.rev.gone .mono,.rev.gone .tiny{text-decoration:line-through;color:var(--soft)}
+.rev.gone .flag{text-decoration:none}
+.tick{display:flex;align-items:center;gap:.35rem;font-size:.88rem}
+.tick input{width:1.05rem;height:1.05rem;accent-color:var(--signal)}
 .revf{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
 .revf input[type=time]{width:6.4rem}
 .revf input[type=text]{flex:1 1 8rem}

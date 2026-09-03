@@ -448,6 +448,8 @@ function editShift(id){
       <label class="f"><span>End</span><input id="e-end" type="time" value="${s.end}"></label>
     </div>
     <label class="f"><span>Site or role</span><input id="e-label" type="text" value="${esc(s.label)}"></label>
+    <label class="f"><span>Address, for the calendar</span>
+      <input id="e-place" type="text" placeholder="401 Main St, Hattiesburg MS" value="${esc(s.place||'')}"></label>
     <div class="rowbtns">
       <button class="act" id="e-save">Save</button>
       <button class="ghost" id="e-cancel">Cancel</button>
@@ -461,6 +463,7 @@ function editShift(id){
     s.start = $('#e-start').value;
     s.end = $('#e-end').value;
     s.label = $('#e-label').value.trim() || 'Shift';
+    s.place = $('#e-place').value.trim();
     s.sent = false;              // changed, so send it to the calendar again
     save(); dlg.close(); renderAll();
   };
@@ -653,22 +656,28 @@ function calendarRows(text){
     }
     if(bySlot(row)) fresh.push(row);
   }
-  return { rows: fresh, report, unchanged };
+  return { rows: fresh, report, unchanged, gone: cancellationRows(report) };
 }
 
 /* A cancelled event names a shift on file that is not happening. Nothing else
    in this app can tell him that — a screenshot of a schedule cannot show what
-   is missing from it — so it is said plainly rather than acted on quietly.
-   Removal stays his: the calendar he synced may not cover every job. */
-function cancelledNote(report){
-  const hits = (report.cancelledRows || [])
-    .map(c => S.shifts.find(s => s.extUid === c.uid))
-    .filter(Boolean);
-  if(!hits.length) return '';
-  const list = hits.slice(0, 4)
-    .map(s => `${s.date} ${fmtTime(s.start)} ${s.label}`).join(', ');
-  return ` Cancelled in the calendar but still on file: ${list}${hits.length > 4 ? ', …' : ''}. ` +
-         `Open Schedule and delete ${hits.length === 1 ? 'it' : 'them'}.`;
+   is missing from it — and with the schedule flowing back out to a calendar of
+   its own, removing it here is what takes it off the phone.
+
+   It is still a proposal, never an action. §8.4's rule holds: a partial view
+   of a schedule is indistinguishable from a week of cancellations, so removal
+   is a row he ticks off, sitting in the same review list as everything else. */
+function cancellationRows(report){
+  const co = coById($('#impco').value);
+  return (report.cancelledRows || []).map(c => {
+    const s = S.shifts.find(x => x.extUid === c.uid && x.companyId === co.id);
+    if(!s) return null;
+    return {
+      rid: uid(), companyId: s.companyId, removeId: s.id,
+      date: s.date, start: s.start, end: s.end, label: s.label,
+      flags: [], source: 'ics'
+    };
+  }).filter(Boolean);
 }
 
 function readCalendarText(text, sourceName){
@@ -692,6 +701,7 @@ function readCalendarText(text, sourceName){
   }
   const r = got.report;
   got.rows.forEach(row => pending.push(row));
+  got.gone.forEach(row => pending.push(row));
 
   const skipped = [];
   if(got.unchanged) skipped.push(`${got.unchanged} already on file`);
@@ -706,7 +716,10 @@ function readCalendarText(text, sourceName){
       ? `${got.rows.length} shift${got.rows.length===1?'':'s'} to check, from ${r.events} events`
       : `Nothing new in ${r.events} events`) +
     (skipped.length ? ` (skipped: ${skipped.join(', ')}).` : '.') +
-    cancelledNote(r);
+    (got.gone.length
+      ? ` ${got.gone.length} shift${got.gone.length===1?' has':'s have'} been cancelled — ` +
+        `tick ${got.gone.length===1?'it':'them'} below to take ${got.gone.length===1?'it':'them'} off the calendar.`
+      : '');
   renderReview();
 }
 
@@ -754,6 +767,28 @@ function renderReview(){
   const manyJobs = S.companies.length > 1;
 
   pending.forEach(p => {
+    // A removal is not an edit. It gets no fields — there is nothing to
+    // correct, only a decision — and it says what would go.
+    if(p.removeId){
+      const row = el('div','rev flagged gone');
+      row.innerHTML = `
+        <div class="revf">
+          <label class="tick"><input type="checkbox" checked> Remove</label>
+          <span class="mono tiny">${esc(p.date)} ${esc(fmtTime(p.start))}\u2013${esc(fmtTime(p.end))}</span>
+          <span class="tiny">${esc(p.label)}</span>
+          <button class="kill" aria-label="Keep this shift">&times;</button>
+        </div>
+        <p class="flag">Cancelled in the calendar. Removing it takes it off the phone on the next export.</p>`;
+      const box = row.querySelector('input[type=checkbox]');
+      box.onchange = () => { p.keep = !box.checked; };
+      row.querySelector('.kill').onclick = () => {
+        pending = pending.filter(x => x.rid !== p.rid);
+        renderReview();
+      };
+      $('#review').appendChild(row);
+      return;
+    }
+
     const row = el('div','rev' + ((!p.date || p.flags.length) ? ' flagged' : ''));
     row.innerHTML = `
       <div class="revf">
@@ -800,19 +835,32 @@ function renderReview(){
 
 /* ---------- calendar file ------------------------------------------------ */
 function icsEscape(s){ return String(s).replace(/([,;\\])/g,'\\$1').replace(/\n/g,'\\n'); }
+/* The spec folds at 75 octets, not 75 characters. Slicing by character wrote
+   over-long lines for anything non-ASCII, which some calendar apps reject
+   outright — live now that real addresses go in the file, since a Montréal
+   site name is two bytes a letter in the accents. Splitting on code points
+   keeps a character whole; counting their UTF-8 length keeps the line legal. */
 function fold(l){
-  if(l.length <= 74) return l;
-  const out = [l.slice(0,74)];
-  let rest = l.slice(74);
-  while(rest.length > 73){ out.push(' ' + rest.slice(0,73)); rest = rest.slice(73); }
-  if(rest) out.push(' ' + rest);
+  const enc = new TextEncoder();
+  if(enc.encode(l).length <= 74) return l;
+  const out = [];
+  let line = '', limit = 74;               // continuation lines carry a space
+  for(const ch of l){
+    const n = enc.encode(ch).length;
+    if(enc.encode(line).length + n > limit){
+      out.push(line);
+      line = ' ' + ch;
+      limit = 74;
+    } else line += ch;
+  }
+  if(line) out.push(line);
   return out.join('\r\n');
 }
 function buildICS(only){
   const now = new Date().toISOString().replace(/[-:]/g,'').split('.')[0] + 'Z';
   const leads = (S.settings.leads || []).filter(n => n > 0);
   const L = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Shift Deck//EN','CALSCALE:GREGORIAN',
-             'METHOD:PUBLISH','X-WR-CALNAME:Work shifts'];
+             'METHOD:PUBLISH','X-WR-CALNAME:Work Schedule'];
   only.forEach(s => {
     const co = coById(s.companyId);
     const endDate = mins(s.end) <= mins(s.start) ? shiftDays(s.date,1) : s.date;
@@ -822,8 +870,15 @@ function buildICS(only){
       `DTSTAMP:${now}`,
       `DTSTART:${s.date.replace(/-/g,'')}T${s.start.replace(':','')}00`,
       `DTEND:${endDate.replace(/-/g,'')}T${s.end.replace(':','')}00`,
+      // Every event says which job it is. That is the whole point of the
+      // normalising step: an employer's own sync writes "Security Officer"
+      // with nothing to say whose shift it is, and two jobs' worth of those
+      // on one calendar is unreadable.
       fold('SUMMARY:' + icsEscape(title)),
       fold('DESCRIPTION:' + icsEscape(`${fmtDur(durMins(s))} scheduled`)));
+    // An address here is a tappable link to a map. The two-hour alarm fires,
+    // he taps the event, taps the address, and he is navigating.
+    if(s.place) L.push(fold('LOCATION:' + icsEscape(s.place)));
     leads.forEach(h => {
       L.push('BEGIN:VALARM','ACTION:DISPLAY',
         fold('DESCRIPTION:' + icsEscape(title)),
@@ -886,8 +941,15 @@ document.addEventListener('paste', e => {
 });
 
 $('#commit').onclick = () => {
-  let added = 0, replaced = 0;
-  pending.filter(p => p.date && p.start && p.end && p.companyId).forEach(p => {
+  let added = 0, replaced = 0, removed = 0;
+
+  pending.filter(p => p.removeId && !p.keep).forEach(p => {
+    const before = S.shifts.length;
+    S.shifts = S.shifts.filter(x => x.id !== p.removeId);
+    if(S.shifts.length < before) removed++;
+  });
+
+  pending.filter(p => !p.removeId && p.date && p.start && p.end && p.companyId).forEach(p => {
     const rec = {
       id: uid(), companyId: p.companyId, date: p.date, start: p.start, end: p.end,
       label: snapSite(p.label, p.companyId), source: p.source || 'ocr'
@@ -895,6 +957,7 @@ $('#commit').onclick = () => {
     // A calendar row carries the event's UID. Keeping it is what makes the
     // next import of the same feed an update rather than a second copy.
     if(p.extUid) rec.extUid = p.extUid;
+    if(p.place) rec.place = p.place;
     if(p.replaceId){
       // The employer moved a shift already on file. Replace it in place and
       // keep its id, so a calendar built in manual-import mode rewrites the
@@ -914,7 +977,14 @@ $('#commit').onclick = () => {
   save(); renderReview(); renderAll();
   $('#progtext').textContent =
     `Added ${added} shift${added===1?'':'s'}` +
-    (replaced ? `, updated ${replaced}.` : '.');
+    (replaced ? `, updated ${replaced}` : '') +
+    (removed ? `, removed ${removed}` : '') + '.' +
+    // In subscription mode the feed is rebuilt whole, so a removal reaches the
+    // phone by itself. In manual-import mode nothing withdraws an event that
+    // has already been sent, so say so rather than let it sit there ringing.
+    (removed && S.settings.feedMode === 'import'
+      ? ' The events already sent to the calendar stay there \u2014 delete them in the calendar app too.'
+      : '');
 };
 $('#discard').onclick = () => { pending = []; renderReview(); $('#progtext').textContent = 'Discarded.'; };
 

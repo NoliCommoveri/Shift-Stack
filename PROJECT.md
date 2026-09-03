@@ -1,7 +1,9 @@
 # Shift Deck — project state
 
-_Last updated 3 September 2026_ — real screenshots of both apps landed (§3.1, §5), and
-Homebase's own Calendar Sync turned out to exist and is now an import path (§11).
+_Last updated 3 September 2026_ — real screenshots of both apps landed (§3.1, §5),
+Homebase's own Calendar Sync turned out to exist and is now an import path (§11),
+and the app became the normalising step between two calendars rather than a
+second source of the same events (§12).
 
 A record of what has been built, why the design went the way it did, and what
 is still undecided.
@@ -708,6 +710,92 @@ pass in one place and fail in another.
    If it is annoying enough to be skipped, that is a silent-staleness risk of
    the same family as §10.5, and the answer is the §4 Worker fetching the feed
    server-side rather than anything clever in the browser.
-4. **Cancellations are told, not shown.** A row in the review screen with a
-   tick-box would be better than a sentence in the progress line. It needs the
-   review screen to grow a second row type, which is §8.4's job.
+4. ~~**Cancellations are told, not shown.**~~ Built in §12: the review screen
+   grew a second row type and a cancellation is now a tick-box. It had to be —
+   once the app is what feeds the calendar he reads, a cancellation it does not
+   act on is a shift that keeps ringing.
+
+---
+
+## 12. Two calendars, and the app between them
+
+Naming Calendar Sync as an import path (§11) left an obvious problem sitting in
+the open: Homebase writes its shifts into a Google calendar, this app writes
+*its* shifts into a calendar too, and both land on the same phone. Every
+Homebase shift would appear twice.
+
+The answer settles what this app is for, so it is worth stating plainly.
+
+```
+Homebase  ──Calendar Sync──▶  "Homebase Raw"     staging. Hidden on the phone.
+                                    │             Machine-readable, not for him.
+                                    │  .ics
+                                    ▼
+TrackTik  ──screenshots────▶  S H I F T   D E C K
+                              normalises, merges, holds the hours and the pay
+                                    │
+                                    │  export ──▶ ICSx⁵
+                                    ▼
+                              "Work Schedule"    the one he reads. The widget
+                                                  and the alarms come off it.
+```
+
+**The app is the normalising step, not a second source.** The employer's own
+sync writes `Security Officer` with nothing to say whose shift it is. Two jobs
+on one calendar that way is unreadable, which is §1's complaint restated: the
+problem was never that the shifts were unavailable, it was that nothing put
+them in one place in one language. What goes out is `DSI- Security Officer -
+Headquarters`, from the job name in Setup, whichever way the shift arrived.
+
+**The staging calendar is a data channel, not a view.** Hidden in the phone's
+calendar app, so nothing renders it and there are no duplicates. This also
+retires the import filter for the Homebase side: a calendar of its own has
+nothing in it but shifts, so `co.icsMatch` becomes the fallback for when
+Homebase will only write to an account's main calendar rather than a chosen
+one. Which of those it does is worth one look at the Calendar field on the
+sync screen — it decides whether the filter matters at all.
+
+### What this made worth building
+
+- **`LOCATION` on the way out.** §8.1 called an address in the `.ics` the
+  single best reason to build the site table — the alarm fires, he taps the
+  event, taps the address, and he is navigating. Homebase puts a real street
+  address on its events, so on that half of the schedule it arrives free of
+  the site table entirely. Shifts keep `place`, the export emits it, and the
+  edit dialog has a field so TrackTik shifts can have one typed in. The site
+  table in §8.1 is still the right destination; this is the part of its value
+  that did not have to wait for it.
+
+- **Folding by octets.** §10.7 had this down as small and unowned: `fold()`
+  sliced by character where the spec counts bytes, so an accented site name
+  could produce an invalid line. Emitting real addresses made it live —
+  Montréal is in scope — so it now walks code points and counts their UTF-8
+  length. A character is never split and no line exceeds 75 octets.
+
+- **Cancellation as a tick-box**, per §11's fourth open end. The reasoning
+  changed with the architecture: while the app was a private view, an
+  unremoved cancellation was untidy. Now that its export *is* the calendar he
+  reads, an unremoved cancellation is an alarm that goes off for a shift that
+  does not exist. It still never removes anything unasked — §8.4's rule that a
+  partial capture is indistinguishable from a week of cancellations holds, and
+  a cancellation is a proposal with a tick in it, not an action.
+
+  One asymmetry to know about: in subscription mode the feed is rebuilt whole,
+  so a removal reaches the phone by itself. In manual-import mode nothing
+  withdraws an event already sent — §10.6's missing `METHOD:CANCEL` — so the
+  app says so at the moment it matters rather than leaving it in a document.
+
+### What this does not fix
+
+**It is still a manual save.** The `.ics` has to be downloaded and added. The
+architecture above changes what the app *is*; it does not change how the bytes
+get in. §11's routes out stand: try the link button once in case Homebase's own
+feed allows a direct read, and otherwise the §4 Worker fetching server-side is
+the one thing that closes it — the same Worker the export side already wants,
+now with a reason on both ends.
+
+**And the horizon question is sharper now.** If Calendar Sync only publishes
+two months, and the Work Schedule calendar is the only one he looks at, then
+anything past that horizon is missing from the only place he checks. §10.5's
+"nothing on file after Friday" warning was already worth building; this makes
+it the next thing.

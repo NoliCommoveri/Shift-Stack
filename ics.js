@@ -36,9 +36,11 @@
 const icsISO = (y, m, d) =>
   `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
-/* All a feed's text needs: no line breaks, no runs of spaces, a sane length. */
-function clean(s){
-  return String(s || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+/* All a feed's text needs: no line breaks, no runs of spaces, a sane length.
+   A label has to fit a phone-width row; an address has to stay navigable, so
+   it gets far more room. */
+function clean(s, max = 60){
+  return String(s || '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
 /* Flag codes, same contract as parser.js: codes here, sentences in app.js. */
@@ -295,7 +297,13 @@ function buildRow(ev, ctx){
   // and counted rather than guessed at.
   if(dtstart.dateOnly){ report.allDay++; return null; }
 
-  const label = labelFor(unescapeText(p.SUMMARY), unescapeText(p.LOCATION));
+  const location = unescapeText(p.LOCATION);
+  const label = labelFor(unescapeText(p.SUMMARY), location);
+  // The whole address is kept beside the shortened label. Homebase writes a
+  // real street address here, and an address on a calendar event is a tappable
+  // link to a map on the phone — which is §8.1's best argument for the site
+  // table, arriving for free on this half of the schedule.
+  const place = clean(location, 200);
 
   const a = resolve(dtstart, zone);
   const date = dayISO(a.parts);
@@ -312,7 +320,7 @@ function buildRow(ev, ctx){
   // screenshot can never tell you. app.js matches these against the store.
   if(String(p.STATUS || '').toUpperCase().trim() === 'CANCELLED'){
     report.cancelled++;
-    report.cancelledRows.push({ uid: eventUID(p), date, label });
+    report.cancelledRows.push({ uid: eventUID(p), date, label, place });
     return null;
   }
 
@@ -351,6 +359,7 @@ function buildRow(ev, ctx){
   return {
     date, start: hhmm(a.parts), end: hhmm(endParts),
     label: label || 'Shift',
+    place,
     flags,
     uid: eventUID(p),
     endDate,

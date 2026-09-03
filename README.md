@@ -55,6 +55,54 @@ sent before, since importing appends rather than replaces.
 
 Alarm lead times are set in Setup, in hours before each shift.
 
+## How the two calendars fit together
+
+The shape that makes this work, and the one to set up:
+
+```
+Homebase  ──Calendar Sync──▶  "Homebase Raw"      a staging calendar,
+                              (Google)             hidden on the phone
+
+                                    │  save the .ics, add it
+                                    ▼
+TrackTik  ──screenshots────▶  S H I F T   D E C K   one job named on every
+                              normalises, merges     shift, hours, pay
+                                    │
+                                    │  export ──▶ ICSx⁵
+                                    ▼
+                              "Work Schedule"      the calendar he actually
+                              (native Android)      looks at, and the widget
+```
+
+Two things follow from it.
+
+**Every event says which job it is.** Homebase writes `Security Officer` and
+nothing else — put two employers' shifts on one calendar that way and it is
+unreadable. What Shift Deck exports is `DSI- Security Officer - Headquarters`,
+using the job name from Setup, for both jobs and whichever way the shift came
+in. That normalising step is the reason to route through here at all.
+
+**No duplicates.** The staging calendar is the raw feed and is switched off in
+the phone's calendar app; the Work Schedule calendar is the only one showing.
+Without the split, every Homebase shift appears twice — once from Homebase's
+own sync and once from the export.
+
+Setting it up:
+
+1. In Google Calendar, create a calendar called **Homebase Raw**.
+2. In Homebase → Settings → Calendar Sync, point the **Calendar** field at it
+   rather than at the account's main calendar. If the field only offers
+   accounts and not individual calendars, leave it and use the job's import
+   filter instead — see below.
+3. On the phone, untick **Homebase Raw** so it does not draw.
+4. Point ICSx⁵ at the exported `shifts.ics` as the **Work Schedule** calendar,
+   and leave that one showing. The widget reads it.
+
+Addresses ride along. Homebase puts a real street address on its events, and
+Shift Deck now passes it through to the export, so the two-hour alarm fires, he
+taps the event, taps the address, and he is navigating. For TrackTik shifts
+there is a field for it on the edit dialog.
+
 ## Bringing in an employer's calendar sync
 
 Homebase has a Calendar Sync of its own — Settings → Calendar Sync, then
@@ -82,20 +130,23 @@ fail and fall back to the file. It is there for feeds that do allow it.
 Importing the same calendar again is safe and is how it stays current. Events
 are matched on their ID, so a shift already on file is left alone, and one the
 employer has **moved** is shown as a change — `was 20:00–06:00` — and replaces
-the old one rather than appearing twice. A **cancelled** shift is named in the
-import message; removing it stays a manual step, since the calendar you synced
-may not cover every job.
+the old one rather than appearing twice. A **cancelled** shift arrives as a
+row in the review list with a tick already in it: leave it ticked and the shift
+goes, and the next export takes it off the Work Schedule calendar too. It is
+never removed without being shown, because a partial view of a schedule looks
+exactly like a week of cancellations.
 
 Three things are skipped, and the import says how many of each: anything
 before last week, all-day entries — a shift is its times, and inventing one
 would be the exact mistake this app exists to avoid — and anything that does
 not match the job's filter.
 
-That filter matters. Homebase syncs into a whole Google account, so dentist
-appointments and birthdays arrive alongside the shifts. **Setup → the job →
-Calendar import: only events mentioning…** takes a word that appears on every
-shift and nothing else — a site name, the role. Leave it empty to take
-everything and delete the rest by hand in the review list.
+That filter is the fallback for when Homebase cannot be pointed at a calendar
+of its own. Syncing into a whole Google account brings the dentist and the
+birthdays along with the shifts, and **Setup → the job → Calendar import: only
+events mentioning…** takes a word that appears on every shift and nothing else
+— a site name, the role. With a staging calendar there is nothing to filter and
+it can stay empty.
 
 ## Reading screenshots
 
@@ -157,8 +208,11 @@ start over**. See PROJECT.md §7.
 - am/pm rides on a single character. A misread puts a shift twelve hours out
   and it will look plausible. Glance at the times before exporting. This is a
   screenshot problem only — a calendar import cannot get a time wrong this way.
-- A calendar import never removes anything. A cancelled shift is named in the
-  import message and then waits for you to delete it.
+- A calendar import never removes anything on its own. Cancellations are
+  proposed with a tick-box and wait for you.
+- In manual-import mode, removing a shift here does not withdraw an event
+  already sent to the phone's calendar — delete it there too. Subscription
+  mode has no such problem: the feed is rebuilt whole every time.
 - Pay figures are gross estimates for spotting a missing shift on a paystub,
   not a prediction of the deposit. Overtime is counted separately per employer,
   and premiums, stat holidays and retro pay are not modelled.
