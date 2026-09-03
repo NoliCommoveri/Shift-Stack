@@ -940,11 +940,13 @@ it the next thing.
 
 ## 14. The Worker, specified
 
-> Read §15 alongside this. §14 was written from first principles; §15 checks it
-> against the three Cloudflare apps that already exist and finds the shape
-> right and the platform underneath it wrong in four places — KV, CORS, the
-> CLI setup steps, and the token comparison. The reasoning below stands; where
-> §15 contradicts a mechanism, §15 is the later word.
+> **Corrected against the three Cloudflare apps that already exist**
+> (Star-homeschool, Heritage-Hooves, Scheduling_App). This section was first
+> written from first principles, which was a mistake: it specified KV, a
+> cross-origin `POST`, and a CLI setup, none of which any of those three uses.
+> The shape survived the comparison; the platform underneath it did not. The
+> text below is the corrected version and is what gets built. §15 is the audit
+> that produced the corrections and the record of why each one was made.
 
 §13 ended by naming the §4 Worker as the one thing that closes the import gap,
 "now with a reason on both ends". This section is that Worker written down
@@ -991,7 +993,7 @@ Homebase ──Calendar Sync──▶ "Homebase Raw" (Google) ──secret .ics�
                                           Worker, cron every 15 min │
                                           fetch → parseICS → merge  │
                                                                     │
-TrackTik ──screenshots──▶ phone ──POST──▶  KV  ◀────────────────────┘
+TrackTik ──screenshots──▶ phone ──POST──▶  D1  ◀────────────────────┘
                                             │
                                      GET, feed rebuilt whole
                                             ▼
@@ -1006,58 +1008,90 @@ Homebase shifts reach his phone with the app never opened. TrackTik shifts
 still need screenshots, because there is no feed to poll — that remains §5's
 distribution-email question, and no amount of Worker closes it.
 
-### 14.3 Storage, and the reason it is split
+### 14.3 Storage
 
-KV has no transactions and no compare-and-set. One key with two writers loses
-writes, and here there genuinely are two: the phone pushing TrackTik shifts and
-the cron applying Homebase's. So the store is split by provenance, and **no key
-has more than one writer**:
+**D1**, which is what Star-homeschool, Heritage-Hooves and Scheduling_App all
+use. An earlier draft of this section specified KV and then spent its length
+working around KV's lack of transactions — splitting the store by provenance so
+that no key had more than one writer, and closing on the line "we are out of
+writers". D1 has atomic `batch()`, so there is nothing to work around: two
+writers to one table is the ordinary case.
 
-| Key | Written by | Holds |
+| Table | Written by | Holds |
 |---|---|---|
-| `cfg` | phone | companies, settings, alarm lead times |
-| `shifts/manual` | phone | every OCR and hand-entered shift |
-| `shifts/feed/<jobId>` | cron | that job's calendar-sourced shifts |
-| `raw/<jobId>` | cron | last known-good `.ics`, for diffing and for looking at when something is wrong |
-| `polls` | cron | ring buffer, last 50 poll records (§14.8) |
+| `cfg` | phone | one row: companies, settings, alarm lead times, as JSON `TEXT` |
+| `shifts` | phone (`source='manual'`), cron (`source='feed'`) | every shift, whatever its origin |
+| `raw` | cron | one row per job: last known-good `.ics`, for diffing and for looking at when something is wrong |
+| `polls` | cron | append-only, trimmed to the last 50 (§14.8) |
 
-The feed served to ICSx⁵ is built at read time from the union. Nothing merges
-the two stores into a third, because a third would need a writer and we are out
-of writers.
+`shifts` carries `source` (`manual` or `feed`), `job_id`, and `ext_uid` — null
+for a hand-entered or OCR'd shift, the calendar UID for a fed one, and unique
+per job where it is not null. That constraint is what makes the cron's
+diff-and-apply idempotent (§14.5) rather than merely usually-correct.
 
-This also answers a question §4 never had to: the phone stops being the source
-of truth. It owns its half, the Worker owns the other, and neither is complete
-alone. That is the real cost of automatic import, and it is larger than §4's
-stated privacy cost — the shift data is not merely *copied* to Cloudflare, part
-of it now *lives* there.
+The two writers stay disciplined about *which rows* they touch — the phone
+never writes `source='feed'`, the cron never writes anything else — but that is
+now a rule in the code rather than a property of the storage, and one `WHERE`
+clause enforces it. This is the same column-level ownership Scheduling_App
+locked for its shared `assignments` table: one table, two writers, each owning
+its own columns and rows, enforced in the Worker rather than by keeping them
+apart.
+
+`GET /feed` is a `SELECT`, not a merge of two stores.
+
+`polls` is append-only with a trim, which is `tick_run` in Heritage-Hooves and
+`reward_entries` in Scheduling_App — a pattern with two prior implementations
+in the account to copy from.
+
+What does not change from that earlier draft is the honest part: the phone
+stops being the source of truth. It owns its half, the Worker owns the other,
+and neither is complete alone. That is the real cost of automatic import, and
+it is larger than §4's stated privacy cost — the shift data is not merely
+*copied* to Cloudflare, part of it now *lives* there. Scheduling_App reached
+the same place and locked it as "D1 holds the truth; the device is a
+read-through cache plus a write outbox", which is also why §14.7's pass two is
+not optional.
 
 ### 14.4 Endpoints
 
 Three, all on one Worker.
 
-**`POST /push`** — the phone sends `cfg` and `shifts/manual`. Bearer token in
-`Authorization`, compared against the `PUSH_TOKEN` secret. Rejects anything
-that is not the expected shape rather than storing it, because a half-written
-`cfg` breaks the cron on its next tick and the phone would not hear about it.
+**`POST /push`** — the phone sends `cfg` and its `source='manual'` shifts.
+Bearer token in `Authorization`, compared against the `PUSH_TOKEN` secret.
+Rejects anything that is not the expected shape rather than storing it, because
+a half-written `cfg` breaks the cron on its next tick and the phone would not
+hear about it.
 
-This one is cross-origin and the Worker has to say so. The app is served from
-`nolicommoveri.github.io` and there is no reason to move it — §4 rejected Pages
-for hosting the *feed*, where a world-readable schedule was the objection, and
-the app itself carries no data at all. So the page lives on Pages, the Worker
-lives on Cloudflare, and every request between them is cross-origin. The Worker
-answers the `OPTIONS` preflight and returns `Access-Control-Allow-Origin` for
-the Pages origin exactly — not `*`, which would let any page that learned the
-push token write to the store — along with `Allow-Headers: Authorization,
-Content-Type`. `GET /feed` needs none of this: ICSx⁵ is not a browser and does
-not ask.
+**Same-origin, so no CORS.** The Worker serves the app as well, from its
+`[assets]` binding, exactly as all three of the other apps do (§14.9 step 2).
+An earlier draft kept the app on GitHub Pages and specified an `OPTIONS`
+preflight and an exact-origin `Access-Control-Allow-Origin` to go with it.
+Nothing needed that: the app is four files and icons with no build step, moving
+it under the Worker costs nothing, and it removes the preflight handler, the
+origin allowlist, a second URL to configure in Setup, and the push token
+travelling cross-origin. Scheduling_App has this as a locked decision — "one
+Worker serving both apps, same-origin, no CORS, one git connection" — with the
+failure that produced it recorded in its `wrangler.toml`: a relative
+`fetch("/api/…")` cannot resolve from a GitHub Pages origin.
 
-The irony is worth recording. The same rule that makes the import impossible
-from the page is the one the export has to satisfy to leave it, and both are
-the browser's, not Google's.
+Two rules on the token comparison, both taken from `Scheduling_App`'s Worker
+rather than invented here:
+
+- **Fail closed when the secret is unset.** `if (!env.PUSH_TOKEN) return false`
+  — an unset secret opens nothing. This is not hypothetical: §14.9 records that
+  a secret only takes effect on a deploy made *after* it was added, so an unset
+  `PUSH_TOKEN` is a state this Worker will genuinely be in for one deploy.
+- **Compare in constant time**, not with `===`.
+
+Hashing at rest and revocation, which the other apps do, do not transfer:
+`PUSH_TOKEN` and `FEED_TOKEN` are Worker secrets rather than stored
+credentials, and there is no device table to revoke from.
 
 **`GET /feed/<FEED_TOKEN>.ics`** — what ICSx⁵ subscribes to. Rebuilt whole on
-every request from the union of the stores, so a removal reaches the phone by
+every request from one `SELECT` over `shifts`, so a removal reaches the phone by
 itself and duplicates stay structurally impossible. `text/calendar; charset=utf-8`.
+ICSx⁵ is not a browser and sends no preflight, so this endpoint needs nothing
+from the paragraph above.
 
 A different token from `PUSH_TOKEN`, and it must be: the feed token travels in
 a URL that sits in ICSx⁵'s settings and in request logs, while the push token
@@ -1078,20 +1112,38 @@ Setup screen. Same token as the feed.
 
 1. fetch the secret `.ics` address
 2. `parseICS(text, { from: today − 7d, match: co.icsMatch, zone })`
-3. match each row against `shifts/feed/<jobId>` on `extUid`, exactly as
-   `calendarRows` does today: same UID and same times means unchanged, same UID
-   and different times means replace in place keeping the shift's `id`, no UID
-   on file means add
+3. match each row against that job's `source='feed'` rows on `ext_uid`, exactly
+   as `calendarRows` does today: same UID and same times means unchanged, same
+   UID and different times means replace in place keeping the shift's `id`, no
+   UID on file means add
 4. `report.cancelledRows` name shifts to remove
 5. run the guards in §14.6; if any refuses, write nothing and record why
-6. write `shifts/feed/<jobId>` and `raw/<jobId>`, append a poll record
+6. apply the changes and update `raw`, in one `batch()`, and append a poll record
 
-Free plan fits: 3 cron triggers per Worker against the one needed, 96 polls a
-day against 1,000 KV writes, and writes only happen when something changed. The
-number to actually measure is CPU — 10 ms per invocation on the free plan, and
-a few dozen events of regex line-parsing should sit well inside it, but "should"
-is doing work in that sentence. If it does not fit, the paid plan is $5 a month
-and the alternative is not building this.
+**The cron must be idempotent, because Cron Triggers do not retry.** An
+invocation that throws or times out is skipped silently until the next fire —
+Heritage-Hooves states this and derives its whole tick design from it. Step 3
+is already close, since it diffs on `ext_uid` rather than incrementing
+anything, and the unique constraint in §14.3 is what makes "already applied"
+a fact the database knows rather than one the code hopes for. A double-fire
+must be a no-op, and a missed fire must cost nothing but fifteen minutes.
+§14.6's "six hours without a successful poll" alarm is what catches the case
+where they stop firing altogether, and it is doing more work than it looks.
+
+**Cron Triggers are UTC-only**, which is most of what §14.10 used to leave open
+about `zone`. The handler is told the zone; it never infers one.
+
+Free plan fits, with room: 3 cron triggers per Worker against the one needed,
+and D1's 100,000 rows written a day against roughly 100 — 96 poll records plus
+whatever actually changed. The earlier KV draft made this same claim against a
+1,000-writes-a-day ceiling, where a poll record on every tick plus a `raw`
+update plus a second configured job would have been real arithmetic rather than
+a rounding error. The number to actually measure is CPU — 10 ms per invocation
+on the free plan, and a few dozen events of regex line-parsing should sit well
+inside it, but "should" is doing work in that sentence. Database waiting does
+not count toward it, only our own logic, which is the one way D1 is cheaper here
+than a KV blob read plus a JSON parse. If it does not fit, the paid plan is $5 a
+month and the alternative is not building this.
 
 ### 14.6 The guards, which replace the tick-box
 
@@ -1143,18 +1195,23 @@ review rows; the Worker applies it. One implementation, so the two paths cannot
 disagree about what "already on file" means.
 
 **`app.js`** — `doExport` POSTs in subscription mode instead of downloading;
-Setup grows the Worker URL, the tokens, and the status panel from `/status`;
-the manual `.ics` download stays as the fallback for when the Worker is
-unreachable.
+Setup grows the push token and the status panel from `/status`; the manual
+`.ics` download stays as the fallback for when the Worker is unreachable.
+
+Setup does **not** grow a Worker URL field. Once the app is served by the
+Worker (§14.4, §14.9), every call is a relative path to its own origin, and a
+configurable base URL would be a way to get it wrong rather than a feature.
 
 Both new modules get tests before the Worker is written, because they are the
 part where a bug is silent.
 
-Pass two, not required for the calendar to work: the phone reading
-`shifts/feed/*` back down so its own hours and pay views count the Homebase
-shifts it no longer holds. Until that lands the calendar is right and the pay
-screen is short — worth saying out loud on the screen rather than letting the
-numbers just be wrong.
+Pass two, and it is not really optional: the phone reading the `source='feed'`
+shifts back down so its own hours and pay views count the Homebase shifts it no
+longer holds. §14.3 makes the Worker the source of truth, and the second half of
+that pattern is a read-through cache on the device — which is what
+Scheduling_App locked, and what stops the pay screen being quietly short. Until
+it lands the calendar is right and the pay screen is wrong, and the screen
+should say so rather than letting the numbers just be wrong.
 
 ### 14.8 Measuring the part that cannot be promised
 
@@ -1174,14 +1231,27 @@ say without being asked.
 
 ### 14.9 What he sets up before any of this deploys
 
-Six of these are one-time and none of them are in the code. Three need a
-computer; the rest are on the phone.
+All one-time, none of them in the code, **and none of them a terminal
+command.** Scheduling_App's guardrails put this plainly — "never instruct Ray
+to run a CLI command or paste SQL into the D1 console; if a task seems to
+require it, that is a bug in the task" — and an earlier draft of this section
+broke that rule twice, asking for a KV namespace and three `wrangler secret
+put` invocations. Everything below is the Cloudflare dashboard, the Google
+Calendar UI, or the phone.
 
-**Not on the list: moving the app.** It stays on GitHub Pages where it already
-runs. Only the Worker is new, and it is the only thing that needs a Cloudflare
-account.
+**The app moves under the Worker.** An earlier draft kept it on GitHub Pages
+and paid for that in CORS (§14.4). It is now served by the Worker itself, which
+is what all three of the other apps do. Two consequences, both one-time:
 
-**On a computer, before deploying:**
+- **The PWA reinstalls**, because the origin changes. Test the install and
+  offline mode at step 3 below, before going further — Star-homeschool's own
+  deployment notes flag this as the one step with a user-visible cost.
+- **`.assetsignore` at the repo root becomes load-bearing.** With
+  `directory = "./"` everything not excluded is publicly downloadable. The
+  `.git/` line is not optional: wrangler's default ignore list does not skip it,
+  and without it the whole commit history is served as static assets.
+
+**In a browser, before deploying:**
 
 1. **Google Calendar → create a calendar named `Homebase Raw`.** Staging, per
    §13 — machine-readable, never rendered.
@@ -1207,12 +1277,36 @@ account.
    Worth confirming once: the exact calendar name, since §14.9's next step
    needs that specific calendar's address and Google will happily hand over a
    different one's.
-3. **Google Calendar → `Homebase Raw` → Settings → Integrate calendar → Secret
+3. **Cloudflare → Workers & Pages → Create → connect to Git**, pick
+   `NoliCommoveri/Shift-Stack`, branch `main`. A git-connected repo always
+   creates a Worker now; there is no separate Pages option, and there must not
+   be — **Cron Triggers do not run on Pages**, which is Heritage-Hooves' finding
+   and the reason this is a plain Worker (`main = "worker/index.js"`,
+   `[triggers] crons`, `export default { fetch, scheduled }`) rather than
+   Star-homeschool's Pages-Functions build. A git-connected Worker takes all of
+   its configuration from the committed `wrangler.toml`, so there is nothing to
+   set here.
+
+   *Checkpoint:* the assigned `…workers.dev` URL loads the app, and the PWA
+   installs and opens offline from it.
+4. **Cloudflare → D1 → Create database**, named `shift-deck`, then apply the
+   schema from the app's own Settings screen. Browser-applied migrations are
+   how both other D1 apps do it — Heritage-Hooves at `/admin/migrations`,
+   Scheduling_App at Settings → Database — and both bundle the `.sql` files
+   into the Worker with the same three-line `[[rules]] type = "Text"` block.
+5. **Google Calendar → `Homebase Raw` → Settings → Integrate calendar → Secret
    address in iCal format.** Copy it. That string is the whole import.
-4. **Cloudflare** — a KV namespace, and `wrangler secret put` for `PUSH_TOKEN`,
-   `FEED_TOKEN` and the secret iCal address. The address is a credential: it
-   grants read of the calendar to anyone holding it, so it belongs in a secret
-   and not in `wrangler.toml`.
+6. **Cloudflare → the Worker → Settings → Variables and secrets** → add
+   `PUSH_TOKEN`, `FEED_TOKEN` and the secret iCal address, each with type
+   **Secret**, not Text. Secrets genuinely do work from the dashboard, unlike
+   bindings — they are stored separately from `wrangler.toml`, which is also
+   why a secret value is never committed. The iCal address belongs here and not
+   in the config: it grants read of the calendar to anyone holding it.
+
+   **The gotcha:** bindings and secrets only take effect on a deploy made
+   *after* they were added. Push a commit or hit Retry deployment, or `env.DB` and
+   `env.PUSH_TOKEN` are still undefined. §14.4's fail-closed rule is what makes
+   that state safe rather than open.
 
 **On the phone, after deploying:**
 
@@ -1222,20 +1316,21 @@ account.
    calls it a data channel, not a view, and this is the step that makes that
    true on the device.
 
-5. **ICSx⁵ → subscribe to `https://<worker>/feed/<FEED_TOKEN>.ics`**, sync
+7. **ICSx⁵ → subscribe to `https://<worker>/feed/<FEED_TOKEN>.ics`**, sync
    interval 15 minutes.
-6. **Google Calendar app → tick the new calendar visible** in its calendar
+8. **Google Calendar app → tick the new calendar visible** in its calendar
    list. It does not appear on its own, and this is the most common "it isn't
    working" that is not a fault.
-7. **Settings → Battery → Background usage limits → Never sleeping apps → add
+9. **Settings → Battery → Background usage limits → Never sleeping apps → add
    ICSx⁵**, and stay off Maximum power saving, which disables sync adapters and
    does not re-enable them on the way out. Without this the 15-minute interval
    quietly becomes "whenever he next opens ICSx⁵", which is precisely the
    silent staleness §4 refused to accept.
 
-**Then, once:** open the app, paste the Worker URL and the push token into
-Setup, export once to seed the feed, and confirm a shift appears in the Google
-Calendar app within half an hour.
+**Then, once:** open the app at its `workers.dev` address, paste the push token
+into Setup — there is no URL to paste, the app is talking to its own origin —
+export once to seed the feed, and confirm a shift appears in the Google Calendar
+app within half an hour.
 
 ### 14.10 Still open
 
@@ -1244,18 +1339,29 @@ Calendar app within half an hour.
 - **ICSx⁵'s authentication support** is unconfirmed (§14.4). Ten seconds on the
   phone decides whether the feed gets a second lock.
 - **Worker CPU on the free plan** against a real Google export (§14.5). The
-  first poll answers it.
-- **Where `zone` comes from.** `parseICS` takes one and the tests pin it; the
-  Worker has no locale and must be told. Simplest is a per-job setting
-  defaulting to `America/Toronto`, but it should be explicit, not inferred from
-  a runtime that has no business having an opinion.
-- **The pay screen is short until pass two** (§14.7), and it should say so.
+  first poll answers it. Moving to D1 (§14.3) probably helps rather than hurts,
+  since database waiting does not count against the 10 ms and a `SELECT` is
+  less of our own logic than a blob parse — but "probably" is doing work in that
+  sentence, and the first real poll is still what settles it.
+- ~~Where `zone` comes from~~ — settled. Cron Triggers are UTC-only and the
+  Worker has no locale, so it is told: a per-job IANA name in `cfg`, defaulting
+  to `America/Toronto`, validated on the way in and never inferred from the
+  runtime. Star-homeschool's `normalizeTimezone()` is the validator to lift —
+  it already rejects a bare offset like `UTC+5`, which is the failure worth
+  catching, because an offset is wrong for half the year in any zone that
+  observes DST.
+- **The pay screen is wrong until pass two** (§14.7), and it should say so.
 - **Nothing here helps TrackTik**, which stays on screenshots until §5's email
   gets sent.
 
 ---
 
 ## 15. §14 read against the three Cloudflare apps that already exist
+
+> **Applied.** Every correction below is folded into §14, which is now the
+> version to build from. This section stays as the record of what was changed
+> and why — and, more usefully, as the list of things to check the *next* time
+> a Cloudflare design gets written here from scratch.
 
 §14 was written from first principles. It should not have been. Three of Ray's
 repos already run on Cloudflare, two of them have a written record of *why*
@@ -1434,22 +1540,24 @@ from. §14.4's instinct to use **two** separate tokens is right and is the same
 instinct as Scheduling_App's three credential classes — a token that travels in
 ICSx⁵'s settings and in request logs should not also authorise writes.
 
-### 15.7 What actually changes in §14
+### 15.7 What changed in §14
 
 Nothing about the *shape*. The cron, the guards, the 15-minute interval, the
 three endpoints, the two tokens, the `feed.js` / `merge.js` extraction and the
-decision to apply calendar shifts without review all stand. What changes is the
+decision to apply calendar shifts without review all stood. What changed is the
 platform underneath them, and every change is toward what the other three apps
 already do:
 
-| §14 says | Should say | Why |
+| §14 said | §14 now says | Why |
 |---|---|---|
-| KV, split by writer (§14.3) | D1, one `shifts` table with a `source` column | All three repos use D1; the split exists only to work around KV |
+| KV, split by writer (§14.3) | D1, one `shifts` table with a `source` column | All three repos use D1; the split existed only to work around KV |
 | App on GitHub Pages, CORS on `/push` (§14.4) | App served by the Worker, no CORS | Locked decision in Scheduling_App; the failure it fixes is recorded there |
-| unstated | Plain Worker, not Pages Functions | Heritage-Hooves: cron does not work on Pages |
-| `wrangler secret put` (§14.9) | Dashboard → Variables and secrets | "No CLI, ever" is locked; the dashboard path is already documented |
+| unstated | Plain Worker, not Pages Functions (§14.9) | Heritage-Hooves: cron does not run on Pages |
+| `wrangler secret put` (§14.9) | Dashboard → Variables and secrets, plus the deploy-ordering gotcha | "No CLI, ever" is locked; the dashboard path is already documented |
 | `===` against the secret (§14.4) | Fail closed on unset, constant-time compare | Both already written in `Scheduling_App` |
-| "Where does `zone` come from" is open (§14.10) | A stored IANA name, `Intl`, never an offset | Cron is UTC-only; `normalizeTimezone()` already exists and already rejects fixed offsets |
+| no mention of retry (§14.5) | Idempotence required, and why | Cron Triggers do not retry; Heritage-Hooves derives its whole tick from this |
+| "where does `zone` come from" open (§14.10) | A validated IANA name in `cfg`, never an offset | Cron is UTC-only; `normalizeTimezone()` already exists and already rejects offsets |
+| pass two "not required" (§14.7) | the read-through half of §14.3, and not optional | Scheduling_App locked exactly this pairing |
 
 ### 15.8 One open question this does not close
 
