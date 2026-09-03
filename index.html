@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shift Deck</title>
+<meta name="theme-color" content="#EDEEE9">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+<style>
+:root{
+  --paper:#EDEEE9;
+  --card:#FFFFFF;
+  --ink:#22282B;
+  --soft:#5C6663;
+  --rule:#C6CAC1;
+  --hair:#DCDFD7;
+  --signal:#B0631A;
+  --wash:#F6E9D8;
+  --bad:#A32B1E;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--paper);color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,sans-serif;
+  font-size:16px;line-height:1.5;-webkit-text-size-adjust:100%;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.wrap{max-width:46rem;margin:0 auto;padding:1rem 1rem 6.5rem}
+h1{font-size:1.3rem;font-weight:600;letter-spacing:-.015em;margin:0 0 1rem}
+h2{font-size:1rem;font-weight:600;margin:0 0 .1rem}
+.soft{color:var(--soft)}
+.tiny{font-size:.84rem}
+.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+
+/* tabs */
+nav{
+  position:fixed;left:0;right:0;bottom:0;z-index:20;
+  background:var(--paper);border-top:1px solid var(--rule);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+nav div{max-width:46rem;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr)}
+nav button{
+  background:none;border:none;font-family:inherit;font-size:.85rem;
+  color:var(--soft);padding:.85rem .2rem;cursor:pointer;
+  border-top:2px solid transparent;margin-top:-1px;
+}
+nav button[aria-current="true"]{color:var(--ink);font-weight:600;border-top-color:var(--signal)}
+nav button:focus-visible{outline:2px solid var(--signal);outline-offset:-2px}
+
+section[hidden]{display:none}
+
+/* generic bits */
+.card{background:var(--card);border:1px solid var(--hair);border-radius:3px;padding:.85rem;margin-bottom:.7rem}
+button.act{
+  background:var(--ink);color:var(--paper);border:none;border-radius:2px;
+  font-family:inherit;font-size:.95rem;font-weight:500;padding:.7rem 1rem;cursor:pointer;
+}
+button.act:hover{background:#111517}
+button.ghost{
+  background:none;border:1px solid var(--rule);color:var(--ink);
+  font-family:inherit;font-size:.88rem;padding:.5rem .8rem;border-radius:2px;cursor:pointer;
+}
+button.ghost:hover{border-color:var(--soft)}
+button:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+.danger{color:var(--bad)}
+.rowbtns{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.7rem}
+
+input,select{
+  font-family:inherit;font-size:.92rem;background:var(--card);color:var(--ink);
+  border:1px solid var(--rule);border-radius:2px;padding:.45rem .5rem;min-width:0;
+}
+input[type=date],input[type=time],input[type=number]{font-family:"IBM Plex Mono",monospace;font-size:.88rem}
+input:focus,select:focus{outline:2px solid var(--signal);border-color:var(--signal)}
+label.f{display:block;margin-bottom:.55rem}
+label.f span{display:block;font-size:.8rem;color:var(--soft);margin-bottom:.15rem}
+label.f input,label.f select{width:100%}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:.55rem}
+
+/* schedule */
+.weekhead{
+  display:flex;justify-content:space-between;align-items:baseline;gap:.6rem;
+  border-bottom:1px solid var(--rule);padding:1.3rem 0 .35rem;margin-bottom:.5rem;
+}
+.weekhead h2{font-size:.95rem}
+.day{display:grid;grid-template-columns:3.1rem 1fr;gap:.7rem;padding:.5rem 0;border-bottom:1px solid var(--hair)}
+.daynum{text-align:center;padding-top:.15rem}
+.daynum b{display:block;font-size:1.15rem;font-weight:600;line-height:1.1;font-family:"IBM Plex Mono",monospace}
+.daynum span{font-size:.7rem;color:var(--soft);letter-spacing:.06em}
+.day.today .daynum b{
+  background:var(--ink);color:var(--paper);border-radius:50%;
+  width:1.85rem;height:1.85rem;line-height:1.85rem;margin:0 auto;
+}
+.shift{display:flex;gap:.6rem;align-items:flex-start;padding:.3rem 0;cursor:pointer}
+.tick{width:3px;border-radius:2px;align-self:stretch;min-height:2.2rem;background:var(--rule);flex:none}
+.shift .when{font-weight:500;font-family:"IBM Plex Mono",monospace;font-size:.9rem}
+.shift .where{font-size:.86rem;color:var(--soft)}
+.shift .len{margin-left:auto;font-size:.82rem;color:var(--soft);font-family:"IBM Plex Mono",monospace;padding-top:.15rem}
+.gapwarn{font-size:.8rem;color:var(--signal);padding:.15rem 0 .35rem 1.2rem}
+.empty{padding:2rem 0;color:var(--soft)}
+
+/* next shift banner */
+.next{
+  background:var(--ink);color:var(--paper);border-radius:3px;
+  padding:.9rem 1rem;margin-bottom:1rem;
+}
+.next .lbl{font-size:.78rem;opacity:.65;letter-spacing:.06em}
+.next .big{font-size:1.25rem;font-weight:600;margin:.1rem 0 .05rem}
+.next .sub{font-size:.87rem;opacity:.8}
+.next .cd{font-family:"IBM Plex Mono",monospace;font-size:.85rem;opacity:.9;margin-top:.35rem}
+
+/* import */
+.intake{
+  border:1.5px dashed var(--rule);background:var(--card);border-radius:3px;
+  padding:1.7rem 1rem;text-align:center;cursor:pointer;
+}
+.intake:hover,.intake.hot{border-color:var(--signal);background:var(--wash)}
+.intake p{margin:0;font-weight:500}
+.intake small{display:block;margin-top:.35rem;color:var(--soft)}
+input[type=file]{display:none}
+.bar{height:3px;background:var(--hair);border-radius:2px;overflow:hidden;margin-top:.9rem}
+.bar i{display:block;height:100%;width:0;background:var(--signal);transition:width .25s}
+.prog{display:none}.prog.on{display:block}
+.prog span{display:block;margin-top:.4rem;font-size:.85rem;color:var(--soft)}
+
+.rev{padding:.75rem 0;border-bottom:1px solid var(--hair)}
+.rev.flagged{background:var(--wash);margin:0 -.5rem;padding-left:.5rem;padding-right:.5rem}
+.revf{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
+.revf input[type=time]{width:6.4rem}
+.revf input[type=text]{flex:1 1 8rem}
+.flag{font-size:.8rem;color:var(--signal);margin:.4rem 0 0}
+.kill{background:none;border:none;color:var(--soft);font-size:1.15rem;cursor:pointer;padding:.3rem .45rem;border-radius:2px}
+.kill:hover{color:var(--bad);background:#F3DEDA}
+
+/* pay */
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th{text-align:left;font-weight:500;color:var(--soft);font-size:.8rem;padding:.35rem 0;border-bottom:1px solid var(--rule)}
+td{padding:.45rem 0;border-bottom:1px solid var(--hair);font-variant-numeric:tabular-nums}
+td.n,th.n{text-align:right;font-family:"IBM Plex Mono",monospace}
+tr.tot td{font-weight:600;border-bottom:none;border-top:1px solid var(--rule)}
+details{margin-top:1rem}
+summary{cursor:pointer;font-size:.88rem;color:var(--soft)}
+
+.dot{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:.35rem;vertical-align:baseline}
+
+/* dialog */
+dialog{
+  border:1px solid var(--rule);border-radius:3px;background:var(--paper);color:var(--ink);
+  padding:1.1rem;width:min(30rem,calc(100vw - 2rem));
+}
+dialog::backdrop{background:rgba(34,40,43,.45)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- ============ SCHEDULE ============ -->
+<section id="tab-schedule">
+  <h1>Schedule</h1>
+  <div id="nextwrap"></div>
+  <div id="launchers" class="rowbtns" style="margin-bottom:1rem"></div>
+  <div id="sched"></div>
+</section>
+
+<!-- ============ IMPORT ============ -->
+<section id="tab-import" hidden>
+  <h1>Add shifts</h1>
+
+  <label class="f"><span>Which job are these from?</span>
+    <select id="impco"></select>
+  </label>
+
+  <div class="intake" id="intake" tabindex="0" role="button">
+    <p>Add screenshots</p>
+    <small>Tap here or drag images in. Several at a time is fine.</small>
+  </div>
+  <input type="file" id="picker" accept="image/*" multiple>
+
+  <div class="prog" id="prog">
+    <div class="bar"><i id="barfill"></i></div>
+    <span id="progtext"></span>
+  </div>
+
+  <div id="review"></div>
+  <div class="rowbtns" id="revbtns" hidden>
+    <button class="act" id="commit">Add to schedule</button>
+    <button class="ghost" id="discard">Discard</button>
+  </div>
+
+  <div class="rowbtns"><button class="ghost" id="manual">Enter one by hand</button></div>
+
+  <details>
+    <summary>Show the raw text that was read</summary>
+    <pre class="tiny mono" id="raw" style="white-space:pre-wrap;background:var(--card);border:1px solid var(--hair);padding:.7rem;max-height:18rem;overflow:auto">Nothing read yet.</pre>
+  </details>
+</section>
+
+<!-- ============ HOURS & PAY ============ -->
+<section id="tab-pay" hidden>
+  <h1>Hours and pay</h1>
+  <div id="payout"></div>
+  <p class="tiny soft" style="margin-top:1.5rem">
+    Estimates only. Gross, before deductions. Overtime is worked out per job, since each employer counts its own week separately.
+  </p>
+</section>
+
+<!-- ============ SETUP ============ -->
+<section id="tab-setup" hidden>
+  <h1>Setup</h1>
+  <div id="colist"></div>
+  <div class="rowbtns"><button class="ghost" id="addco">Add a job</button></div>
+
+  <h2 style="margin-top:1.8rem">Reminders</h2>
+  <p class="tiny soft" style="margin-top:0">Alarms written into the calendar file, in hours before each shift.</p>
+  <label class="f"><span>Lead times, comma separated</span>
+    <input type="text" id="leads" placeholder="12, 2">
+  </label>
+
+  <h2 style="margin-top:1.8rem">Calendar</h2>
+  <label class="f"><span>How the calendar is fed</span>
+    <select id="feedmode">
+      <option value="subscribe">Subscription — ICSx&#8309; watches the file</option>
+      <option value="import">Manual import — open the file in the calendar app</option>
+    </select>
+  </label>
+  <p class="tiny soft" id="feedhelp" style="margin-top:-.2rem"></p>
+  <div class="rowbtns">
+    <button class="act" id="exportics"></button>
+    <button class="ghost" id="exportall" hidden>Rebuild the whole calendar</button>
+  </div>
+  <p class="tiny soft" id="unsent" style="margin-top:.5rem"></p>
+
+  <h2 style="margin-top:1.8rem">Backup</h2>
+  <div class="rowbtns">
+    <button class="ghost" id="exportjson">Save a backup</button>
+    <button class="ghost" id="importjson">Restore a backup</button>
+    <input type="file" id="jsonpick" accept="application/json">
+  </div>
+
+  <details>
+    <summary>Danger zone</summary>
+    <div class="rowbtns">
+      <button class="ghost danger" id="wipeshifts">Delete all shifts</button>
+    </div>
+  </details>
+
+  <p class="tiny soft" id="storenote" style="margin-top:1.5rem"></p>
+</section>
+
+</div>
+
+<nav>
+  <div>
+    <button data-tab="schedule" aria-current="true">Schedule</button>
+    <button data-tab="import">Add</button>
+    <button data-tab="pay">Pay</button>
+    <button data-tab="setup">Setup</button>
+  </div>
+</nav>
+
+<dialog id="dlg"><div id="dlgbody"></div></dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
