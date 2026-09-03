@@ -142,6 +142,10 @@ input[type=file]{display:none}
 .revf input[type=time]{width:6.4rem}
 .revf input[type=text]{flex:1 1 8rem}
 .flag{font-size:.8rem;color:var(--signal);margin:.4rem 0 0}
+/* The horizon warnings sit above the week list. A job that feeds itself gets
+   the quieter treatment: worth knowing, but not a job to do. */
+.horizon{margin:0 0 .6rem;padding:.5rem .6rem;border-left:2px solid var(--signal);background:var(--card)}
+.horizon.fed{color:var(--soft);border-left-color:var(--hair)}
 .kill{background:none;border:none;color:var(--soft);font-size:1.15rem;cursor:pointer;padding:.3rem .45rem;border-radius:2px}
 .kill:hover{color:var(--bad);background:#F3DEDA}
 
@@ -172,6 +176,7 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
 <section id="tab-schedule">
   <h1>Schedule</h1>
   <div id="nextwrap"></div>
+  <div id="horizon" hidden></div>
   <div id="launchers" class="rowbtns" style="margin-bottom:1rem"></div>
   <div id="sched"></div>
 </section>

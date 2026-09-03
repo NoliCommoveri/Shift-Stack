@@ -101,6 +101,8 @@ const FLAG_TEXT = {
   [FLAG.AMPM]:    'No am/pm was printed \u2014 check the times.',
   [FLAG.SPLIT]:   'Times were read from two separate lines \u2014 check them.',
   [FLAG.WEEKDAY]: 'The weekday on screen does not match this date.',
+  [FLAG.ONETIME]: 'Only one time could be read \u2014 set the missing one below.',
+  [FLAG.FIXEDAP]: 'The am/pm was printed on its own line and has been applied \u2014 check it.',
   [FLAG_MOVED]:   'A shift is already on file at this time in a different place \u2014 adding this will not replace it.',
   [FLAG_CHANGED]: 'The calendar has moved a shift already on file.',
   [ICS_FLAG.NOEND]: 'The calendar gave no end time \u2014 set one below.',
@@ -226,8 +228,71 @@ function renderLaunchers(){
 }
 
 /* -- schedule list -- */
+/* How close the last shift on file has to be before the schedule is treated as
+   probably unimported rather than genuinely empty. */
+const HORIZON_DAYS = 3;
+
+/* "Nothing on file after Friday", per job.
+
+   An empty calendar reads as a day off, which is the silent failure this whole
+   app exists to prevent, and the only existing signal for it is a line of text
+   in Setup that he has no reason to open. This one sits on Schedule, which is
+   where he actually looks.
+
+   It is per job because the two jobs fail differently. Trupoint's shifts arrive
+   through Homebase's Calendar Sync, so a short horizon there is the sync's
+   business, not his. DSI is screenshots and manual adds only — nothing is
+   coming unless he brings it — so a short horizon there is a job to do, and
+   that is the case this warning is really for. Same fact, two meanings, so
+   they get two sentences.
+
+   A feed-backed job is one with an icsMatch set, which is already how a
+   calendar event finds its job. No new field, and nothing to migrate. */
+function horizonNotes(){
+  const today = todayISO();
+  const soon = shiftDays(today, HORIZON_DAYS);
+  const many = S.companies.length > 1;
+
+  return S.companies.map(co => {
+    const mine = S.shifts.filter(s => s.companyId === co.id && s.date >= today);
+    const last = mine.reduce((a, s) => s.date > a ? s.date : a, '');
+    if(last && last > soon) return null;              // far enough ahead, nothing to say
+
+    const fed = !!String(co.icsMatch || '').trim();
+    const when = last ? `nothing on file after ${fmtDay(last)}` : 'nothing on file at all';
+    // With one job there is no name in front, so the sentence has to start itself.
+    const head = many ? `${co.name} — ${when}` : when[0].toUpperCase() + when.slice(1);
+    return {
+      text: fed
+        ? `${head}. The calendar should be filling this — check Calendar Sync.`
+        : `${head}. Nothing is coming automatically for this job — add next week.`,
+      fed
+    };
+  }).filter(Boolean);
+}
+
+/* A date as "Fri 11 Sep" — short enough to read inside a sentence. */
+function fmtDay(d){
+  const x = asDate(d);
+  return `${DAYNAMES[x.getDay()].slice(0,3)} ${x.getDate()} ${MONTHNAMES[x.getMonth()].slice(0,3)}`;
+}
+
+function renderHorizon(){
+  const wrap = $('#horizon');
+  if(!wrap) return;
+  wrap.innerHTML = '';
+  const notes = horizonNotes();
+  wrap.hidden = !notes.length;
+  notes.forEach(n => {
+    const p = el('p', 'flag horizon' + (n.fed ? ' fed' : ''));
+    p.textContent = n.text;
+    wrap.appendChild(p);
+  });
+}
+
 function renderSchedule(){
   renderNext();
+  renderHorizon();
   renderLaunchers();
   const box = $('#sched');
   box.innerHTML = '';
@@ -821,7 +886,14 @@ function renderReview(){
       touch();
     };
     s.oninput = () => { p.start = s.value; };
-    e.oninput = () => { p.end = e.value; };
+    e.oninput = () => {
+      p.end = e.value;
+      // Supplying the end answers the one-time warning and nothing else. The
+      // am/pm warning is about a value that was read, not one that was absent,
+      // so it survives being given the other half of the pair.
+      if(p.end) p.flags = p.flags.filter(f => f !== FLAG.ONETIME);
+      touch();
+    };
     l.oninput = () => { p.label = l.value; };
     const job = row.querySelector('select');
     if(job) job.onchange = () => { p.companyId = job.value; };

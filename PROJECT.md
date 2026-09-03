@@ -5,7 +5,10 @@ Homebase's own Calendar Sync turned out to exist and is now an import path (§12
 and the app became the normalising step between two calendars rather than a
 second source of the same events (§13). The Worker that closes the import gap
 is specified in §14 and audited against Ray's three existing Cloudflare apps
-in §15. Build order for the agreed-but-unbuilt work is in §11.
+in §15. Build order for the agreed-but-unbuilt work is in §11. The first real
+OCR pass ran the same day (§16): TrackTik came through it, Homebase did not,
+and the two jobs turned out to be the opposite way round from what §8 assumed —
+DSI is the fixed one, Trupoint is PRN.
 
 A record of what has been built, why the design went the way it did, and what
 is still undecided.
@@ -61,8 +64,13 @@ built on top of it.
 publishing a schedule sends it to affected employees by email. That would have
 been an ideal parsing target: structured, recurring, no scraping, no stored
 credentials. He is not receiving these emails — it is a per-company setting.
-**Still worth one ask to his scheduler**, since it would unlock a far better
-pipeline than screenshots.
+
+_Closed on 3 September 2026._ **It is a dead end.** The setting is not going to
+be turned on, so there is no email to parse and no point asking again. DSI is
+screenshots and manual entry, permanently, and every plan below should be read
+with that as a fact rather than a pending question. This is the single biggest
+input to the roadmap in §11: it removes step 0 entirely, and it promotes the
+manual path from a stopgap to the design.
 
 **Scraping the TrackTik web portal.** Rejected. Requires stored credentials,
 breaks on any markup change, sits in awkward territory with employer terms,
@@ -464,6 +472,14 @@ human is what stops bad data becoming authority.
 One job is PRN and moves constantly. The other is fixed for days and times, with
 only the location changing — so most weeks it needs no screenshot at all.
 
+**Which job is which, corrected 3 September 2026.** This section and §8.2 and
+§8.4 were written without naming them, and §8.4's line about the PRN job reads
+as though the PRN one is the job on screenshots. It is the other way round.
+**DSI on TrackTik is the fixed job**; **Trupoint on Homebase is the PRN one.**
+§16 has the evidence and what the swap costs each of the three sections. The
+short version is that it is good news: the fixed job is the one with no
+calendar feed, so generation lands on exactly the input that is expensive.
+
 "Fill week of ___" emits rows into the existing `pending` array, so it reuses the
 whole review screen, its flags, the commit path, and the diff in §8.4. Location
 defaults to the most recent site for that pattern — a convenience default is
@@ -579,12 +595,15 @@ all, which now renders correctly.
 
 Carried forward, plus what today added.
 
-1. **Do the parsers work at all on his real screens?** Everything in §8 assumes
-   usable rows come out. Screenshots are being collected; the capture list is in
-   `tests/fixtures/README.md`. This gates §8.1's site/role split.
-2. **The TrackTik distribution email.** Still one message to his scheduler. If
-   it lands, email parsing beats screenshots on every axis and much of §8.4
-   becomes unnecessary. Worth asking before investing further in OCR.
+1. ~~**Do the parsers work at all on his real screens?**~~ Answered, and
+   differently for each: TrackTik parses a real OCR pass exactly once the month
+   header tolerates its debris; Homebase reads the layout but mangles the times
+   badly enough to be unusable. §16 has both, and the Homebase result opens a
+   decision rather than a bug list, since that job has a feed.
+2. ~~**The TrackTik distribution email.**~~ Closed, and closed as a dead end
+   (§2). It is not being switched on. DSI stays on screenshots and manual
+   entry, so the OCR path is load-bearing rather than provisional and §8.4 is
+   needed in full.
 3. ~~**Does Homebase expose its calendar feed on his account?**~~ Answered: it
    has an in-app Calendar Sync writing to Google, and §12 imports from it. Only
    TrackTik needs screenshots now. What remains is whether the review flow is
@@ -604,7 +623,15 @@ Carried forward, plus what today added.
    - **"Nothing on file after Friday."** If the last shift held is within ~3
      days, the schedule is probably unimported rather than empty — and an empty
      calendar reads as a day off, which is the exact silent failure this project
-     exists to prevent.
+     exists to prevent. **Per job**, decided 3 September 2026 and now built: the
+     two jobs fail differently, so one sentence cannot serve both. Trupoint
+     arrives through Calendar Sync, so a short horizon there is the sync's
+     business and reads as "the calendar should be filling this". DSI is
+     screenshots and manual adds only — nothing arrives unless he brings it —
+     so a short horizon there is a job to do, and that is the case the warning
+     is really for. A job counts as feed-backed when its `icsMatch` is set,
+     which is already how a calendar event finds its job, so this needed no new
+     field and nothing to migrate.
 6. **Manual-import mode orphans deleted shifts.** No `METHOD:CANCEL` is emitted,
    so a deleted shift keeps its calendar event and its alarms forever.
    Subscription mode is immune.
@@ -676,7 +703,7 @@ behind three schema changes.
 
 | | Work | Why here |
 |---|---|---|
-| 0 | The two emails (§10.2, §10.3) | No code; may delete work below |
+| 0 | ~~The two emails (§10.2, §10.3)~~ | Both closed. §10.3 answered by Calendar Sync; §10.2 is a dead end (§2). Step 0 is gone |
 | 1 | Real Tesseract pass, fixtures from it, OCR tuning (§10.1, §10.7) | Gates §8.2's design |
 | 2 | Staleness warnings, `METHOD:CANCEL`, byte-based `fold()` (§10.5–§10.7) | No schema, ships value immediately |
 | 3 | **§8.1 site table** — schema, aliases, merge, `LOCATION:`, title convention, the parser split from §11.1 | Everything after assumes `siteId` |
@@ -689,9 +716,11 @@ Steps 3 and 6 are the heavy ones. Step 5 is an evening.
 **What §12 and §13 did to this table, later the same day.** The roadmap above
 was written before Homebase's Calendar Sync was found, and four rows moved:
 
-- **Step 0 is half done.** §10.3 is answered — Homebase syncs to Google, and
-  §12 imports from it. The TrackTik email in §10.2 is still one message worth
-  sending, and it is now the whole of step 0.
+- **Step 0 is done, and it deleted nothing.** §10.3 is answered — Homebase
+  syncs to Google, and §12 imports from it. §10.2 is now closed too, as a dead
+  end: the TrackTik email is not coming (§2). The hoped-for outcome was that it
+  would delete much of §8.4; the actual outcome is the opposite, and §17 is
+  what follows from that.
 - **Step 1 got more important, not less.** With Homebase on a feed, the OCR
   path carries TrackTik alone — the dark screen, which is exactly where the
   am/pm risk in §6 lives. A real Tesseract pass is now the only unproven part
@@ -1567,3 +1596,299 @@ more I/O and less compute than a KV blob read plus a JSON parse, and DB waiting
 does not count against the 10 ms ceiling — Heritage-Hooves §3 makes that point
 explicitly. So the move to D1 probably helps. "Probably" is still doing work in
 that sentence, and the first real poll is still what answers it.
+
+---
+
+## 16. The first real OCR pass, 3 September 2026
+
+§10.1 asked whether the parsers work at all on his real screens, and §11.2 made
+a real Tesseract pass the gate on §8.2's design. It has now run, on one
+screenshot from each app, and the answer is different for each.
+
+### 16.1 TrackTik survives it
+
+One fault, and it was not in the layout. The month header came off the screen
+as `September Vv os` — the collapse chevron and a stray icon read as short
+letter tokens — and `monthHeader()` allowed only `[~v^⌄\-_]` after the month
+name. So `month` stayed null, and since a TrackTik date is a bare day number
+that needs a month to mean anything, **every row on the screen came back
+`nodate`**. Three shifts, all correct times, all correct labels, no date on any
+of them. One over-tight character class, the entire screen unusable.
+
+Widened to tolerate punctuation runs and one- or two-letter tokens, with digits
+still excluded so a day number can never be eaten as noise. The week now parses
+exactly: 9, 11 and 14 September, all 15:00–23:00, weekday cross-check clean, no
+flags. `tests/fixtures/tracktik-2026-09-week2.txt` is the first fixture in the
+repo that is neither PROVISIONAL nor TRANSCRIBED — it is what Tesseract
+actually produced.
+
+Three things worth recording beyond the fix:
+
+- **The dark-mode path works.** `prep()`'s auto-invert had never executed
+  against a real input (§11.2). It has now, on the dark TrackTik screen, and
+  the text came back clean enough that am/pm survived on every row — which is
+  the failure §6 names as most likely to cost him a shift.
+- **The line order is not what the transcription guessed.** The TRANSCRIBED
+  fixture has the weekday-and-time line above the day-number-and-site line, and
+  so does the real OCR — but the real capture opens mid-row, so the first line
+  on screen is a site with its times above the fold. The parser already handles
+  that; it is worth knowing the transcriptions guessed the shape right.
+- **§11.1's pipe finding is confirmed on real data.** The label arrives as
+  `Cook Plant ASO | SOUTHERN HENS, I...` and reaches the review screen as
+  `Cook Plant ASO - SOUTHERN HENS, I`, the separator already flattened by
+  `normalise()`. §8.1 needs that boundary and it is destroyed before anything
+  can read it.
+
+### 16.2 Homebase does not survive it
+
+The layout was read correctly and the dates are right. The times are not.
+Ground truth for these exact days was already in the repo as a TRANSCRIBED
+fixture, so the comparison is direct:
+
+| | transcribed truth | from the real OCR |
+|---|---|---|
+| Thu 3 | 00:15–04:15 Training — Headquarters | 19:15–04:15, "Headquarters" |
+| Thu 3 | 20:00–00:00 Training — F.O.C | **08:00**–00:00, "cc Training i - F.O.C" |
+| Fri 4 | 00:15–08:15 Security Agent — Headquarters | 19:15–08:15, "Headquarters" |
+| Sat 5 | 19:15–07:15 Security Officer — F.O.C | **dropped entirely** |
+
+Three of four start times wrong, one shift silently missing, and the roles gone
+from two of the three that survived. `12:15 am` came through as `19:15`, which
+no downstream check can undo — the information is not in the text. `8:00 pm`
+lost its meridiem onto the following line as `00pm .` and parsed as 08:00,
+twelve hours out, which is §6's documented top risk happening on real input.
+The Saturday row had one legible time where the two-single-times rule needs
+two, so it did not become a flagged row — it became no row.
+
+The `ampm` and `split` flags did fire on all three, so the app is not lying
+quietly; the review screen says "no am/pm was printed — check the times". But a
+fallback that needs every row's start time corrected by hand, and that can drop
+a shift without saying so, is not much of a fallback.
+
+### 16.2a Decided: the OCR path stays, on both jobs
+
+Retiring the Homebase reader was on the table — Calendar Sync already delivers
+that job's exact times, so the screenshot path is redundant on a good day. Ray
+decided against it, and the reasoning holds: a feed that can be switched off,
+fall behind or lose a location is not a reason to have no second way in. So the
+faults above are a work list rather than an argument, and three of the four
+have been fixed.
+
+**The meridiem is recovered when it is legible.** `8:00 pm` lost its `pm` onto
+the next line as `00pm .`; a following line that carries an unmistakable
+meridiem and no time of its own now supplies it, and the row is flagged
+`fixedap` — "printed on its own line and has been applied, check it" — rather
+than passing itself off as a clean read. The bar is deliberately high:
+`00pm` gives up its `pm`, while `2adM` and `28M` give up nothing. Guessing from
+wreckage would reintroduce the twelve-hour error under a different name. That
+shift now parses **exactly right**: 20:00–00:00, Training — F.O.C.
+
+**The role is no longer stepped over.** The gather jumped from the start-time
+line to the end-time line, so anything between them was lost — which is
+precisely where Homebase puts the role. Together with a token-level debris
+filter (a token mixing digits with letters is a broken time, not a word; two
+letters or fewer is avatar debris) all four labels now come out right:
+`Training - Headquarters`, `Training - F.O.C`, `Security Agent - Headquarters`,
+`Security Officer - F.O.C`.
+
+**A half-read shift is flagged, not dropped.** The Saturday row had one legible
+time where the pairing rule wanted two, so it silently became nothing. It now
+emits with the end left empty and an `onetime` flag. Nothing had to be invented
+to make that safe: the review screen already renders an empty `type="time"` as
+a blank asking to be filled, and the commit path at `app.js:952` already
+refuses to file a row without an end. A shift that is *visibly incomplete*
+costs a correction; a shift that is *absent* reads as a day off, and that is
+the failure this project exists to prevent.
+
+**What is left is not fixable here.** `12:15 am` came through as `19:15`. The
+information is gone from the text and no amount of parsing recovers it, so two
+rows in the golden are knowingly wrong and carry the `ampm` flag, which is the
+honest limit of what the parser can say. Two things reduce that exposure and
+neither is parser work: §8.2's plausibility check, and the fact that for this
+job the feed is the primary path and OCR the fallback.
+
+The capture is a committed fixture now rather than parked evidence, because
+what it protects is real: the recovery, the gather, and the no-drop rule all
+have a regression test made of text a real phone actually produced.
+
+### 16.3 What the jobs actually look like
+
+The screenshots settle the correction in §8.3, and they settle it with data.
+
+**DSI on TrackTik is fixed.** Every shift seen, across both captures, is
+15:00–23:00 at one site. The days across 3–14 September:
+
+| Sept | 3 Thu | 4 Fri | 5 Sat | 6 Sun | 7 Mon | 8 Tue | 9 Wed | 10 Thu | 11 Fri | 12 Sat | 13 Sun | 14 Mon |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| shift | — | ✓ | — | — | **hol.** | ✓ | ✓ | — | ✓ | — | — | ✓ |
+
+Monday, Tuesday, Wednesday, Friday. Thursday and weekends off. The one Monday
+without a shift is 7 September — Labour Day, the first Monday of the month —
+which Ray confirmed is a holiday rather than a change of rota. So the pattern
+is `{ days:[1,2,3,5], start:'15:00', end:'23:00' }`, exactly §8.2's shape,
+including the `days` field that makes a pattern generative.
+
+**Trupoint on Homebase is PRN.** Four shifts in three days: 00:15–04:15,
+20:00–00:00, 00:15–08:15, 19:15–07:15. Three different roles — Training,
+Security Agent, Security Officer — across two sites. Nothing here repeats.
+
+### 16.4 What the correction costs each section
+
+- **§8.2 gains.** The declared-pattern check is worth most on the job whose
+  times are stable, and that is the job on OCR. DSI's pattern is one line and
+  is already known. The am/pm control lands where am/pm is actually read.
+- **§8.3 gains a great deal.** Generation applies to the job with no feed, so
+  "most weeks it needs no screenshot at all" now means most weeks the *only*
+  OCR path in the product goes unused. That is the largest single reduction in
+  manual effort available anywhere in §8, and §11.3 rates it an evening's work.
+- **§8.3 also gains a named risk.** Its warning that "pretty fixed is not
+  fixed" has a concrete instance on the very first fortnight of real data:
+  Labour Day. Statutory holidays are the predictable exception, and a generated
+  week that emits a shift on one would fire alarms for work that does not
+  exist. Generation should skip them or mark them for confirmation — and since
+  they are known years ahead, this is a lookup, not a guess.
+- **§8.4 loses its headline.** Its most-valuable third bucket, "on file but not
+  in this screenshot", was justified for a PRN job. The PRN job is Homebase,
+  which arrives by feed — where §12 and §13 already detect cancellations,
+  because a feed has stable identity and OCR does not. What §8.4 is left with
+  on the TrackTik side is narrower and easier: catching the week that deviates
+  from a known rota.
+
+### 16.5 What this does to the order in §11.3
+
+Step 1 is done for TrackTik and has answered its question for Homebase. What
+follows moves:
+
+- **§8.2 and §8.3 are now cheap and high-value**, and both depend on a pattern
+  that today's data hands over for free. Neither needs the site table first.
+- **§8.4 shrinks**, and its hardest part is already built on the feed side.
+- **The Homebase decision is taken** (§16.2a) and the work it implied is done.
+  What survives it is a parser limit, not a task.
+- **Step 1's remaining OCR tuning** — page-segmentation mode and a character
+  whitelist (§10.7) — should be judged on TrackTik alone now. TrackTik came
+  through clean, so the case for touching Tesseract's settings is weaker than
+  §11.2 assumed.
+
+---
+
+## 17. Screenshots are the plan now, 3 September 2026
+
+The TrackTik distribution email is closed as a dead end (§2). It had been
+carried since the beginning as the one thing that could replace the OCR path
+wholesale, and it is not coming. What follows is not a small change of plan:
+every argument in §8 that read "worth doing unless the email lands" now reads
+"worth doing".
+
+### 17.1 What the closure costs, and what it settles
+
+**§8.4 is needed in full.** Its own text says most of it "stops being
+necessary" if email parsing arrives. It has not, so change detection on
+screenshot rows — including the third bucket, on file but not in this
+screenshot — is real work with no cheaper substitute.
+
+**The OCR path is load-bearing, not provisional.** This is the second decision
+in a day pointing the same way: §16.2a kept the reader on both jobs, and this
+one makes it the only way DSI shifts ever enter the app. The month-header fix
+in §16.1 was not a tidy-up; it was the difference between a working product and
+a screen of undated rows.
+
+**Nothing is coming automatically for DSI, ever.** That single fact is what
+§17.3 is built on, and it is worth stating plainly because the app's two jobs
+now sit on opposite sides of it.
+
+### 17.2 The proposal: put the normal week through the manual flow
+
+DSI is a fixed rota — Monday, Tuesday, Wednesday, Friday, 15:00–23:00 (§16.3).
+With no email and no feed, the sensible primary input is not the screenshot at
+all. It is **the rota itself, proposed into the manual flow**, with screenshots
+demoted to what they are good at: catching the weeks that deviate.
+
+§8.3 already describes the machinery — "Fill week of ___" emits rows into the
+existing `pending` array, so it reuses the review screen, its flags, the commit
+path and the diff in §8.4. What changes is its standing. It was written as a
+convenience for a job that mostly needed no screenshot; it is now the intended
+normal path for the only job that has no automatic one.
+
+The shape that follows from that:
+
+- **Generated rows are proposals, never facts.** They land in review like any
+  import and he confirms them. `source:'pattern'` already distinguishes them,
+  and §8.3's hollow tick keeps assumption visually separate from fact.
+- **A screenshot corrects the proposal rather than creating it.** That is a
+  better use of a reader that mangles one character in a time than asking it to
+  originate the whole week.
+- **Holidays are the known exception and must be handled.** Labour Day is
+  already in the first fortnight of real data (§16.3): the rota says Monday,
+  the screen says no shift. A generated week that emits a shift on a statutory
+  holiday fires alarms for work that does not exist, which §8.3 names as the
+  thing that corrodes trust. They are known years ahead, so this is a lookup
+  and not a guess.
+- **Unconfirmed proposals must not pile up silently.** §8.3 already asks for
+  this; §17.4's warning is the place it belongs.
+
+### 17.3 Built: "nothing on file after Friday", per job
+
+§10.5's warning is in, on the Schedule tab where he actually looks, and it is
+per job because the two jobs fail differently:
+
+- **DSI** — "Nothing is coming automatically for this job — add next week."
+  Actionable, because nothing arrives unless he brings it.
+- **Trupoint** — "The calendar should be filling this — check Calendar Sync."
+  Quieter, and styled to match: worth knowing, not a job to do.
+
+A job counts as feed-backed when its `icsMatch` is set, which is already how a
+calendar event finds its job — so no new field and nothing to migrate, which
+keeps §7 intact.
+
+Showing the feed-backed job a quieter note rather than nothing is deliberate.
+Suppressing it entirely would make a broken Calendar Sync invisible, and an
+empty calendar reading as a day off is the precise failure this warning exists
+to prevent — it does not stop being that failure because the cause was a sync
+rather than a forgotten screenshot.
+
+### 17.4 Built: the employer's separator survives
+
+§11.1's finding is fixed, deliberately and before §8.1 rather than halfway
+through it. `normalise()` flattened TrackTik's `|` to `" - "`, which is exactly
+what the Homebase label join produces, so a real boundary and an arbitrary glue
+join were indistinguishable at the point §8.1 wants to read one.
+
+The pipe is now kept, spacing canonicalised, and `tidy()` no longer strips it:
+
+| in a label | means |
+|---|---|
+| `" \| "` | a boundary the employer printed — `splitLabel()` can trust it |
+| `" - "` | fragments this parser glued together — says nothing about structure |
+
+`splitLabel()` is exported and tested and nothing reads it yet. That is the
+point: §8.1 starts from a boundary that is already correct.
+
+One knock-on, taken now because it is free now. The label is what the `.ics`
+`SUMMARY` is built from, so TrackTik events read `DSI- Cook Plant ASO |
+SOUTHERN HENS` instead of `DSI- Cook Plant ASO - SOUTHERN HENS`. §8.1 warns
+that changing `SUMMARY` rewrites every event and is messy in manual-import
+mode. Under §7 there is no live data yet, so the rewrite costs nothing today
+and would cost something later — which is an argument for having done it now.
+
+### 17.5 Where this leaves the order
+
+Step 0 is gone. Step 1 is done (§16). Step 2 is now partly done — the horizon
+warning is in; `METHOD:CANCEL` (§10.6) is still open. The rest reorders around
+one fact: **the fixed job's rota is the highest-value unbuilt thing in the
+document**, because it is the only job with no automatic input and the one
+whose input is a reader that mangles times.
+
+| | Work | Why here |
+|---|---|---|
+| 1 | **§8.2 patterns** for DSI | One line of config, already known from §16.3. Prerequisite for the next row |
+| 2 | **§8.3 generation**, with holidays | §17.2's proposal. An evening's work per §11.3, and it removes most weeks of OCR |
+| 3 | `METHOD:CANCEL` (§10.6) | The remainder of step 2; no schema |
+| 4 | **§8.1 site table** | Unblocked now (§17.4). Still the heaviest, and everything after assumes `siteId` |
+| 5 | **§8.4 change detection** | Needed in full now the email is closed; wants stable site identity first |
+
+§8.2 and §8.3 moving ahead of §8.1 is a change from §11.3, and it is worth
+being explicit about why: they need no schema, they depend only on a pattern
+today's data already hands over, and together they take the OCR path off the
+critical route for most weeks. §8.1 remains the bigger prize for labels and for
+the `LOCATION:` line that makes an address tappable, but it no longer has to go
+first.

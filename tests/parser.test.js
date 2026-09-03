@@ -77,7 +77,10 @@ test('guessYear puts a bare month and day near now', () => {
 });
 
 test('tidy strips OCR debris without eating real site names', () => {
-  assert.equal(P.tidy('  (03) Mobile Guard | De la Montagne  '), '03 Mobile Guard De la Montagne');
+  // The pipe is kept deliberately: it is TrackTik's own mark for where the
+  // role ends and the site begins, and §8.1 needs to read it. Brackets and
+  // the rest of the debris still go.
+  assert.equal(P.tidy('  (03) Mobile Guard | De la Montagne  '), '03 Mobile Guard | De la Montagne');
   assert.equal(P.tidy('Café Rue-St'), 'Café Rue-St');
   assert.equal(P.tidy(''), '');
 });
@@ -119,6 +122,108 @@ test('rows scrolled off the top or bottom do not invent a date', () => {
   assert.equal(got.length, 1);
   assert.equal(got[0].date, '');
   assert.ok(got[0].flags.includes(P.FLAG.NODATE));
+});
+
+/* ---------- what the first real OCR pass broke ---------------------------- */
+
+test('a month header survives OCR debris beside it', () => {
+  // The real September capture read the header as "September Vv os" — the
+  // collapse chevron and a stray icon. The month never got set, and since a
+  // TrackTik date is a bare day number, every row on the screen came back
+  // nodate: three correct shifts with no date on any of them.
+  assert.deepEqual(P.monthHeader('September Vv os'), { month: 8, year: null });
+  assert.deepEqual(P.monthHeader('September'),       { month: 8, year: null });
+  assert.deepEqual(P.monthHeader('September 2026'),  { month: 8, year: 2026 });
+
+  // Digits are still not debris — a day number must never be eaten as noise,
+  // and a written date header must not be mistaken for a month header.
+  assert.equal(P.monthHeader('September 02'), null);
+  assert.equal(P.monthHeader('Thursday, September 03'), null);
+  assert.equal(P.monthHeader('Schedule'), null);
+});
+
+test('a meridiem stranded on its own line is recovered', () => {
+  // "8:00 pm" lost its pm onto the following line as "00pm .", so it parsed
+  // as 08:00 — twelve hours out, the documented top risk on real input.
+  assert.equal(P.looseMeridiem('00pm .'), 'PM');
+  assert.equal(P.looseMeridiem('am'), 'AM');
+
+  // And is not guessed from wreckage that merely contains an m.
+  assert.equal(P.looseMeridiem('\u20142adM cc @ Training'), null);
+  assert.equal(P.looseMeridiem('28M cc @ @ Security Agent :'), null);
+  assert.equal(P.looseMeridiem('Headquarters'), null);
+  assert.equal(P.looseMeridiem('4:15am'), null);   // attached to a time already
+
+  const got = P.parse(
+    'Thursday, September 03\n8:00 (You) Cerion C.\n00pm .\n12:00am @ Training\nF.O.C.',
+    { now: NOW });
+  assert.equal(got.length, 1);
+  assert.equal(got[0].start, '20:00');
+  assert.ok(got[0].flags.includes(P.FLAG.FIXEDAP));
+  assert.ok(!got[0].flags.includes(P.FLAG.AMPM), 'a recovered meridiem is no longer missing');
+});
+
+test('label debris is dropped without taking the role with it', () => {
+  assert.equal(P.stripDebris('\u20142adM cc @ Training'), 'Training');
+  assert.equal(P.stripDebris('28M cc @ @ Security Agent :'), 'Security Agent');
+  assert.equal(P.stripDebris('00pm .'), '');
+  assert.equal(P.stripDebris('F.O.C.'), 'F.O.C.');        // three letters, kept
+  assert.equal(P.stripDebris('Headquarters'), 'Headquarters');
+});
+
+test('the role between the two time lines is not stepped over', () => {
+  // The gather used to jump from the start-time line to the end-time line,
+  // so a role sitting between them was lost on every Homebase import.
+  const got = P.parse(
+    'Friday, September 04\n' +
+    '19:15 (You) Cerion C.\n' +
+    '28M cc @ @ Security Agent :\n' +
+    '8:15am\n' +
+    'Headquarters', { now: NOW });
+  assert.equal(got.length, 1);
+  assert.equal(got[0].label, 'Security Agent - Headquarters');
+});
+
+test('a shift with only one legible time is flagged, never dropped', () => {
+  // A silently absent shift reads as a day off, which is the failure this
+  // whole project exists to prevent. The end is left empty instead — the
+  // review screen asks for it and the commit path refuses to file without it.
+  const got = P.parse(
+    'Saturday, September 05\n' +
+    '7.15 (You) Cerion C.\n' +
+    'dell cC @ Security Officer :\n' +
+    'F.O.C.', { now: NOW });
+  assert.equal(got.length, 1);
+  assert.equal(got[0].date, '2026-09-05');
+  assert.equal(got[0].start, '07:15');
+  assert.equal(got[0].end, '');
+  assert.ok(got[0].flags.includes(P.FLAG.ONETIME));
+});
+
+test('a stray time with nothing naming a shift is still ignored', () => {
+  // The guard on the rule above: without it, any clock-like text on the
+  // screen would become a row.
+  assert.deepEqual(P.parse('Saturday, September 05\n7:15', { now: NOW }), []);
+});
+
+test('the employer separator survives, and a join is not mistaken for one', () => {
+  // TrackTik prints a real boundary inside one field. normalise() used to
+  // flatten it to " - ", which is what the Homebase join produces, so §8.1
+  // could not tell a separator from glue. The pipe now survives both
+  // normalise() and tidy().
+  const tt = P.parse('September\nWED 3:00pm - 11:00pm\n09 Cook Plant ASO | SOUTHERN HENS, I...',
+                     { now: NOW });
+  assert.equal(tt[0].label, 'Cook Plant ASO | SOUTHERN HENS, I');
+  assert.deepEqual(P.splitLabel(tt[0].label),
+                   { role: 'Cook Plant ASO', site: 'SOUTHERN HENS, I' });
+
+  // Homebase's role and site arrive on separate lines; gluing them back
+  // together is this parser's doing and claims nothing about structure.
+  const hb = P.parse('Thursday, September 03\n12:15 am (You) Cerion C.\n4:15 am @ Training\nHeadquarters',
+                     { now: NOW });
+  assert.equal(hb[0].label, 'Training - Headquarters');
+  assert.deepEqual(P.splitLabel(hb[0].label),
+                   { role: 'Training - Headquarters', site: '' });
 });
 
 /* ---------- golden fixtures ---------------------------------------------- */
