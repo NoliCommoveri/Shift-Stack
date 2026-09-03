@@ -3,8 +3,9 @@
 _Last updated 3 September 2026_ — real screenshots of both apps landed (§3.1, §5),
 Homebase's own Calendar Sync turned out to exist and is now an import path (§12),
 and the app became the normalising step between two calendars rather than a
-second source of the same events (§13). Build order for the agreed-but-unbuilt
-work is in §11.
+second source of the same events (§13). The Worker that closes the import gap
+is specified in §14 and audited against Ray's three existing Cloudflare apps
+in §15. Build order for the agreed-but-unbuilt work is in §11.
 
 A record of what has been built, why the design went the way it did, and what
 is still undecided.
@@ -939,6 +940,12 @@ it the next thing.
 
 ## 14. The Worker, specified
 
+> Read §15 alongside this. §14 was written from first principles; §15 checks it
+> against the three Cloudflare apps that already exist and finds the shape
+> right and the platform underneath it wrong in four places — KV, CORS, the
+> CLI setup steps, and the token comparison. The reasoning below stands; where
+> §15 contradicts a mechanism, §15 is the later word.
+
 §13 ended by naming the §4 Worker as the one thing that closes the import gap,
 "now with a reason on both ends". This section is that Worker written down
 before any of it is built. It settles §4 and it goes past it: §4 was only ever
@@ -1245,3 +1252,210 @@ Calendar app within half an hour.
 - **The pay screen is short until pass two** (§14.7), and it should say so.
 - **Nothing here helps TrackTik**, which stays on screenshots until §5's email
   gets sent.
+
+---
+
+## 15. §14 read against the three Cloudflare apps that already exist
+
+§14 was written from first principles. It should not have been. Three of Ray's
+repos already run on Cloudflare, two of them have a written record of *why*
+they are shaped the way they are, and one of them solved — as a locked decision
+with the reasoning attached — two of the four problems §14 spends its length
+solving.
+
+The repos, and what each is:
+
+| Repo | Shape | Storage | Cron | App served from |
+|---|---|---|---|---|
+| `Star-homeschool` | git-connected Worker, Pages-Functions source built to `dist/worker` | D1 | none | the Worker, `[assets] directory = "./"` |
+| `Heritage-Hooves` | git-connected Worker, `src/index.ts` | D1 | `*/15 * * * *` | the Worker, `[assets] directory = "public"` |
+| `Scheduling_App` | git-connected Worker, `management-app/worker/index.js` | D1 + R2 | none | the Worker, `[assets] directory = "./"` |
+
+(There is no `sched-manager` repo. The scheduling one is `NoliCommoveri/Scheduling_App`.)
+
+**None of the three uses KV. None of the three sends a cross-origin request.
+None of the three asks Ray to run a CLI command.** §14 does all three.
+
+### 15.1 What §14 gets right
+
+Worth saying first, because most of it holds.
+
+- **The 15-minute cron** is exactly Heritage-Hooves' interval, and for the same
+  reason: a fixed schedule that fires more often than the work needs, with the
+  handler deciding whether there is anything to do.
+- **Pure functions with the I/O outside them.** §14.7's `feed.js` / `merge.js`
+  extraction is Heritage-Hooves' §5.1 ("pure engines, thin database layer") and
+  Star-homeschool's `functions/api/_lib/` under different names. `ics.js` and
+  `parser.js` were already built this way. This is the house style, not a new idea.
+- **The 10 ms CPU ceiling, and the response to it.** §14.5 says measure, and
+  move to the $5 tier rather than contort the design. Heritage-Hooves §3 says
+  the same sentence about its world tick. Same conclusion, reached twice.
+- **Free tier only**, and no dependency with a hosted component. Locked in
+  Scheduling_App, assumed everywhere else.
+- **Google Drive.** §4 rejected it on OAuth grounds. Scheduling_App's decision
+  table records it as **ABANDONED**, "solved a problem that no longer exists."
+  Two independent rejections is a settled question.
+- **The phone stops being the source of truth** (§14.3) is presented as this
+  project's uncomfortable new cost. It is Scheduling_App's §III.A, locked:
+  "D1 holds the truth. IndexedDB on both devices is a read-through cache plus a
+  write outbox." Which also means §14.7's "pass two, not required" — the phone
+  reading feed shifts back down — is not an optional extra. It is the second
+  half of the pattern he has already standardised on, and the pay screen being
+  short is what a missing read-through cache looks like.
+
+### 15.2 KV should be D1
+
+This is the big one.
+
+§14.3 is a careful piece of design work solving a problem that does not exist
+on the storage every other app uses. Its own words: "KV has no transactions and
+no compare-and-set. One key with two writers loses writes." Everything after
+that — the split by provenance, the one-writer-per-key rule, the union computed
+at read time, the closing line "we are out of writers" — is scaffolding erected
+around a limitation of KV.
+
+D1 has atomic `batch()`. Two writers to one table is the ordinary case, not a
+hazard to be designed around. Under D1 the store is one `shifts` table with a
+`source` column (`manual` | `feed`), the phone writes its rows, the cron writes
+its own, and `GET /feed` is a `SELECT`. The `raw/<jobId>` blob is a column or a
+small table; the `polls` ring buffer is an append-only table with a `DELETE` on
+a row count — which is `tick_run` in Heritage-Hooves and `reward_entries` in
+Scheduling_App, a pattern with two prior implementations to copy from.
+
+The free-tier arithmetic also moves the right way, and §14.5's version of it is
+tighter than it reads. KV free is **1,000 writes a day**. A poll record on every
+tick is 96 of them before anything changes; add `raw/<jobId>` and a second
+configured job and the margin is real but not comfortable. D1 free is **100,000
+rows written a day**. The question stops being a question.
+
+The one thing KV would genuinely be better at is serving a static blob from
+edge cache. §14.4 gives that up in its own text — the feed is "rebuilt whole on
+every request" — so the advantage was never being collected.
+
+### 15.3 The app should move under the Worker, and CORS should disappear
+
+§14.4 spends a paragraph on the `OPTIONS` preflight, an exact-origin
+`Access-Control-Allow-Origin` (correctly refusing `*`), and
+`Allow-Headers: Authorization, Content-Type`, and closes on the irony that the
+same browser rule blocking the import is the one the export has to satisfy.
+
+The irony is optional. All three repos serve the app and the API from one
+Worker via the `[assets]` binding, and Scheduling_App carries it as a locked
+decision — *"One Worker serving both apps — same-origin, no CORS, one git
+connection"* — with the failure that produced it written into its
+`wrangler.toml`: a relative `fetch("/api/pair")` cannot resolve from a GitHub
+Pages origin, so the assets directory was widened to the repo root.
+
+§14.4's argument for staying on Pages is that the app carries no data, so §4's
+world-readable objection does not apply. That is an argument for Pages being
+*acceptable*, not better. Moving costs nothing in code — Shift Deck is already
+"four files plus icons" with no build step (§3) — and removes the preflight
+handler, the origin allowlist, a second URL to configure in Setup, and the
+`PUSH_TOKEN` travelling cross-origin. §14.9's "**Not on the list: moving the
+app**" should flip to being on the list.
+
+Two things come with it, both one-time and both already documented in his own
+notes:
+
+- **The PWA reinstalls.** The origin changes, so the installed app and its
+  service-worker cache are a fresh install. Star-homeschool's spec calls this
+  out at exactly the same step: *"Test the PWA install and offline mode here,
+  before going further — this is the hosting move, and it is the one step with
+  a user-visible cost."*
+- **`.assetsignore` becomes load-bearing.** With `directory = "./"` everything
+  not excluded is publicly downloadable. Both repos that do this say so in
+  capitals, and Star-homeschool adds the specific trap: wrangler's default
+  ignore list does not skip `.git`, so without that line the whole commit
+  history is served as static assets.
+
+### 15.4 It has to be a plain Worker, not Pages Functions
+
+§14 never says which. It matters, and Heritage-Hooves already answers it in one
+line: **"Not Pages. Cron Triggers don't work with Pages."** Shift Deck's import
+is a cron. So the template to copy is Heritage-Hooves (`main = "src/index.ts"`,
+`[triggers] crons`, `export default { fetch, scheduled }`), not
+Star-homeschool's `wrangler pages functions build` hybrid, which has no cron and
+would need one bolted on.
+
+Two more facts from that same file that §14 does not record and should:
+
+- **Cron Triggers do not retry.** An invocation that throws or times out is
+  skipped silently until the next fire. §14.5's diff-and-apply is close to
+  idempotent already — it matches on `extUid` and rewrites the job's rows — but
+  that should be stated as a requirement rather than left as a property. §14.6's
+  "six hours without a successful poll" alarm is what catches the rest, and it
+  is doing more work than §14 credits it with.
+- **Cron Triggers are UTC-only.** Which is most of §14.10's open question.
+
+### 15.5 §14.9 step 4 asks for a CLI, and that is a locked "never"
+
+§14.9 tells Ray to create a KV namespace and run `wrangler secret put` three
+times. Scheduling_App's guardrails: **"No CLI, ever — LOCKED. Migrations and
+all ops are browser-driven,"** and, plainly, *"Never instruct Ray to run a CLI
+command or paste SQL into the D1 console. If a task seems to require it, that
+is a bug in the task, not in Ray's setup."*
+
+Secrets do not need one. Star-homeschool's Step 6 documents the dashboard path
+and why it works where bindings do not: Worker → Settings → **Variables and
+secrets** → add, type **Secret**. Secrets are stored separately from
+`wrangler.toml`, which is also why they are correct not to be committed. What
+§14.9 does need to add is the gotcha that file records immediately after, and
+which is the most common "it isn't working" that is not a fault:
+
+> **Bindings and secrets only take effect on a deploy made after they were
+> added.** Push a commit or hit Retry deployment, or `env.PUSH_TOKEN` is
+> `undefined`.
+
+Under D1 (§15.2) the namespace-creation step becomes creating a database in the
+dashboard and applying the schema, and Ray has two existing implementations of
+browser-applied migrations to lift — Heritage-Hooves' `/admin/migrations` and
+Scheduling_App's Settings → Database — both of which bundle the `.sql` files
+into the Worker with the same three-line `[[rules]] type = "Text"` block.
+
+Net effect: §14.9's "three need a computer" drops to a dashboard session and no
+terminal at all.
+
+### 15.6 Token handling is thinner than the other three
+
+§14.4 compares a bearer token against a secret with `===`. Every other repo is
+stricter, and two of the differences are worth taking:
+
+- **Fail closed on an unset secret.** Scheduling_App does this explicitly, with
+  the reason in the comment: `if (!env.SYNC_TOKEN) return false; // fail closed
+  — an unset secret opens nothing`. Given §15.5's deploy-ordering gotcha, an
+  unset secret is a state this Worker will genuinely be in.
+- **Constant-time comparison.** `timingSafeEqual` in Scheduling_App, used even
+  for the Worker-secret path.
+
+What does *not* transfer is hashing at rest and revocation. Star-homeschool
+hashes device tokens because it stores them; `PUSH_TOKEN` and `FEED_TOKEN` are
+Worker secrets, not stored credentials, and there is no device table to revoke
+from. §14.4's instinct to use **two** separate tokens is right and is the same
+instinct as Scheduling_App's three credential classes — a token that travels in
+ICSx⁵'s settings and in request logs should not also authorise writes.
+
+### 15.7 What actually changes in §14
+
+Nothing about the *shape*. The cron, the guards, the 15-minute interval, the
+three endpoints, the two tokens, the `feed.js` / `merge.js` extraction and the
+decision to apply calendar shifts without review all stand. What changes is the
+platform underneath them, and every change is toward what the other three apps
+already do:
+
+| §14 says | Should say | Why |
+|---|---|---|
+| KV, split by writer (§14.3) | D1, one `shifts` table with a `source` column | All three repos use D1; the split exists only to work around KV |
+| App on GitHub Pages, CORS on `/push` (§14.4) | App served by the Worker, no CORS | Locked decision in Scheduling_App; the failure it fixes is recorded there |
+| unstated | Plain Worker, not Pages Functions | Heritage-Hooves: cron does not work on Pages |
+| `wrangler secret put` (§14.9) | Dashboard → Variables and secrets | "No CLI, ever" is locked; the dashboard path is already documented |
+| `===` against the secret (§14.4) | Fail closed on unset, constant-time compare | Both already written in `Scheduling_App` |
+| "Where does `zone` come from" is open (§14.10) | A stored IANA name, `Intl`, never an offset | Cron is UTC-only; `normalizeTimezone()` already exists and already rejects fixed offsets |
+
+### 15.8 One open question this does not close
+
+§14.10's list loses `zone` and gains nothing, but the CPU question changes
+character rather than going away: a `SELECT` and a few `INSERT`s against D1 is
+more I/O and less compute than a KV blob read plus a JSON parse, and DB waiting
+does not count against the 10 ms ceiling — Heritage-Hooves §3 makes that point
+explicitly. So the move to D1 probably helps. "Probably" is still doing work in
+that sentence, and the first real poll is still what answers it.
