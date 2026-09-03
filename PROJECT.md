@@ -1020,6 +1020,21 @@ Three, all on one Worker.
 that is not the expected shape rather than storing it, because a half-written
 `cfg` breaks the cron on its next tick and the phone would not hear about it.
 
+This one is cross-origin and the Worker has to say so. The app is served from
+`nolicommoveri.github.io` and there is no reason to move it — §4 rejected Pages
+for hosting the *feed*, where a world-readable schedule was the objection, and
+the app itself carries no data at all. So the page lives on Pages, the Worker
+lives on Cloudflare, and every request between them is cross-origin. The Worker
+answers the `OPTIONS` preflight and returns `Access-Control-Allow-Origin` for
+the Pages origin exactly — not `*`, which would let any page that learned the
+push token write to the store — along with `Allow-Headers: Authorization,
+Content-Type`. `GET /feed` needs none of this: ICSx⁵ is not a browser and does
+not ask.
+
+The irony is worth recording. The same rule that makes the import impossible
+from the page is the one the export has to satisfy to leave it, and both are
+the browser's, not Google's.
+
 **`GET /feed/<FEED_TOKEN>.ics`** — what ICSx⁵ subscribes to. Rebuilt whole on
 every request from the union of the stores, so a removal reaches the phone by
 itself and duplicates stay structurally impossible. `text/calendar; charset=utf-8`.
@@ -1141,6 +1156,10 @@ say without being asked.
 
 Six of these are one-time and none of them are in the code. Three need a
 computer; the rest are on the phone.
+
+**Not on the list: moving the app.** It stays on GitHub Pages where it already
+runs. Only the Worker is new, and it is the only thing that needs a Cloudflare
+account.
 
 **On a computer, before deploying:**
 
