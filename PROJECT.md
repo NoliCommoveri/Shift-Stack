@@ -1178,13 +1178,28 @@ account.
 
 1. **Google Calendar → create a calendar named `Homebase Raw`.** Staging, per
    §13 — machine-readable, never rendered.
-2. **Homebase → Settings → Calendar Sync → point the Calendar field at
-   `Homebase Raw`**, not at the account's main calendar. **Look at what that
-   field offers.** If it will only take an account and not a named calendar,
-   the staging split is off the table and `co.icsMatch` becomes load-bearing —
-   a word on every shift and nothing else, set per job in Setup. This is the
-   one setup step that changes what gets built, so it wants checking before the
-   Worker is written, not after.
+2. **Homebase → Settings → Calendar Sync → point the Calendar field at the
+   staging calendar.** ✅ **Done, and it takes a named calendar.** The field
+   offers any named calendar from the synced phone calendar app, and Homebase
+   is already scoped to a staging calendar created for it. The §13 split holds
+   as designed, which settles the one open question that could have changed
+   what gets built:
+
+   - `co.icsMatch` stays **empty** for Trupoint. `parseICS` skips filtering
+     entirely on an empty needle (`ics.js:313`), so this costs nothing and
+     needs no special case. It remains in the schema as the fallback for a
+     future job whose app will only write to a whole account.
+   - The guards get *stricter*, not looser. A calendar written to by one app
+     and nothing else contains shifts and only shifts, so a row that will not
+     parse is no longer noise to be skipped quietly — it is a signal that
+     Homebase has changed its format or that something else has started
+     writing there. The cron records unreadable rows as a distinct condition
+     and says so on the Setup screen, rather than folding them into
+     `report.unreadable` and moving on.
+
+   Worth confirming once: the exact calendar name, since §14.9's next step
+   needs that specific calendar's address and Google will happily hand over a
+   different one's.
 3. **Google Calendar → `Homebase Raw` → Settings → Integrate calendar → Secret
    address in iCal format.** Copy it. That string is the whole import.
 4. **Cloudflare** — a KV namespace, and `wrangler secret put` for `PUSH_TOKEN`,
@@ -1193,6 +1208,12 @@ account.
    and not in `wrangler.toml`.
 
 **On the phone, after deploying:**
+
+0. **Untick the staging calendar in the Google Calendar app.** It syncs down
+   like any other calendar, and if it draws, every Trupoint shift appears
+   twice — once raw from Homebase and once from the Work Schedule feed. §13
+   calls it a data channel, not a view, and this is the step that makes that
+   true on the device.
 
 5. **ICSx⁵ → subscribe to `https://<worker>/feed/<FEED_TOKEN>.ics`**, sync
    interval 15 minutes.
@@ -1211,6 +1232,8 @@ Calendar app within half an hour.
 
 ### 14.10 Still open
 
+- ~~Whether Homebase will write to a named calendar~~ — settled, it does
+  (§14.9). The staging split is on and the import filter is not needed.
 - **ICSx⁵'s authentication support** is unconfirmed (§14.4). Ten seconds on the
   phone decides whether the feed gets a second lock.
 - **Worker CPU on the free plan** against a real Google export (§14.5). The
