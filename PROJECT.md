@@ -1,9 +1,10 @@
 # Shift Deck — project state
 
 _Last updated 3 September 2026_ — real screenshots of both apps landed (§3.1, §5),
-Homebase's own Calendar Sync turned out to exist and is now an import path (§11),
+Homebase's own Calendar Sync turned out to exist and is now an import path (§12),
 and the app became the normalising step between two calendars rather than a
-second source of the same events (§12).
+second source of the same events (§13). Build order for the agreed-but-unbuilt
+work is in §11.
 
 A record of what has been built, why the design went the way it did, and what
 is still undecided.
@@ -44,7 +45,7 @@ enabled on his account was never confirmed, so nothing was built against it.
 _Superseded on 3 September 2026._ It is enabled, and it is better than a feed
 URL: the Homebase app has a **Calendar Sync** screen of its own — Enable, a
 location list, the Google account, an alert lead time and a Sync now button —
-which writes his shifts straight into that Google calendar. §11 is what was
+which writes his shifts straight into that Google calendar. §12 is what was
 built on top of it.
 
 **TrackTik schedule distribution email.** TrackTik's documentation states that
@@ -78,7 +79,7 @@ Four files plus icons, deployable to GitHub Pages as-is.
 index.html              markup and styles
 app.js                  all logic
 parser.js               screenshot text to shift rows      (added, §9)
-ics.js                  calendar file to shift rows        (added, §11)
+ics.js                  calendar file to shift rows        (added, §12)
 sw.js                   service worker, offline shell + OCR engine caching
 manifest.webmanifest    PWA install metadata
 icon-192.png
@@ -278,7 +279,7 @@ before investing further in OCR.
 **Whether Homebase exposes its calendar feed on his account.** ~~Never
 confirmed.~~ Confirmed on 3 September 2026, and better than expected: the app
 has a Calendar Sync screen that pushes into a Google calendar. Homebase needs
-no OCR now. See §11 for what that does and does not close.
+no OCR now. See §12 for what that does and does not close.
 
 What it leaves open is TrackTik, which has no export of any kind, so the OCR
 work in §3.1 stays load-bearing for that half of the schedule.
@@ -573,9 +574,9 @@ Carried forward, plus what today added.
    it lands, email parsing beats screenshots on every axis and much of §8.4
    becomes unnecessary. Worth asking before investing further in OCR.
 3. ~~**Does Homebase expose its calendar feed on his account?**~~ Answered: it
-   has an in-app Calendar Sync writing to Google, and §11 imports from it. Only
+   has an in-app Calendar Sync writing to Google, and §12 imports from it. Only
    TrackTik needs screenshots now. What remains is whether the review flow is
-   too manual to keep up with — see §11's open ends.
+   too manual to keep up with — see §12's open ends.
 4. **Getting the feed to ICSx⁵** (§4) — still the live blocker, still pointing
    at a Cloudflare Worker. The browser-native escape hatch does not exist:
    `showSaveFilePicker()` with a retained handle would solve the `shifts (1).ics`
@@ -604,7 +605,126 @@ Carried forward, plus what today added.
 
 ---
 
-## 11. Calendar import, 3 September 2026
+## 11. Roadmap — the order to build §8 in, and where to stop
+
+§8 already argues its own internal order and that argument holds: each of the
+four pieces changes the shape the next is written against. What this section
+adds is where the §10 loose ends slot in, what the code says about §8.1's
+stated blocker, and where to cut the work into sessions.
+
+### 11.1 Two findings from reading §8 against the code
+
+**§8.1's blocker is cleared.** §8.1 says the site/role split is "blocked on a
+real TrackTik screenshot" because the split assumes the line contains a `|`.
+It does — `tests/fixtures/tracktik-2026-09-TRANSCRIBED.txt` reads
+`Cook Plant ASO | SOUTHERN HENS, I...`. The separator is real and §8.1 can
+start.
+
+**But the separator is destroyed before anything could read it.**
+`normalise()` (`parser.js:38`) rewrites `|` to ` - ` on every line, and the
+Homebase branch (`parser.js:238`) joins its own gathered fragments with the
+same ` - `. So at the point a role/site split would want to read the boundary,
+a real separator and an arbitrary fragment join look identical. Either split on
+the pipe inside the TrackTik branch before `normalise()` flattens it, or keep
+the pipe and give the Homebase join a different marker. This is a small change
+but it has to be made deliberately, not discovered halfway through §8.1.
+
+Two things are also cheaper than §8 implies. `source` already exists on the
+shift record (`app.js:713`, `app.js:727`), so §8.3's hollow-tick rendering has
+its hook. And `pending` already carries `rid`, per-row job stamping and a
+review screen with flags, which is the scaffolding both §8.3 and §8.4 plug
+into.
+
+### 11.2 What comes before §8.1
+
+**Send the two emails first.** §10.2 and §10.3 are each one message and each
+can delete a large amount of the work below. If the TrackTik distribution email
+gets switched on, email parsing beats screenshots on every axis and most of
+§8.4 stops being necessary. If Homebase turns out to expose its feed, that job
+needs no OCR at all. Neither costs a line of code, and both are worth their
+answer before more is invested in OCR.
+
+**Then a real OCR pass.** §10.1 is still open: the fixtures are TRANSCRIBED,
+read off the images by eye, so the parser is known to understand the layout and
+is still unproven against the mangling. The auto-invert branch in `prep()` has
+never executed against a real input. §8.2 is a control designed specifically
+against am/pm misreads — designing it before seeing how am/pm actually fails on
+the dark TrackTik screen is designing against a guess. Run the four screenshots
+through Tesseract, commit the raw text as fixtures, fix what breaks. The
+page-segmentation mode and character whitelist in §10.7 belong in the same
+sitting, since that is the one time the OCR settings are being looked at
+anyway.
+
+**And pull §10.5 forward.** The two staleness warnings touch no schema, depend
+on no transport, and defend the exact failure the project exists to prevent —
+an empty calendar reading as a day off. There is no reason they should queue
+behind three schema changes.
+
+### 11.3 The order
+
+| | Work | Why here |
+|---|---|---|
+| 0 | The two emails (§10.2, §10.3) | No code; may delete work below |
+| 1 | Real Tesseract pass, fixtures from it, OCR tuning (§10.1, §10.7) | Gates §8.2's design |
+| 2 | Staleness warnings, `METHOD:CANCEL`, byte-based `fold()` (§10.5–§10.7) | No schema, ships value immediately |
+| 3 | **§8.1 site table** — schema, aliases, merge, `LOCATION:`, title convention, the parser split from §11.1 | Everything after assumes `siteId` |
+| 4 | **§8.2** patterns and am/pm plausibility | Needs step 1's evidence; independent of sites |
+| 5 | **§8.3** week generation | Small once patterns exist |
+| 6 | **§8.4** change detection | Needs stable site identity to tell "same shift, different place" |
+
+Steps 3 and 6 are the heavy ones. Step 5 is an evening.
+
+**What §12 and §13 did to this table, later the same day.** The roadmap above
+was written before Homebase's Calendar Sync was found, and four rows moved:
+
+- **Step 0 is half done.** §10.3 is answered — Homebase syncs to Google, and
+  §12 imports from it. The TrackTik email in §10.2 is still one message worth
+  sending, and it is now the whole of step 0.
+- **Step 1 got more important, not less.** With Homebase on a feed, the OCR
+  path carries TrackTik alone — the dark screen, which is exactly where the
+  am/pm risk in §6 lives. A real Tesseract pass is now the only unproven part
+  of the input side rather than one of two.
+- **Step 2's `fold()` is done**, forced by §13 emitting real addresses. The
+  §10.5 staleness warnings and §10.6's `METHOD:CANCEL` are still open, and
+  §13 sharpened the first of them: if Calendar Sync publishes only two months
+  and the exported calendar is the one he reads, the horizon is a silent gap
+  in the only place he looks.
+- **Steps 3 and 6 are partly delivered on the calendar side.** §8.1's
+  `LOCATION:` and §8.4's "cancelled" bucket both exist now for shifts that
+  arrive from a feed, because a feed gives an address and a stable identity
+  that OCR cannot. Neither is finished: the site table, the aliases and the
+  merge are untouched, and change detection for screenshot rows still has only
+  the slot to match on. What this changes is the argument — the two hardest
+  steps now have a worked example to copy rather than a design to invent.
+
+None of this reorders the table. It removes work from steps 0 and 2, and gives
+3 and 6 a precedent.
+
+**§4 is a parallel track, not part of this.** Getting the feed to ICSx⁵ remains
+the live blocker for the product, but none of §8 depends on it and it is
+infrastructure rather than enhancement. Worth noting that the minimal-feed idea
+in §10.4 gets easier *after* §8.1: once role and site are separate fields,
+"which of these leaves the phone" is a real choice rather than a string split.
+
+### 11.4 One decision before step 3
+
+§7 defers schema migrations until the first live data point. Step 3 is a schema
+change. So before it starts, confirm §7 still holds — that nothing real is
+being relied on yet. If it no longer holds, `S.version` and the migration path
+are prerequisites of step 3 rather than something deferred, and §7 says exactly
+what that means: both `loadState()` and the backup-restore path have to run it.
+
+§12 and §13 added two fields to the shift record — `extUid` and `place` — which
+is the first test of that agreement since it was written. They pass it on a
+technicality worth stating: both are optional and every read is guarded, so a
+record saved before them behaves exactly as it did. Additive optional fields do
+not need a migration. Step 3 is not like that: it moves a value out of `label`
+into a `siteId`, and a record written before it means something different
+afterwards. That is the case §7 is actually about, and the check above stands.
+
+---
+
+## 12. Calendar import, 3 September 2026
 
 He went looking and found Homebase's own **Calendar Sync**: Settings → Calendar
 Sync, with an Enable toggle, the seven stations to tick, the Google account
@@ -710,16 +830,16 @@ pass in one place and fail in another.
    If it is annoying enough to be skipped, that is a silent-staleness risk of
    the same family as §10.5, and the answer is the §4 Worker fetching the feed
    server-side rather than anything clever in the browser.
-4. ~~**Cancellations are told, not shown.**~~ Built in §12: the review screen
+4. ~~**Cancellations are told, not shown.**~~ Built in §13: the review screen
    grew a second row type and a cancellation is now a tick-box. It had to be —
    once the app is what feeds the calendar he reads, a cancellation it does not
    act on is a shift that keeps ringing.
 
 ---
 
-## 12. Two calendars, and the app between them
+## 13. Two calendars, and the app between them
 
-Naming Calendar Sync as an import path (§11) left an obvious problem sitting in
+Naming Calendar Sync as an import path (§12) left an obvious problem sitting in
 the open: Homebase writes its shifts into a Google calendar, this app writes
 *its* shifts into a calendar too, and both land on the same phone. Every
 Homebase shift would appear twice.
@@ -772,7 +892,7 @@ sync screen — it decides whether the filter matters at all.
   Montréal is in scope — so it now walks code points and counts their UTF-8
   length. A character is never split and no line exceeds 75 octets.
 
-- **Cancellation as a tick-box**, per §11's fourth open end. The reasoning
+- **Cancellation as a tick-box**, per §12's fourth open end. The reasoning
   changed with the architecture: while the app was a private view, an
   unremoved cancellation was untidy. Now that its export *is* the calendar he
   reads, an unremoved cancellation is an alarm that goes off for a shift that
@@ -789,7 +909,7 @@ sync screen — it decides whether the filter matters at all.
 
 **It is still a manual save.** The `.ics` has to be downloaded and added. The
 architecture above changes what the app *is*; it does not change how the bytes
-get in. §11's routes out stand: try the link button once in case Homebase's own
+get in. §12's routes out stand: try the link button once in case Homebase's own
 feed allows a direct read, and otherwise the §4 Worker fetching server-side is
 the one thing that closes it — the same Worker the export side already wants,
 now with a reason on both ends.
