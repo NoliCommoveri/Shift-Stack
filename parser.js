@@ -7,9 +7,13 @@
    Loaded as a plain script before app.js in the browser, and required
    directly by tests/parser.test.js in node. No build step either way.
 
-   STATUS: both layout profiles below were derived from screenshots in the
-   vendors' own user guides, NOT from real captures of the schedules this app
-   is for. Treat every fixture as provisional until real screenshots land.
+   STATUS: both layout profiles were originally derived from screenshots in
+   the vendors' user guides. Real captures of September 2026 have since landed
+   and confirmed the shape of both — a month header with the day number in a
+   left column for TrackTik, a written date header with the times on separate
+   lines for Homebase. What they changed is the debris around the times: see
+   PERSON below. Fixtures marked PROVISIONAL are still guide-derived; those
+   marked TRANSCRIBED were read off real screenshots by eye rather than by OCR.
    ========================================================================== */
 
 const MONTHS = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
@@ -135,13 +139,32 @@ function tidy(s){
 }
 
 // Lines that are chrome, not data.
-const NOISE = /^(schedule|my shifts|open shifts|all shifts|today|table of contents|browsing|your hours|scheduled|actual|home|money|messages|more|clock)/i;
+const NOISE = /^(schedule|my shifts|open shifts|all shifts|day view|week view|today|no shifts scheduled|\d+\s+new shifts?|table of contents|browsing|your hours|scheduled|actual|home|money|messages|my profile|profile|more|clock)/i;
+
+/* The row naming the employee whose schedule this is. Homebase prints it
+   above the role on every single shift — "CC (You) Cerion C." — so it carries
+   nothing a label should keep, and the avatar initials share the row with it.
+   Matched loosely because "(You)" is four characters of OCR risk. */
+const PERSON = /^[^A-Za-z0-9]*(?:[A-Za-z]{1,3}\b[^A-Za-z0-9]*)?[\(\[\{]?\s*y[o0]u\s*[\)\]\}]?\b/i;
+
+/* Label fragments worth keeping in a label. Two characters or fewer is avatar
+   debris, not a role. */
+const usefulPart = s => s.length > 2 && !NOISE.test(s) && !PERSON.test(s);
 
 /* ---------- the parser --------------------------------------------------
-   Handles both layouts seen so far:
-     TrackTik  month header, then "WED 9:00am - 11:00am" / "(03) Site"
-     Homebase  "Sunday, July 27, 2025", then a start time and an end time
-               on separate lines with the role beside them
+   Handles both layouts, as captured in September 2026:
+     TrackTik  month header, then the weekday and the time range on one line
+               with the day number and the site on the next:
+                 September
+                 FRI 3:00pm - 11:00pm
+                 04 Cook Plant ASO | SOUTHERN HENS, I...
+     Homebase  a written date header with no year, then the start and end
+               times on separate lines, with the employee's own name, the role
+               and the site spread over the three lines beside them:
+                 Thursday, September 03 Today
+                 12:15 am CC (You) Cerion C.
+                 4:15 am Training
+                 Headquarters
 
    opts.now  Date treated as "today" when guessing a missing year.
    -------------------------------------------------------------------- */
@@ -149,7 +172,7 @@ function parse(text, opts = {}){
   const now = opts.now || new Date();
   const lines = normalise(text).split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
   const out = [];
-  let month = null, year = null, lastDay = null, dateNow = null;
+  let month = null, year = null, lastDay = null, dateNow = null, dateNowWd;
 
   for(let i = 0; i < lines.length; i++){
     const line = lines[i];
@@ -157,10 +180,17 @@ function parse(text, opts = {}){
     const mh = monthHeader(line);
     if(mh){ month = mh.month; if(mh.year) year = mh.year; lastDay = null; continue; }
 
-    // A header line carrying a full date resets the current day.
+    // A header line carrying a full date resets the current day. Homebase
+    // writes the weekday first and no year at all, so keep the weekday: it is
+    // the only check there is on the year guessYear had to invent.
     if(!findSingle(line)){
       const fd = fullDate(line, now);
-      if(fd){ dateNow = fd; continue; }
+      if(fd){
+        dateNow = fd;
+        const w = line.match(/^\s*[\(\[]?\s*([A-Za-z]{3,9})\b/);
+        dateNowWd = w ? WEEKDAYS[w[1].slice(0,3).toLowerCase()] : undefined;
+        continue;
+      }
     }
 
     if(NOISE.test(line)) continue;
@@ -193,13 +223,19 @@ function parse(text, opts = {}){
       if(!b) continue;
       start = a.time; end = b.time; ambiguous = a.ambiguous || b.ambiguous;
       consumed = j - i;
-      const restA = line.replace(a.text,'').trim();
-      const restB = lines[j].replace(b.text,'').trim();
-      label = [restA, restB].filter(x => x.length > 2 && !NOISE.test(x)).join(' ');
-      if(lines[j+1] && !findSingle(lines[j+1]) && !NOISE.test(lines[j+1]) && !fullDate(lines[j+1], now)){
-        if(label.length < 3) label = lines[j+1];
-        consumed = j + 1 - i;
+      // The role sits beside one of the times and the site on its own line
+      // under them, with the employee's own name on a third. Which of those
+      // shares a line with a time depends on how the OCR grouped the rows, so
+      // gather them all and sort them out by content rather than by position.
+      const parts = [line.replace(a.text,''), lines[j].replace(b.text,'')];
+      for(let k = j + 1; k < lines.length && k <= j + 2; k++){
+        const nx = lines[k];
+        if(findSingle(nx) || findRange(nx) || monthHeader(nx) || NOISE.test(nx)) break;
+        if(fullDate(nx, now)) break;
+        parts.push(nx);
+        consumed = k - i;
       }
+      label = parts.map(x => x.trim()).filter(usefulPart).join(' - ');
     }
 
     // Work out the date.
@@ -230,11 +266,10 @@ function parse(text, opts = {}){
     if(!date)     flags.push(FLAG.NODATE);
     if(ambiguous) flags.push(FLAG.AMPM);
     if(!r)        flags.push(FLAG.SPLIT);
-    if(date && wdTok){
-      const want = WEEKDAYS[wdTok[1].toLowerCase()];
-      if(want !== undefined && asDate(date).getDay() !== want)
-        flags.push(FLAG.WEEKDAY);
-    }
+    const want = wdTok ? WEEKDAYS[wdTok[1].toLowerCase()]
+               : (date && date === dateNow) ? dateNowWd : undefined;
+    if(date && want !== undefined && asDate(date).getDay() !== want)
+      flags.push(FLAG.WEEKDAY);
 
     out.push({ date, start, end, label: tidy(label) || 'Shift', flags });
     i += consumed;
@@ -246,5 +281,5 @@ function parse(text, opts = {}){
 if(typeof module !== 'undefined' && module.exports){
   module.exports = { MONTHS, WEEKDAYS, FLAG, iso, asDate, normalise, guessYear,
                      monthHeader, fullDate, leadingDay, to24, findRange,
-                     findSingle, tidy, NOISE, parse };
+                     findSingle, tidy, NOISE, PERSON, usefulPart, parse };
 }

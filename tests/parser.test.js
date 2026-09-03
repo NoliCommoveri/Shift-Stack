@@ -82,6 +82,45 @@ test('tidy strips OCR debris without eating real site names', () => {
   assert.equal(P.tidy(''), '');
 });
 
+test('the employee\'s own name is kept out of the label', () => {
+  // Homebase prints "(You) Cerion C." above the role on every row of his own
+  // schedule, with the avatar initials beside it. Neither says anything.
+  assert.equal(P.usefulPart('CC (You) Cerion C.'), false);
+  assert.equal(P.usefulPart('(You) Cerion C.'), false);
+  assert.equal(P.usefulPart('CC'), false);          // avatar initials alone
+  assert.equal(P.usefulPart('Training'), true);
+  assert.equal(P.usefulPart('Cook Plant ASO'), true);
+  assert.equal(P.usefulPart('Security Officer'), true);
+});
+
+test('a split shift keeps both the role and the site', () => {
+  const got = P.parse(
+    'Thursday, September 03 Today\n' +
+    '12:15 am CC (You) Cerion C.\n' +
+    '4:15 am @ Training\n' +
+    'Headquarters', { now: NOW });
+  assert.equal(got.length, 1);
+  assert.equal(got[0].label, 'Training - Headquarters');
+});
+
+test('the weekday on a written date header is checked too', () => {
+  // Homebase prints no year, so guessYear has to invent one and the weekday
+  // beside the date is the only thing that can contradict it.
+  const ok = P.parse('Friday, September 04\n9:00 am\n5:00 pm Security Agent', { now: NOW });
+  assert.deepEqual(ok[0].flags, [P.FLAG.SPLIT]);
+
+  const bad = P.parse('Monday, September 04\n9:00 am\n5:00 pm Security Agent', { now: NOW });
+  assert.ok(bad[0].flags.includes(P.FLAG.WEEKDAY));
+});
+
+test('rows scrolled off the top or bottom do not invent a date', () => {
+  // A time with no day number under it is a row cut off by the screen edge.
+  const got = P.parse('September\nWED 3:00pm - 11:00pm', { now: NOW });
+  assert.equal(got.length, 1);
+  assert.equal(got[0].date, '');
+  assert.ok(got[0].flags.includes(P.FLAG.NODATE));
+});
+
 /* ---------- golden fixtures ---------------------------------------------- */
 
 const raws = fs.existsSync(FIX)
