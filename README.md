@@ -204,6 +204,32 @@ under an hour or over fourteen is flagged as an unlikely length.
 Calendar rows and shifts typed by hand are never corrected this way. Those
 times are the employer's own numbers, or yours.
 
+## Filling a week from the rota
+
+A job that runs the same days every week does not need a screenshot most weeks.
+**Add → Fill a week from the rota** puts the declared rota into a week and
+drops the shifts into the review list, where they behave like any other import:
+same flags, same overlap check, same commit. Nothing is filed until you add
+them.
+
+They stay marked afterwards. A shift that came from the rota rather than from a
+screenshot shows a **hollow stripe** and the words *from the rota* in the week
+list, is named separately in the pay tab — "8.00 h from the rota, unconfirmed" —
+and goes into the calendar as *DSI- De la Montagne (from the rota)*, so the
+05:00 alarm says which kind of shift it is. A screenshot covering that week
+**promotes** them: the matching shift becomes confirmed in place, keeping its
+calendar event, and a site read off the screen replaces the one the app
+guessed. Editing a shift by hand confirms it too.
+
+If a week filled this way is never confirmed, the schedule says so rather than
+letting it pass as fact: *"3 shifts in the last fortnight came from the rota and
+were never confirmed against a screenshot."*
+
+Set **Statutory holidays** on the job and a generated shift landing on one is
+flagged — *"A statutory holiday falls on this day."* It is never dropped for
+you: the rota may well run that day, and a shift quietly skipped is a shift
+missed. Past weeks are never filled, and a week already covered is left alone.
+
 ## Overlapping shifts
 
 Two shifts scheduled over each other is the one failure with no recovery, so it
@@ -223,17 +249,19 @@ ending at 15:00 and one starting at 15:00 say nothing.
 
 ## Development
 
-Three modules, all pure functions — no DOM, no storage. `parser.js` turns OCR
+Four modules, all pure functions — no DOM, no storage. `parser.js` turns OCR
 text into shift rows and `ics.js` does the same for a calendar file; they share
 nothing but the row shape, so both land in the same review screen with the same
 flags and the same commit path. `patterns.js` reads nothing at all — it takes a
 finished row and the shifts declared for its job and decides what to do about
-the difference. Each loads as a plain script in the browser and is required
-directly by the tests. There is still no build step and the app has no runtime
-dependencies.
+the difference, and it also turns a declared rota into a week of rows.
+`holidays.js` is a calendar: which dates are statutory holidays, worked out by
+rule so nothing expires. Each loads as a plain script in the browser and is
+required directly by the tests. There is still no build step and the app has no
+runtime dependencies.
 
 ```
-npm test              # run all three modules' tests
+npm test              # run every module's tests
 npm run test:update   # regenerate golden files, then read them before committing
 ```
 
@@ -244,8 +272,9 @@ do not depend on where the tests are run.
 Fixtures marked PROVISIONAL are typed from the vendors' user guides; ones
 marked TRANSCRIBED are real schedules read off screenshots by eye rather than
 by OCR. Neither kind proves the reading of the text, only the understanding of
-the layout. An unmarked fixture is pasted OCR output. `patterns.js` has no
-fixtures — it reads nothing, so its tests are stated cases rather than samples.
+the layout. An unmarked fixture is pasted OCR output. `patterns.js` and `holidays.js` have no
+fixtures — they read nothing, so their tests are stated cases and dates checked
+against a calendar rather than samples.
 
 The app is not carrying live data yet, so there are no schema migrations. When
 the stored shape changes, use **Setup → Danger zone → Delete everything and
@@ -267,7 +296,12 @@ start over**. See PROJECT.md §7.
   mode has no such problem: the feed is rebuilt whole every time.
 - Pay figures are gross estimates for spotting a missing shift on a paystub,
   not a prediction of the deposit. Overtime is counted separately per employer,
-  and premiums, stat holidays and retro pay are not modelled.
+  and premiums, stat holidays and retro pay are not modelled. A week holding
+  shifts filled from the rota says how many of its hours are assumed.
+- The holiday lists are Québec's and the US federal one, and they say when a
+  holiday falls, not whether your employer observes it or whether you are
+  working it. That is why a holiday only ever flags a generated shift and never
+  removes one.
 - Android can clear the storage of a web app under pressure. Save a backup
   from Setup now and then.
 - Both layouts have been checked against real screenshots, but not yet against

@@ -90,12 +90,19 @@ function weekStart(dateStr, startDow){
   return shiftDays(dateStr, -back);
 }
 
+/* A shift the app proposed from a declared rota (§8.3), which nothing has
+   confirmed yet. Every screen that presents a shift as a fact has to ask this
+   — the schedule, the pay tab, the horizon note and the calendar file — and
+   §20 is the record of what each of them did before it could. */
+const isProposed = s => !!s && s.source === 'pattern';
+
 /* ---------- review flags -------------------------------------------------
    parser.js emits codes; the wording lives here so changing it never breaks
    a test fixture. FLAG_MOVED is raised by the importer, not the parser.
    ---------------------------------------------------------------------- */
 const FLAG_MOVED = 'moved';
 const FLAG_CHANGED = 'changed';
+const FLAG_HOLIDAY = 'holiday';
 const FLAG_TEXT = {
   [FLAG.NODATE]:  'No date found \u2014 set it below.',
   [FLAG.AMPM]:    'No am/pm was printed \u2014 check the times.',
@@ -109,6 +116,7 @@ const FLAG_TEXT = {
   [PAT_FLAG.CLASH]:   'This runs over a shift already on file.',
   [FLAG_MOVED]:   'A shift is already on file at this time in a different place \u2014 adding this will not replace it.',
   [FLAG_CHANGED]: 'The calendar has moved a shift already on file.',
+  [FLAG_HOLIDAY]: 'A statutory holiday falls on this day \u2014 remove this row if he is not working it.',
   [ICS_FLAG.NOEND]: 'The calendar gave no end time \u2014 set one below.',
   [ICS_FLAG.RECUR]: 'A repeating event \u2014 only the first was read.',
   [ICS_FLAG.ZONE]:  'The time zone was not recognised \u2014 times taken as written.',
@@ -257,22 +265,64 @@ function horizonNotes(){
   const soon = shiftDays(today, HORIZON_DAYS);
   const many = S.companies.length > 1;
 
-  return S.companies.map(co => {
+  const out = [];
+  S.companies.forEach(co => {
     const mine = S.shifts.filter(s => s.companyId === co.id && s.date >= today);
-    const last = mine.reduce((a, s) => s.date > a ? s.date : a, '');
-    if(last && last > soon) return null;              // far enough ahead, nothing to say
-
+    // Confirmed only. A week filled from the rota would otherwise switch this
+    // note off, which turns the one standing prompt to act into a reassurance
+    // about four assumptions (§20.3).
+    const ahead = mine.filter(s => !isProposed(s));
+    const proposed = mine.filter(isProposed);
+    const last = ahead.reduce((a, s) => s.date > a ? s.date : a, '');
+    const lastAny = mine.reduce((a, s) => s.date > a ? s.date : a, '');
     const fed = !!String(co.icsMatch || '').trim();
-    const when = last ? `nothing on file after ${fmtDay(last)}` : 'nothing on file at all';
+    const rota = canGenerate(co.patterns);
     // With one job there is no name in front, so the sentence has to start itself.
-    const head = many ? `${co.name} — ${when}` : when[0].toUpperCase() + when.slice(1);
-    return {
-      text: fed
-        ? `${head}. The calendar should be filling this — check Calendar Sync.`
-        : `${head}. Nothing is coming automatically for this job — add next week.`,
-      fed
-    };
-  }).filter(Boolean);
+    const head = t => many ? `${co.name} — ${t}` : t[0].toUpperCase() + t.slice(1);
+
+    // A week filled from the rota is not nothing, and saying "nothing on file"
+    // over four visible shifts reads as a bug rather than a distinction. It is
+    // a quieter note than the one below because the state is better — there is
+    // a schedule, it is just an assumed one — and it names the way out of it.
+    if(proposed.length){
+      const to = proposed.reduce((a, s) => s.date > a ? s.date : a, '');
+      out.push({ text: head(`filled from the rota to ${fmtDay(to)} — ` +
+        `${proposed.length} shift${proposed.length===1?'':'s'}, none confirmed yet. ` +
+        'A screenshot of that week confirms them.'), fed: true });
+    }
+
+    // The alarm below is about running out of schedule altogether, so it is
+    // measured against everything on file, assumed or not — but what it counts
+    // as an answer is only what has been confirmed.
+    if(!(lastAny && lastAny > soon)){
+      // "Confirmed" only once there is something unconfirmed to distinguish it
+      // from. On a job that has never generated a week, this is §17.3's
+      // sentence unchanged.
+      const kind = proposed.length ? 'confirmed' : 'on file';
+      const when = last ? `nothing ${kind} after ${fmtDay(last)}` : `nothing ${kind} at all`;
+      out.push({
+        text: fed
+          ? `${head(when)}. The calendar should be filling this — check Calendar Sync.`
+          : rota
+            ? `${head(when)}. Nothing is coming automatically for this job — fill a week from the rota in Add.`
+            : `${head(when)}. Nothing is coming automatically for this job — add next week.`,
+        fed
+      });
+    }
+
+    // The pile-up warning §8.3 asked for, and §17.2 put here. It counts the
+    // proposals whose date has *passed* unconfirmed, because that is the state
+    // that means the screenshots stopped arriving and nobody noticed. Counting
+    // the ones still ahead would fire on the ordinary case the day after he
+    // fills a week, which is §19.1's mistake exactly.
+    const stale = S.shifts.filter(s => s.companyId === co.id && isProposed(s) &&
+                                       s.date < today && s.date >= shiftDays(today, -14));
+    if(stale.length)
+      out.push({ text: head(`${stale.length} shift${stale.length===1?'':'s'} in the last fortnight ` +
+        `came from the rota and ${stale.length===1?'was':'were'} never confirmed against a screenshot. ` +
+        'The hours and the pay for those are assumptions.'), fed: false });
+  });
+  return out;
 }
 
 /* A date as "Fri 11 Sep" — short enough to read inside a sentence. */
@@ -385,11 +435,19 @@ function renderSchedule(){
       ds.forEach((s, idx) => {
         const co = coById(s.companyId);
         const item = el('div','shift');
+        // §8.3's hollow tick, on the thing that is actually there: the colour
+        // stripe goes outlined rather than filled for a shift nothing has
+        // confirmed. Colour alone cannot carry that on a 3px rule, so the word
+        // rides along on the line that already names the job and the site.
+        const dot = isProposed(s)
+          ? `background:transparent;box-shadow:inset 0 0 0 1px ${esc(co?.color || '#C6CAC1')}`
+          : `background:${esc(co?.color || '#C6CAC1')}`;
         item.innerHTML = `
-          <i class="tick" style="background:${esc(co?.color || '#C6CAC1')}"></i>
+          <i class="tick" style="${dot}"></i>
           <div>
             <div class="when">${esc(fmtTime(s.start))} – ${esc(fmtTime(s.end))}</div>
-            <div class="where">${esc(co ? co.name : 'Unassigned')} &middot; ${esc(s.label)}</div>
+            <div class="where">${esc(co ? co.name : 'Unassigned')} &middot; ${esc(s.label)}${
+              isProposed(s) ? ' &middot; <span class="rota">from the rota</span>' : ''}</div>
           </div>
           <div class="len">${fmtDur(durMins(s))}</div>`;
         item.onclick = () => editShift(s.id);
@@ -439,8 +497,15 @@ function renderPay(){
     weeks.forEach(([ws, shifts]) => {
       const w = weekTotals(shifts, co);
       const d = asDate(ws);
-      const tr = el('tr');
-      tr.innerHTML = `<td>${MONTHNAMES[d.getMonth()].slice(0,3)} ${d.getDate()}</td>
+      // A week holding shifts nothing has confirmed says so, with the assumed
+      // hours named separately (§20.4). The figure is not suppressed — a
+      // forecast is useful — but a gross to the cent, checked against a
+      // deposit weeks later when the screenshot is long gone, must not quietly
+      // rest on a rota.
+      const assumed = weekTotals(shifts.filter(isProposed), co);
+      const tr = el('tr', assumed.hrs ? 'assumed' : null);
+      tr.innerHTML = `<td>${MONTHNAMES[d.getMonth()].slice(0,3)} ${d.getDate()}${
+          assumed.hrs ? `<span class="tiny soft"><br>${assumed.hrs.toFixed(2)} h from the rota, unconfirmed</span>` : ''}</td>
         <td class="n">${w.hrs.toFixed(2)}</td>
         <td class="n">${w.ot ? w.ot.toFixed(2) : '–'}</td>
         <td class="n">${co.rate ? '$' + w.gross.toFixed(2) : '–'}</td>`;
@@ -624,6 +689,17 @@ function renderSetup(){
         on every shift and nothing else — a site name, the role — keeps them out. Leave it
         empty to take everything.</p>
 
+      <label class="f"><span>Statutory holidays</span>
+        <select data-k="holidays">
+          <option value=""${!co.holidays ? ' selected' : ''}>Don’t check</option>
+          ${holidayPlaces().map(h =>
+            `<option value="${h.id}"${co.holidays===h.id?' selected':''}>${esc(h.name)}</option>`).join('')}
+        </select></label>
+      <p class="tiny soft" style="margin:-.35rem 0 0">Only used when a week is filled from
+        the rota: a generated shift landing on a holiday is flagged so it can be removed
+        before it is added. It never removes one by itself — the rota may well run that
+        day, and a shift quietly dropped is a shift missed.</p>
+
       <h3 class="subhead">Shifts this job normally runs</h3>
       <p class="tiny soft" style="margin:0 0 .4rem">Times read off a screenshot are checked
         against these. One exactly twelve hours out is an am/pm misread and is corrected;
@@ -712,6 +788,11 @@ function editShift(id){
     s.end = $('#e-end').value;
     s.label = $('#e-label').value.trim() || 'Shift';
     s.place = $('#e-place').value.trim();
+    // He has just been through this shift by hand, which is the strongest
+    // confirmation there is. Leaving it as a proposal would keep drawing his
+    // own numbers as an assumption and keep counting them as unconfirmed
+    // (§20.8).
+    if(isProposed(s)) s.source = 'manual';
     s.sent = false;              // changed, so send it to the calendar again
     save(); dlg.close(); renderAll();
   };
@@ -846,13 +927,35 @@ async function readFiles(files){
 /* Drop only exact repeats — same job, same date, same times, same place. A row
    matching on time but not on place is a location change, not a duplicate, so
    it stays and gets flagged for review. This is all a screenshot row can be
-   matched on; a calendar row has a UID and is matched on that first. */
+   matched on; a calendar row has a UID and is matched on that first.
+
+   The case that made §8.3 work is the middle one. A generated shift is exactly
+   what a later screenshot matches, so under the old rule the confirming row
+   was discarded as a duplicate, nothing was written, and the record stayed a
+   proposal for ever — the hollow tick could never fill in, and the mitigation
+   §8.3 rests on could never happen (§20.2). A match against a `source:'pattern'`
+   record is therefore a confirmation rather than a repeat: it carries
+   `replaceId`, and the commit path replaces in place keeping the record's id,
+   so the calendar sees an update rather than a second event.
+
+   The site is not compared in that case. The label on a generated row was
+   never read off anything — §8.3 calls it a convenience default — so a
+   screenshot disagreeing with it is not a location change, it is the first
+   real information anyone has had about it. */
 function bySlot(p){
   if(!p.date) return true;
   const sameSlot = S.shifts.filter(s =>
     s.companyId === p.companyId && s.date === p.date &&
     s.start === p.start && s.end === p.end);
   if(!sameSlot.length) return true;
+
+  // A generated row into a slot already filled: the week is already covered,
+  // whatever is standing there. Filling the same week twice adds nothing.
+  if(isProposed(p)) return false;
+
+  const proposal = sameSlot.find(isProposed);
+  if(proposal){ p.replaceId = proposal.id; return true; }            // confirmation
+
   const snapped = key(snapSite(p.label, p.companyId));
   if(sameSlot.some(s => key(s.label) === snapped)) return false;     // exact repeat
   p.flags = [...p.flags, FLAG_MOVED];
@@ -893,6 +996,103 @@ function applyPatterns(p){
   p.patNote = (got.read && got.flags.includes(PAT_FLAG.FLIPPED))
     ? `Read as ${fmtTime(got.read.start)}\u2013${fmtTime(got.read.end)}.`
     : '';
+}
+
+/* ---------- filling a week from the rota (§8.3) ----------------------------
+   The fixed job has no feed and no email, so the sensible primary input is not
+   a screenshot at all — it is the rota itself, proposed into the review screen,
+   with screenshots demoted to catching the weeks that deviate (§17.2).
+
+   Rows are emitted into `pending`, which is the whole trick: the review screen,
+   its flags, the length and overlap checks, the site snapping and the commit
+   path all already exist and all treat these like any other import. What is
+   new here is only what a pattern cannot say — which dates, which site, and
+   which of those dates is a holiday.
+   ---------------------------------------------------------------------- */
+
+/* The pay week, not the schedule's Sunday-to-Saturday one. It is the week
+   boundary he chose a meaning for, and a generated week that cut across the
+   week his hours are totalled in would be useless for the one thing generation
+   is for (§20.8). */
+function payWeekStart(co, dateStr){
+  return weekStart(dateStr || todayISO(), co.weekStart ?? 0);
+}
+
+/* Where the shift is, which a pattern does not carry. The most recent filed
+   shift at these times for this job is the best guess available, and a
+   convenience default is fine for a label where it would not be for a time:
+   a wrong label costs mild confusion, a wrong time costs a shift (§8.3).
+
+   `place` comes with it. It is what makes the two-hour alarm a tappable
+   address (§14, §20.8) — a label without it is a downgrade from every other
+   route into this app. */
+function siteFor(co, start, end){
+  // Confirmed records first, and only then the app's own earlier guesses. A
+  // label copied from one generated week into the next would be an assumption
+  // quietly acquiring a history, which is the shape §8.2 rejected outright when
+  // it refused to learn times from the parser's own output.
+  const rank = s => (isProposed(s) ? 1 : 0);
+  const mine = S.shifts.filter(s => s.companyId === co.id)
+    .sort((a, b) => rank(a) - rank(b) || (b.date + b.start).localeCompare(a.date + a.start));
+  const same = mine.find(s => s.start === start && s.end === end) || mine[0];
+  return { label: same ? same.label : 'Shift', place: same && same.place ? same.place : '' };
+}
+
+/* Marked, never skipped. A silent skip generalises from one observed Labour
+   Day, and on the holiday he does work it produces a missing shift with
+   nothing on screen to notice — the more expensive failure by §8.3's own
+   ranking. Flagged, the question costs one tap, in review, before anything is
+   filed and long before anything rings (§20.7).
+
+   Re-run when the row's date or job changes, the same way the pattern check is
+   (§18.5): a verdict about the 7th has nothing to say about the 8th, and a
+   holiday flag left standing over a date it no longer describes is exactly the
+   sort of stale amber that teaches him to ignore the amber that means it. */
+function applyHoliday(p){
+  if(!isProposed(p)) return;
+  const co = coById(p.companyId);
+  const hol = co && p.date ? holidayOn(p.date, co.holidays) : null;
+  p.flags = p.flags.filter(f => f !== FLAG_HOLIDAY);
+  p.note = '';
+  if(hol){
+    p.flags = [...p.flags, FLAG_HOLIDAY];
+    p.note = `${hol}.`;
+  }
+}
+
+/* One week of the rota, as review rows. Returns what it did rather than
+   saying it, so the caller writes the sentence and the tests do not have to
+   read the DOM to know what happened. */
+function fillWeek(co, ws){
+  const today = todayISO();
+  // Never backwards. Past hours filled from a rota land in the pay tab as
+  // earnings nobody verified, and in the feed as events whose alarms have
+  // already gone off (§20.8).
+  const dates = weekDates(ws, 7).filter(d => d >= today);
+  const rows = generateWeek(co.patterns, dates);
+
+  let filled = 0, covered = 0, holidays = 0;
+  for(const r of rows){
+    const site = siteFor(co, r.start, r.end);
+    const row = { rid: uid(), companyId: co.id, date: r.date, start: r.start, end: r.end,
+                  label: site.label, flags: [], source: 'pattern' };
+    if(site.place) row.place = site.place;
+
+    applyHoliday(row);
+
+    // Already on file, or already sitting in this batch: the slot is covered
+    // and a second row for it would read as a second shift he is expected to
+    // work. bySlot() drops a generated row into a filled slot whatever the
+    // site standing there, because the site on this row was invented here.
+    const inBatch = pending.some(x => !x.removeId && x.companyId === co.id &&
+      x.date === row.date && x.start === row.start && x.end === row.end);
+    if(inBatch || !bySlot(row)){ covered++; continue; }
+
+    pending.push(row);
+    filled++;
+    if(row.flags.includes(FLAG_HOLIDAY)) holidays++;   // counted only if it is really there
+  }
+  return { filled, covered, holidays, dates: dates.length };
 }
 
 /* Overlap, at the point it can still be stopped (§8.2, §19).
@@ -1148,6 +1348,7 @@ function renderReview(){
     // his, and §8.2's rule that a real change must never be snapped away
     // applies most of all when the change came from him.
     const recheck = () => {
+      applyHoliday(p);
       applyPatterns(p);
       if(!p.edited){ s.value = p.start; e.value = p.end; }
       refreshAll();
@@ -1219,7 +1420,12 @@ function buildICS(only){
   only.forEach(s => {
     const co = coById(s.companyId);
     const endDate = mins(s.end) <= mins(s.start) ? shiftDays(s.date,1) : s.date;
-    const title = `${co ? co.name : 'Shift'}- ${s.label}`;
+    // The hollow tick is in the app; the alarm is on the phone, and the phone
+    // is where §8.3's stated risk actually lands. The title carries the mark,
+    // and the alarm body reuses the title, so a 05:00 buzz for a shift nothing
+    // has confirmed says which kind it is (§20.5).
+    const title = `${co ? co.name : 'Shift'}- ${s.label}` +
+                  (isProposed(s) ? ' (from the rota)' : '');
     L.push('BEGIN:VEVENT',
       fold(`UID:${s.id}@shiftdeck`),
       `DTSTAMP:${now}`,
@@ -1342,6 +1548,71 @@ $('#commit').onclick = () => {
       : '');
 };
 $('#discard').onclick = () => { pending = []; renderReview(); $('#progtext').textContent = 'Discarded.'; };
+
+/* "Fill week of ___" (§8.3). The week is asked for rather than assumed —
+   next week is the ordinary case and is what the picker opens on, but the week
+   after is what he wants the moment he is looking further ahead than that. */
+$('#fillweek').onclick = () => {
+  const co = coById($('#impco').value);
+  if(!co){ alert('Add a job in Setup first.'); return; }
+  if(!canGenerate(co.patterns)){
+    alert(`${co.name} has no rota to fill from. In Setup, declare the shifts it normally ` +
+          'runs and tick the days — a shift with no days ticked is only ever checked against.');
+    return;
+  }
+
+  const dlg = $('#dlg');
+  $('#dlgbody').innerHTML = `
+    <h2>Fill a week from the rota</h2>
+    <p class="tiny soft" style="margin:0 0 .6rem">${esc(co.name)}. The shifts land in the
+      review list below like any import — nothing is filed until you add them, and they
+      stay marked as coming from the rota until a screenshot confirms them.</p>
+    <label class="f"><span>Week beginning</span><input id="f-week" type="date"></label>
+    <p class="tiny" id="f-what"></p>
+    <div class="rowbtns">
+      <button class="act" id="f-go">Fill it</button>
+      <button class="ghost" id="f-cancel">Cancel</button>
+    </div>`;
+
+  const wk = $('#f-week');
+  // Next week, on this job's own pay week (§20.8), because the week in front of
+  // him is the one already on the schedule.
+  wk.value = shiftDays(payWeekStart(co, todayISO()), 7);
+  const say = () => {
+    const ws = payWeekStart(co, wk.value || todayISO());
+    const today = todayISO();
+    const dates = weekDates(ws, 7).filter(d => d >= today);
+    const rows = generateWeek(co.patterns, dates);
+    const what = $('#f-what');
+    what.textContent = !dates.length
+      ? `That week has been and gone — ${fmtDay(ws)} onwards is already in the past, and a rota is not evidence about a week that has already happened.`
+      : rows.length
+        ? `Week of ${fmtDay(ws)}: ${rows.length} shift${rows.length===1?'':'s'} — ` +
+          rows.map(r => `${DAYNAMES[dowOf(r.date)]} ${fmtTime(r.start)}\u2013${fmtTime(r.end)}`).join(', ') + '.'
+        : `Week of ${fmtDay(ws)}: the rota puts nothing in it.`;
+    $('#f-go').disabled = !rows.length;
+  };
+  wk.oninput = say;
+  say();
+
+  dlg.showModal();
+  $('#f-cancel').onclick = () => dlg.close();
+  $('#f-go').onclick = () => {
+    const ws = payWeekStart(co, wk.value || todayISO());
+    const got = fillWeek(co, ws);
+    dlg.close();
+    $('#prog').classList.add('on');
+    renderReview();
+    $('#progtext').textContent = got.filled
+      ? `${got.filled} shift${got.filled===1?'':'s'} from the rota, week of ${fmtDay(ws)}. ` +
+        'Nothing has confirmed these — check them, then add.' +
+        (got.holidays ? ` ${got.holidays} fall${got.holidays===1?'s':''} on a holiday and ${got.holidays===1?'is':'are'} flagged.` : '') +
+        (got.covered ? ` ${got.covered} already covered.` : '')
+      : got.covered
+        ? `Nothing to add — that week is already covered.`
+        : `The rota puts nothing in the week of ${fmtDay(ws)}.`;
+  };
+};
 
 $('#manual').onclick = () => {
   const co = $('#impco').value;

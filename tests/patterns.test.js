@@ -301,3 +301,78 @@ test('clashPairs reports each colliding pair once', () => {
   assert.deepEqual([pairs[0].a.id, pairs[0].b.id, pairs[0].mins], ['a','b',75]);
   assert.deepEqual(T.clashPairs([]), []);
 });
+
+/* ---------- generating a week (§8.3) ------------------------------------- */
+
+test('dowOf and weekDates walk the calendar without a local Date', () => {
+  assert.equal(T.dowOf('2026-09-07'), 1);            // Labour Day, a Monday
+  assert.equal(T.dowOf('2026-09-13'), 0);            // Sunday
+  assert.equal(T.dowOf('nonsense'), null);
+  assert.equal(T.isoFromDayNum(T.dayNum('2026-09-07')), '2026-09-07');
+  assert.deepEqual(T.weekDates('2026-09-07'), [
+    '2026-09-07','2026-09-08','2026-09-09','2026-09-10',
+    '2026-09-11','2026-09-12','2026-09-13'
+  ]);
+  assert.deepEqual(T.weekDates('2026-09-07', 2), ['2026-09-07','2026-09-08']);
+  // A month boundary is where hand-rolled date maths usually breaks.
+  assert.deepEqual(T.weekDates('2026-09-28', 4), ['2026-09-28','2026-09-29','2026-09-30','2026-10-01']);
+  assert.deepEqual(T.weekDates('', 7), []);
+  assert.deepEqual(T.weekDates('2026-09-07', 0), []);
+});
+
+test('DSI’s rota fills its own week, and only its own days', () => {
+  const got = T.generateWeek(DSI, T.weekDates('2026-09-07'));
+  assert.deepEqual(got.map(r => r.date),
+    ['2026-09-07','2026-09-08','2026-09-09','2026-09-11']);   // Mon Tue Wed Fri
+  assert.ok(got.every(r => r.start === '15:00' && r.end === '23:00'));
+});
+
+test('a pattern with no days never generates, however it is mixed in', () => {
+  const checkOnly = [{ start:'09:00', end:'17:00' }];
+  assert.deepEqual(T.generateWeek(checkOnly, T.weekDates('2026-09-07')), []);
+  assert.equal(T.canGenerate(checkOnly), false);
+  assert.equal(T.canGenerate(DSI), true);
+  assert.equal(T.canGenerate([]), false);
+  // Beside a rota, the catch-all still contributes nothing to the week.
+  const mixed = T.generateWeek([...DSI, ...checkOnly], T.weekDates('2026-09-07'));
+  assert.equal(mixed.length, 4);
+  assert.ok(mixed.every(r => r.start === '15:00'));
+});
+
+test('a half-typed rota is dropped rather than half-believed', () => {
+  // The state the setup screen is in between adding a shift and typing it.
+  assert.deepEqual(T.generateWeek([{ days:[1,2,3,5], start:'', end:'' }],
+                                  T.weekDates('2026-09-07')), []);
+  assert.deepEqual(T.generateWeek([{ days:[1], start:'15:00' }], T.weekDates('2026-09-07')), []);
+  assert.deepEqual(T.generateWeek(null, T.weekDates('2026-09-07')), []);
+  assert.deepEqual(T.generateWeek(DSI, null), []);
+});
+
+test('the same rota declared twice fills the week once', () => {
+  const got = T.generateWeek([...DSI, ...DSI], T.weekDates('2026-09-07'));
+  assert.equal(got.length, 4);
+  // A second shift at different times on a rota day is a second shift, not a
+  // duplicate, and both are emitted.
+  const two = T.generateWeek([...DSI, { days:[1], start:'06:00', end:'14:00' }],
+                             T.weekDates('2026-09-07'));
+  assert.equal(two.length, 5);
+  assert.deepEqual(two.slice(0, 2).map(r => r.start), ['06:00', '15:00']);  // in order
+});
+
+test('an overnight rota fills the day the shift starts on', () => {
+  // Saturday nights, the shape §16.3 records for the other job.
+  const nights = [{ days:[6], start:'19:15', end:'07:15' }];
+  const got = T.generateWeek(nights, T.weekDates('2026-09-07'));
+  assert.deepEqual(got, [{ date:'2026-09-12', start:'19:15', end:'07:15' }]);
+  // And the overlap check sees it running into the Sunday, exactly as it would
+  // for a shift read off a screenshot.
+  assert.equal(T.clashMins(got[0], { date:'2026-09-13', start:'06:00', end:'14:00' }), 75);
+});
+
+test('generation fills only the dates it is given', () => {
+  // app.js drops the dates already past before calling, which is how §20.8's
+  // "never backwards" is enforced; the function itself just does as it is told.
+  const rest = T.weekDates('2026-09-07').filter(d => d >= '2026-09-09');
+  assert.deepEqual(T.generateWeek(DSI, rest).map(r => r.date),
+    ['2026-09-09','2026-09-11']);
+});
