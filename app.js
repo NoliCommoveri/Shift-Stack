@@ -106,6 +106,7 @@ const FLAG_TEXT = {
   [PAT_FLAG.FLIPPED]: 'Twelve hours out from a shift declared for this job, and corrected \u2014 check it.',
   [PAT_FLAG.OFFPAT]:  'This is not a shift declared for this job \u2014 check the day and the times.',
   [PAT_FLAG.ODDLEN]:  'That is an unusual length for a shift \u2014 check the times.',
+  [PAT_FLAG.CLASH]:   'This runs over a shift already on file.',
   [FLAG_MOVED]:   'A shift is already on file at this time in a different place \u2014 adding this will not replace it.',
   [FLAG_CHANGED]: 'The calendar has moved a shift already on file.',
   [ICS_FLAG.NOEND]: 'The calendar gave no end time \u2014 set one below.',
@@ -280,12 +281,46 @@ function fmtDay(d){
   return `${DAYNAMES[x.getDay()].slice(0,3)} ${x.getDate()} ${MONTHNAMES[x.getMonth()].slice(0,3)}`;
 }
 
+/* The standing warning. The horizon notes say what is missing; this says what
+   is wrong, and it is louder because it is worse.
+
+   It has to be a banner rather than only a line beside the shift, because the
+   way a clash arrives is unattended: Calendar Sync writes a Trupoint shift
+   into Google, the .ics comes in, and it lands on top of a DSI shift already
+   on file. Nobody is looking at that week when it happens. A warning he has to
+   scroll to the right week to find is a warning about a shift he has already
+   stopped thinking about.
+
+   It never proposes a fix. Which of the two is wrong is not something this app
+   can know — the feed may be right and the screenshot stale, or the reverse —
+   so it names both and he decides. */
+function clashNotes(){
+  const today = todayISO();
+  return clashPairs(S.shifts.filter(s => s.date >= shiftDays(today, -1)))
+    .map(({ a, b, mins: m }) => {
+      const side = sh => {
+        const co = coById(sh.companyId);
+        return `${co ? co.name : 'Unassigned'} ${fmtTime(sh.start)}\u2013${fmtTime(sh.end)}`;
+      };
+      return `${fmtDay(a.date)}: ${side(a)} runs over ${side(b)} by ${fmtDur(m)}. ` +
+             'He cannot work both \u2014 one of them is wrong.';
+    });
+}
+
 function renderHorizon(){
   const wrap = $('#horizon');
   if(!wrap) return;
   wrap.innerHTML = '';
   const notes = horizonNotes();
-  wrap.hidden = !notes.length;
+  const bad = clashNotes();
+  wrap.hidden = !(notes.length || bad.length);
+  // Clashes first. A missing week is a job to do; a double booking is a shift
+  // he is going to miss.
+  bad.forEach(t => {
+    const p = el('p','flag horizon clash');
+    p.textContent = t;
+    wrap.appendChild(p);
+  });
   notes.forEach(n => {
     const p = el('p', 'flag horizon' + (n.fed ? ' fed' : ''));
     p.textContent = n.text;
@@ -307,6 +342,20 @@ function renderSchedule(){
     box.appendChild(el('p','empty','Nothing scheduled yet. Use the Add tab to bring shifts in.'));
     return;
   }
+
+  // Worked out over every shift on file, not week by week and not day by day:
+  // a clash does not respect either boundary.
+  const clashes = new Map();
+  clashPairs(S.shifts).forEach(({ a, b, mins: m }) => {
+    const name = sh => {
+      const co = coById(sh.companyId);
+      return `${co ? co.name : 'a shift'} ${fmtTime(sh.start)}\u2013${fmtTime(sh.end)} on ${fmtDay(sh.date)}`;
+    };
+    // Both sides say what they run over. Two lines where the old check printed
+    // one, and that is the right trade for the failure with no recovery.
+    if(!clashes.has(a.id)) clashes.set(a.id, { other: name(b), mins: m });
+    if(!clashes.has(b.id)) clashes.set(b.id, { other: name(a), mins: m });
+  });
 
   const byWeek = new Map();
   list.forEach(s => {
@@ -346,14 +395,17 @@ function renderSchedule(){
         item.onclick = () => editShift(s.id);
         col.appendChild(item);
 
-        // Flag a tight turnaround between two jobs on the same day.
-        const prev = ds[idx-1];
-        if(prev){
-          const gap = mins(s.start) - (mins(prev.start) + durMins(prev));
-          if(gap < 60 && gap > -600)
-            col.appendChild(el('div','gapwarn',
-              gap < 0 ? 'These two overlap.' : `Only ${gap} min between these.`));
-        }
+        // Only real overlap. A tight turnaround used to be flagged here too
+        // and it was wrong for these two jobs — going straight from one to the
+        // other is normal, so it fired constantly on nothing and taught him to
+        // scroll past the line that also has to carry the case that matters.
+        //
+        // Not `ds[idx-1]` either: the collision worth catching is a Trupoint
+        // night running into the next morning, and those two sit in different
+        // day rows. `clashes` is worked out across the whole list.
+        const hit = clashes.get(s.id);
+        if(hit) col.appendChild(el('div','gapwarn',
+          `Overlaps ${hit.other} by ${fmtDur(hit.mins)}. He cannot work both.`));
       });
       row.appendChild(col);
       box.appendChild(row);
@@ -843,6 +895,35 @@ function applyPatterns(p){
     : '';
 }
 
+/* Overlap, at the point it can still be stopped (§8.2, §19).
+
+   The schedule banner catches a clash that is already filed. This catches it
+   one step earlier, in review, which is where it is cheapest to fix and where
+   the calendar path most needs it — a feed import is the one route into this
+   app that nobody is watching.
+
+   A row is checked against what is on file and against the rest of the batch,
+   because a screenshot and an .ics imported in the same sitting can just as
+   easily collide with each other as with history. Rows this one is about to
+   replace or remove are not counted: they are this same shift, not a second
+   one, and counting them would flag every ordinary calendar update. */
+function applyClashes(rows){
+  const live = S.shifts.filter(s => !rows.some(r => r.removeId === s.id || r.replaceId === s.id));
+  rows.forEach(p => {
+    if(p.removeId) return;
+    p.flags = p.flags.filter(f => f !== PAT_FLAG.CLASH);
+    p.clashNote = '';
+    const others = [...live, ...rows.filter(r => !r.removeId)];
+    const hits = findClashes(p, others, o => o === p || (p.replaceId && o.id === p.replaceId));
+    if(!hits.length) return;
+    const o = hits[0].shift;
+    const co = coById(o.companyId);
+    p.flags = [...p.flags, PAT_FLAG.CLASH];
+    p.clashNote = `${co ? co.name : 'A shift'} ${fmtTime(o.start)}\u2013${fmtTime(o.end)} ` +
+                  `on ${fmtDay(o.date)}, by ${fmtDur(hits[0].mins)}.`;
+  });
+}
+
 /* ---------- calendar import ----------------------------------------------
    Homebase's own Calendar Sync writes his shifts into a Google calendar. That
    is a better source than a screenshot in every way that matters — the times
@@ -990,7 +1071,7 @@ async function fetchCalendar(url){
 }
 
 function flagText(p){
-  return [...p.flags.map(f => FLAG_TEXT[f] || f), p.patNote || '', p.note || '']
+  return [...p.flags.map(f => FLAG_TEXT[f] || f), p.patNote || '', p.clashNote || '', p.note || '']
     .filter(Boolean).join(' ');
 }
 
@@ -999,8 +1080,18 @@ function renderReview(){
   box.innerHTML = '';
   $('#revbtns').hidden = !pending.length;
   if(!pending.length) return;
+  // Every render, because a clash is a property of the batch rather than of a
+  // row: correcting one row's date can put it on top of another, and removing
+  // a row can clear a warning still sitting on the one it collided with.
+  applyClashes(pending);
 
   const manyJobs = S.companies.length > 1;
+  // A clash belongs to the batch, not to a row, so changing one row can clear
+  // or raise a warning on another. Every row hands back a way to refresh its
+  // own note line, and they all get called together — re-rendering the list
+  // instead would reorder rows and drop focus mid-edit.
+  const touches = [];
+  const refreshAll = () => { applyClashes(pending); touches.forEach(t => t()); };
 
   pending.forEach(p => {
     // A removal is not an edit. It gets no fields — there is nothing to
@@ -1049,6 +1140,7 @@ function renderReview(){
       note.hidden = !(p.flags.length || p.patNote);
       row.classList.toggle('flagged', !p.date || p.flags.length > 0);
     };
+    touches.push(touch);
     // The date and the job are what decide which declared shifts a row is
     // judged against, so changing either re-runs the check — and a TrackTik
     // screen where every row came back undated (§16.1) is exactly when it is
@@ -1058,7 +1150,7 @@ function renderReview(){
     const recheck = () => {
       applyPatterns(p);
       if(!p.edited){ s.value = p.start; e.value = p.end; }
-      touch();
+      refreshAll();
     };
     const byHand = () => {
       p.edited = true;
@@ -1075,7 +1167,7 @@ function renderReview(){
       if(p.date) p.flags = p.flags.filter(f => f !== FLAG.NODATE);
       recheck();
     };
-    s.oninput = () => { p.start = s.value; byHand(); touch(); };
+    s.oninput = () => { p.start = s.value; byHand(); refreshAll(); };
     e.oninput = () => {
       p.end = e.value;
       byHand();
@@ -1083,7 +1175,7 @@ function renderReview(){
       // am/pm warning is about a value that was read, not one that was absent,
       // so it survives being given the other half of the pair.
       if(p.end) p.flags = p.flags.filter(f => f !== FLAG.ONETIME);
-      touch();
+      refreshAll();
     };
     l.oninput = () => { p.label = l.value; };
     const job = row.querySelector('select');

@@ -35,7 +35,8 @@
 const PAT_FLAG = {
   FLIPPED: 'flipped',  // exactly 12h from a declared shift, and corrected
   OFFPAT:  'offpat',   // patterns are declared for this job and none matched
-  ODDLEN:  'oddlen'    // no pattern needed: this is not the length of a shift
+  ODDLEN:  'oddlen',   // no pattern needed: this is not the length of a shift
+  CLASH:   'clash'     // he cannot work this, he is already somewhere else
 };
 
 /* Snapping must never be silent (§8.2). If the employer genuinely moves a
@@ -214,9 +215,92 @@ function suggestPatterns(shifts){
     .sort((a, b) => b.count - a.count || a.start.localeCompare(b.start));
 }
 
+/* ==========================================================================
+   Overlap, the other half of §8.2's no-config row.
+
+   This is the one failure in the app with no recovery. A misread time is
+   embarrassing; two shifts booked over each other means he is contracted to be
+   in two places at once and finds out on the day.
+
+   **Only real overlap counts.** An earlier version of this warned about tight
+   turnarounds too — under an hour between two shifts — and that is wrong for
+   these two jobs: going straight from one to the other is normal and common,
+   so the warning fired constantly on nothing and taught him to scroll past it.
+   A warning that cries wolf on the ordinary case is worse than no warning,
+   because it is the same warning that has to carry the case that matters.
+
+   Everything below works on an absolute timeline rather than within a day,
+   which the real data forces: Trupoint's shifts are 19:15-07:15 and
+   00:15-08:15 (§16.3), so overnight is that job's normal shape and the
+   collision to catch is a night shift running into the next morning's. A check
+   that compared shifts inside a single date could never see it.
+   ========================================================================== */
+
+/* Days since 1970 for an ISO date, so two shifts on different dates can be put
+   on one number line. Deliberately UTC: this is arithmetic on a calendar date,
+   not a moment in time, and a local-time reading of it would shift by a day
+   somewhere in the world. */
+function dayNum(isoDate){
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate || ''));
+  return m ? Math.round(Date.UTC(+m[1], +m[2]-1, +m[3]) / 86400000) : null;
+}
+
+/* A shift as [from, to) in minutes on that line. An end at or before the start
+   is overnight and runs past the end of its own day, which is the whole reason
+   this is not done inside a date. */
+function absSpan(sh){
+  if(!sh) return null;
+  const d = dayNum(sh.date), a = patMins(sh.start), b = patMins(sh.end);
+  if(d === null || a === null || b === null) return null;
+  const from = d * 1440 + a;
+  return { from, to: from + (b > a ? b - a : b - a + 1440) };
+}
+
+/* Minutes two shifts are both scheduled for. Zero when one ends exactly as the
+   other starts — that is a handover, not a clash, and it is the ordinary case
+   this must stay quiet about. */
+function clashMins(a, b){
+  const x = absSpan(a), y = absSpan(b);
+  if(!x || !y) return 0;
+  return Math.max(0, Math.min(x.to, y.to) - Math.max(x.from, y.from));
+}
+
+/* Everything in `others` that `row` cannot be worked alongside, worst first.
+   A row is never compared with itself: `sameAs` says which of the others is
+   this same shift seen from somewhere else — the record a review row is about
+   to replace, or the row's own entry in a list it is part of.
+
+   A row missing a date or a time simply has no span, so it clashes with
+   nothing. That is right rather than lenient: it is already flagged and asking
+   to be completed, and inventing the missing half to test it against would be
+   inventing the answer. */
+function findClashes(row, others, sameAs){
+  if(!absSpan(row)) return [];
+  return (others || [])
+    .filter(o => o && !(sameAs && sameAs(o)))
+    .map(o => ({ shift: o, mins: clashMins(row, o) }))
+    .filter(c => c.mins > 0)
+    .sort((a, b) => b.mins - a.mins);
+}
+
+/* Every colliding pair in one list, each reported once. Used for the standing
+   warning over the schedule, where the question is not "is this new row safe"
+   but "is anything on file already wrong". */
+function clashPairs(shifts){
+  const list = (shifts || []).filter(s => absSpan(s));
+  const out = [];
+  for(let i = 0; i < list.length; i++)
+    for(let j = i + 1; j < list.length; j++){
+      const m = clashMins(list[i], list[j]);
+      if(m > 0) out.push({ a: list[i], b: list[j], mins: m });
+    }
+  return out.sort((x, y) => y.mins - x.mins);
+}
+
 /* Node picks these up for the tests; the browser just gets the globals. */
 if(typeof module !== 'undefined' && module.exports){
   module.exports = { PAT_FLAG, SNAP_MINS, FLIP_MINS, MIN_SHIFT_MINS, MAX_SHIFT_MINS,
                      clockGap, spanMins, validPatterns, patternsFor, endFit,
-                     checkShift, suggestPatterns };
+                     checkShift, suggestPatterns,
+                     dayNum, absSpan, clashMins, findClashes, clashPairs };
 }

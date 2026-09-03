@@ -209,3 +209,95 @@ test('suggestPatterns ignores rows it cannot read a pair off', () => {
   assert.deepEqual(T.suggestPatterns([]), []);
   assert.deepEqual(T.suggestPatterns(undefined), []);
 });
+
+/* ---------- overlap ------------------------------------------------------
+ * The one failure with no recovery: two shifts booked over each other means
+ * he is contracted to be in two places at once. Every case below is built out
+ * of the real shapes in §16.3 — DSI 15:00-23:00, Trupoint overnight.
+ */
+
+test('a handover is not a clash, however tight', () => {
+  // This is the case that matters most, because it is the common one. He
+  // often goes straight from one job to the other, and a check that fires on
+  // that is a check he learns to scroll past.
+  const a = { date:'2026-09-09', start:'07:00', end:'15:00' };
+  const b = { date:'2026-09-09', start:'15:00', end:'23:00' };
+  assert.equal(T.clashMins(a, b), 0);
+
+  // Two shifts on one day with hours between them are not a clash either.
+  assert.equal(T.clashMins({ date:'2026-09-09', start:'06:00', end:'10:00' },
+                           { date:'2026-09-09', start:'15:00', end:'23:00' }), 0);
+});
+
+test('a real overlap is measured, whichever way round it is given', () => {
+  const a = { date:'2026-09-09', start:'13:00', end:'21:00' };
+  const b = { date:'2026-09-09', start:'15:00', end:'23:00' };
+  assert.equal(T.clashMins(a, b), 360);
+  assert.equal(T.clashMins(b, a), 360);
+});
+
+test('an overnight shift is compared with the next morning, not just its own day', () => {
+  // Trupoint's Saturday night runs to 07:15 on the Sunday. A Sunday shift
+  // starting at 06:00 collides with it by 75 minutes, and the two sit on
+  // different dates — which is why none of this is done inside a date.
+  const night = { date:'2026-09-05', start:'19:15', end:'07:15' };
+  const morning = { date:'2026-09-06', start:'06:00', end:'14:00' };
+  assert.equal(T.clashMins(night, morning), 75);
+
+  // The same night shift against the previous evening's DSI shift.
+  assert.equal(T.clashMins(night, { date:'2026-09-05', start:'15:00', end:'23:00' }), 225);
+});
+
+test('a shift wholly inside another is a clash, not something to wave through', () => {
+  // The old day-bucket check dropped anything overlapping by more than ten
+  // hours, so the worst collisions were the invisible ones.
+  const long = { date:'2026-09-09', start:'08:00', end:'20:00' };
+  const inner = { date:'2026-09-09', start:'10:00', end:'12:00' };
+  assert.equal(T.clashMins(long, inner), 120);
+
+  // Two identical shifts overlap completely.
+  assert.equal(T.clashMins(long, { ...long }), 720);
+});
+
+test('shifts days apart never clash', () => {
+  assert.equal(T.clashMins({ date:'2026-09-09', start:'15:00', end:'23:00' },
+                           { date:'2026-09-11', start:'15:00', end:'23:00' }), 0);
+  // Including across a month end, which is arithmetic the day number has to
+  // get right rather than string comparison.
+  assert.equal(T.clashMins({ date:'2026-09-30', start:'19:15', end:'07:15' },
+                           { date:'2026-10-01', start:'06:00', end:'14:00' }), 75);
+});
+
+test('an incomplete row clashes with nothing', () => {
+  const half = { date:'2026-09-09', start:'15:00', end:'' };
+  assert.equal(T.clashMins(half, { date:'2026-09-09', start:'15:00', end:'23:00' }), 0);
+  assert.deepEqual(T.findClashes(half, [{ date:'2026-09-09', start:'15:00', end:'23:00' }]), []);
+  // Undated too: it is already flagged and asking to be completed, and
+  // inventing the missing half to test it against would be inventing the answer.
+  assert.deepEqual(T.findClashes({ date:'', start:'15:00', end:'23:00' },
+                                 [{ date:'2026-09-09', start:'15:00', end:'23:00' }]), []);
+});
+
+test('findClashes reports the worst first and never counts the row itself', () => {
+  const row = { id:'new', date:'2026-09-09', start:'12:00', end:'20:00' };
+  const filed = [
+    { id:'a', date:'2026-09-09', start:'15:00', end:'23:00' },   // 5h
+    { id:'b', date:'2026-09-09', start:'19:00', end:'23:00' },   // 1h
+    { id:'c', date:'2026-09-09', start:'20:00', end:'23:00' },   // handover
+    { id:'new', date:'2026-09-09', start:'12:00', end:'20:00' }  // itself
+  ];
+  const got = T.findClashes(row, filed, o => o.id === 'new');
+  assert.deepEqual(got.map(c => [c.shift.id, c.mins]), [['a',300], ['b',60]]);
+});
+
+test('clashPairs reports each colliding pair once', () => {
+  const filed = [
+    { id:'a', date:'2026-09-05', start:'19:15', end:'07:15' },
+    { id:'b', date:'2026-09-06', start:'06:00', end:'14:00' },
+    { id:'c', date:'2026-09-09', start:'15:00', end:'23:00' }   // clashes with nothing
+  ];
+  const pairs = T.clashPairs(filed);
+  assert.equal(pairs.length, 1);
+  assert.deepEqual([pairs[0].a.id, pairs[0].b.id, pairs[0].mins], ['a','b',75]);
+  assert.deepEqual(T.clashPairs([]), []);
+});

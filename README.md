@@ -204,6 +204,23 @@ under an hour or over fourteen is flagged as an unlikely length.
 Calendar rows and shifts typed by hand are never corrected this way. Those
 times are the employer's own numbers, or yours.
 
+## Overlapping shifts
+
+Two shifts scheduled over each other is the one failure with no recovery, so it
+is flagged in three places: on the row as you add it, in a red banner over the
+schedule, and beside both shifts in the week list. Each message names both
+sides and how long they overlap by, and stops there — which of the two is wrong
+is not something the app can know.
+
+Overlap is measured across midnight, not within a day: an overnight shift
+running into the next morning's is the likeliest real collision, and it is the
+one a day-by-day check would never see. Nothing is blocked and nothing is
+removed automatically.
+
+**Two shifts on the same day are not a warning.** Going straight from one job
+to the other is ordinary. Only hours actually scheduled twice count, so a shift
+ending at 15:00 and one starting at 15:00 say nothing.
+
 ## Development
 
 Three modules, all pure functions — no DOM, no storage. `parser.js` turns OCR
@@ -243,7 +260,8 @@ start over**. See PROJECT.md §7.
   exporting. This is a screenshot problem only: a calendar import cannot get a
   time wrong this way.
 - A calendar import never removes anything on its own. Cancellations are
-  proposed with a tick-box and wait for you.
+  proposed with a tick-box and wait for you. An import that overlaps a shift
+  already on file is flagged, not blocked.
 - In manual-import mode, removing a shift here does not withdraw an event
   already sent to the phone's calendar — delete it there too. Subscription
   mode has no such problem: the feed is rebuilt whole every time.

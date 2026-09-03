@@ -105,7 +105,7 @@ label.f input,label.f select{width:100%}
 .shift .when{font-weight:500;font-family:"IBM Plex Mono",monospace;font-size:.9rem}
 .shift .where{font-size:.86rem;color:var(--soft)}
 .shift .len{margin-left:auto;font-size:.82rem;color:var(--soft);font-family:"IBM Plex Mono",monospace;padding-top:.15rem}
-.gapwarn{font-size:.8rem;color:var(--signal);padding:.15rem 0 .35rem 1.2rem}
+.gapwarn{font-size:.8rem;color:var(--bad);padding:.15rem 0 .35rem 1.2rem}
 .empty{padding:2rem 0;color:var(--soft)}
 
 /* next shift banner */
@@ -162,6 +162,9 @@ input[type=file]{display:none}
    the quieter treatment: worth knowing, but not a job to do. */
 .horizon{margin:0 0 .6rem;padding:.5rem .6rem;border-left:2px solid var(--signal);background:var(--card)}
 .horizon.fed{color:var(--soft);border-left-color:var(--hair)}
+/* A double booking is the one failure with no recovery, so it is the one
+   thing on this screen allowed to be red. */
+.horizon.clash{color:var(--bad);border-left-color:var(--bad)}
 .kill{background:none;border:none;color:var(--soft);font-size:1.15rem;cursor:pointer;padding:.3rem .45rem;border-radius:2px}
 .kill:hover{color:var(--bad);background:#F3DEDA}
 
