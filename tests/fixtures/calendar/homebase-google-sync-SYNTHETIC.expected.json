@@ -1,0 +1,88 @@
+{
+  "rows": [
+    {
+      "date": "2026-09-03",
+      "start": "06:15",
+      "end": "18:15",
+      "label": "Security Officer - Headquarters",
+      "place": "Headquarters, 401 Main St, Hattiesburg MS",
+      "flags": [],
+      "uid": "homebase-4471903-20260903@homebase.io",
+      "endDate": "2026-09-03",
+      "source": "ics"
+    },
+    {
+      "date": "2026-09-04",
+      "start": "19:15",
+      "end": "05:15",
+      "label": "Security Agent - Purvis Gen Station",
+      "place": "Purvis Gen Station",
+      "flags": [],
+      "uid": "homebase-4471904-20260904@homebase.io",
+      "endDate": "2026-09-05",
+      "source": "ics"
+    },
+    {
+      "date": "2026-09-06",
+      "start": "20:00",
+      "end": "06:00",
+      "label": "Security Officer - Silver Creek Station",
+      "place": "Silver Creek Station",
+      "flags": [],
+      "uid": "homebase-4471905-20260906@homebase.io",
+      "endDate": "2026-09-07",
+      "source": "ics"
+    },
+    {
+      "date": "2026-09-08",
+      "start": "09:00",
+      "end": "13:30",
+      "label": "Training - F.O.C.",
+      "place": "F.O.C.",
+      "flags": [],
+      "uid": "homebase-4471906-20260908@homebase.io",
+      "endDate": "2026-09-08",
+      "source": "ics"
+    },
+    {
+      "date": "2026-09-11",
+      "start": "18:30",
+      "end": "20:00",
+      "label": "Dentist - Hattiesburg",
+      "place": "Hattiesburg",
+      "flags": [],
+      "uid": "personal-9930@google.com",
+      "endDate": "2026-09-11",
+      "source": "ics"
+    },
+    {
+      "date": "2026-09-14",
+      "start": "06:15",
+      "end": "18:15",
+      "label": "Security Officer at the very long site na - Benndale Station",
+      "place": "Benndale Station",
+      "flags": [],
+      "uid": "homebase-4471908-20260914@homebase.io",
+      "endDate": "2026-09-14",
+      "source": "ics"
+    }
+  ],
+  "report": {
+    "calName": "raycarson13@gmail.com",
+    "events": 9,
+    "kept": 6,
+    "allDay": 1,
+    "cancelled": 1,
+    "past": 1,
+    "filtered": 0,
+    "unreadable": 0,
+    "cancelledRows": [
+      {
+        "uid": "homebase-4471907-20260909@homebase.io",
+        "date": "2026-09-09",
+        "label": "Security Officer - Bay Springs Station",
+        "place": "Bay Springs Station"
+      }
+    ]
+  }
+}

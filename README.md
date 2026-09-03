@@ -2,7 +2,8 @@
 
 Aggregates shift schedules from two employer apps into one view, with hours
 and gross pay estimates, and feeds the phone's calendar so the home screen
-widget and alarms do the reminding.
+widget and alarms do the reminding. Shifts come in from screenshots, or from
+an employer's own calendar sync where it has one.
 
 Everything stays on the device. Nothing is uploaded anywhere.
 
@@ -21,16 +22,17 @@ Pay rates and site names are entered in the app, not stored in the repo.
 1. **Setup** → add both jobs. Set the colour, hourly rate, and which day the
    pay week starts. The Android package names for the launch buttons are
    `com.tracktik.shift` and `com.joinhomebase.homebase`.
-2. **Add** → pick the job, drop in screenshots, check the rows, add them.
+2. **Add** → pick the job, then either drop in screenshots or add a calendar
+   file. Check the rows, add them.
 3. **Setup** → Save new shifts → open the file on the phone → import into the
    shift calendar.
 
 The first import downloads the OCR engine, about 10 MB. After that it is cached
 and works offline.
 
-## The calendar
+## Feeding the phone's calendar
 
-Two modes, set in Setup.
+This is the way out, not the way in. Two modes, set in Setup.
 
 **Subscription (recommended).** Install ICSx⁵ from the Play Store or F-Droid.
 Save the feed file, then in ICSx⁵ add a subscription pointing at that local
@@ -52,6 +54,99 @@ Calendar can, via My Files. In this mode the export only includes shifts not
 sent before, since importing appends rather than replaces.
 
 Alarm lead times are set in Setup, in hours before each shift.
+
+## How the two calendars fit together
+
+The shape that makes this work, and the one to set up:
+
+```
+Homebase  ──Calendar Sync──▶  "Homebase Raw"      a staging calendar,
+                              (Google)             hidden on the phone
+
+                                    │  save the .ics, add it
+                                    ▼
+TrackTik  ──screenshots────▶  S H I F T   D E C K   one job named on every
+                              normalises, merges     shift, hours, pay
+                                    │
+                                    │  export ──▶ ICSx⁵
+                                    ▼
+                              "Work Schedule"      the calendar he actually
+                              (native Android)      looks at, and the widget
+```
+
+Two things follow from it.
+
+**Every event says which job it is.** Homebase writes `Security Officer` and
+nothing else — put two employers' shifts on one calendar that way and it is
+unreadable. What Shift Deck exports is `DSI- Security Officer - Headquarters`,
+using the job name from Setup, for both jobs and whichever way the shift came
+in. That normalising step is the reason to route through here at all.
+
+**No duplicates.** The staging calendar is the raw feed and is switched off in
+the phone's calendar app; the Work Schedule calendar is the only one showing.
+Without the split, every Homebase shift appears twice — once from Homebase's
+own sync and once from the export.
+
+Setting it up:
+
+1. In Google Calendar, create a calendar called **Homebase Raw**.
+2. In Homebase → Settings → Calendar Sync, point the **Calendar** field at it
+   rather than at the account's main calendar. If the field only offers
+   accounts and not individual calendars, leave it and use the job's import
+   filter instead — see below.
+3. On the phone, untick **Homebase Raw** so it does not draw.
+4. Point ICSx⁵ at the exported `shifts.ics` as the **Work Schedule** calendar,
+   and leave that one showing. The widget reads it.
+
+Addresses ride along. Homebase puts a real street address on its events, and
+Shift Deck now passes it through to the export, so the two-hour alarm fires, he
+taps the event, taps the address, and he is navigating. For TrackTik shifts
+there is a field for it on the edit dialog.
+
+## Bringing in an employer's calendar sync
+
+Homebase has a Calendar Sync of its own — Settings → Calendar Sync, then
+Enable, the locations, a Google account and an alert lead time. Turned on, it
+writes his shifts into that Google calendar and the phone syncs them down.
+
+That is a better source than a screenshot in every way that matters: the times
+are the employer's own numbers rather than characters read off a dark screen,
+so no am/pm can be misread, no row can be lost to a scroll boundary, and each
+event carries an ID that stays the same when the shift moves.
+
+What it cannot do is put those shifts in here. There is no web API for the
+phone's calendar on Android, so a page like this one cannot go and read it.
+The `.ics` file is the bridge:
+
+1. In Google Calendar in a browser → Settings → the calendar Homebase writes
+   to → **Secret address in iCal format**.
+2. Open that link in Chrome. It saves an `.ics`.
+3. **Add** → pick the job → **Add a calendar file** → choose it.
+
+**Fetch from a link** takes that address directly and skips the saving, but
+Google does not let a web page read its calendar addresses, so expect it to
+fail and fall back to the file. It is there for feeds that do allow it.
+
+Importing the same calendar again is safe and is how it stays current. Events
+are matched on their ID, so a shift already on file is left alone, and one the
+employer has **moved** is shown as a change — `was 20:00–06:00` — and replaces
+the old one rather than appearing twice. A **cancelled** shift arrives as a
+row in the review list with a tick already in it: leave it ticked and the shift
+goes, and the next export takes it off the Work Schedule calendar too. It is
+never removed without being shown, because a partial view of a schedule looks
+exactly like a week of cancellations.
+
+Three things are skipped, and the import says how many of each: anything
+before last week, all-day entries — a shift is its times, and inventing one
+would be the exact mistake this app exists to avoid — and anything that does
+not match the job's filter.
+
+That filter is the fallback for when Homebase cannot be pointed at a calendar
+of its own. Syncing into a whole Google account brings the dentist and the
+birthdays along with the shifts, and **Setup → the job → Calendar import: only
+events mentioning…** takes a word that appears on every shift and nothing else
+— a site name, the role. With a staging calendar there is nothing to filter and
+it can stay empty.
 
 ## Reading screenshots
 
@@ -83,16 +178,22 @@ spelled three different ways by OCR collapses to one.
 
 ## Development
 
-The parser is `parser.js` — pure functions, no DOM, no storage. It loads as a
-plain script in the browser and is required directly by the tests. There is
-still no build step and the app has no runtime dependencies.
+Two readers, both pure functions — no DOM, no storage. `parser.js` turns OCR
+text into shift rows; `ics.js` does the same for a calendar file. They share
+nothing but the row shape, so both land in the same review screen with the
+same flags and the same commit path. Each loads as a plain script in the
+browser and is required directly by the tests. There is still no build step
+and the app has no runtime dependencies.
 
 ```
-npm test              # run the parser tests
+npm test              # run both readers' tests
 npm run test:update   # regenerate golden files, then read them before committing
 ```
 
 `tests/fixtures/README.md` explains how to turn a screenshot into a test case.
+Calendar feeds go in `tests/fixtures/calendar/` as `.ics` alongside their
+expected JSON, and every calendar test pins an output time zone so the answers
+do not depend on where the tests are run.
 Fixtures marked PROVISIONAL are typed from the vendors' user guides; ones
 marked TRANSCRIBED are real schedules read off screenshots by eye rather than
 by OCR. Neither kind proves the reading of the text, only the understanding of
@@ -105,7 +206,13 @@ start over**. See PROJECT.md §7.
 ## Known limits
 
 - am/pm rides on a single character. A misread puts a shift twelve hours out
-  and it will look plausible. Glance at the times before exporting.
+  and it will look plausible. Glance at the times before exporting. This is a
+  screenshot problem only — a calendar import cannot get a time wrong this way.
+- A calendar import never removes anything on its own. Cancellations are
+  proposed with a tick-box and wait for you.
+- In manual-import mode, removing a shift here does not withdraw an event
+  already sent to the phone's calendar — delete it there too. Subscription
+  mode has no such problem: the feed is rebuilt whole every time.
 - Pay figures are gross estimates for spotting a missing shift on a paystub,
   not a prediction of the deposit. Overtime is counted separately per employer,
   and premiums, stat holidays and retro pay are not modelled.

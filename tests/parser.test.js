@@ -1,4 +1,4 @@
-/* Parser tests. Run with:  node --test tests/
+/* Parser tests. Run with:  npm test
  *
  * Two kinds of test here:
  *
@@ -10,7 +10,7 @@
  *      produced it; NAME.expected.json is what the parser should make of it.
  *      To add one: drop the raw text in, run
  *
- *          UPDATE=1 node --test tests/
+ *          npm run test:update
  *
  *      then READ the generated .json before committing it. The update mode
  *      records what the parser currently does, which is not the same as what

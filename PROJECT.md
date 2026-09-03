@@ -1,7 +1,10 @@
 # Shift Deck — project state
 
-_Last updated 3 September 2026_ — real screenshots of both apps landed; see §3.1 and §5.
-Build order for the agreed-but-unbuilt work is in §11.
+_Last updated 3 September 2026_ — real screenshots of both apps landed (§3.1, §5),
+Homebase's own Calendar Sync turned out to exist and is now an import path (§12),
+and the app became the normalising step between two calendars rather than a
+second source of the same events (§13). Build order for the agreed-but-unbuilt
+work is in §11.
 
 A record of what has been built, why the design went the way it did, and what
 is still undecided.
@@ -39,6 +42,12 @@ feed. TrackTik SHIFT does not — it is a guard-duty app with a view-only
 schedule and clock-in, no export of any kind. Whether the Homebase feed is
 enabled on his account was never confirmed, so nothing was built against it.
 
+_Superseded on 3 September 2026._ It is enabled, and it is better than a feed
+URL: the Homebase app has a **Calendar Sync** screen of its own — Enable, a
+location list, the Google account, an alert lead time and a Sync now button —
+which writes his shifts straight into that Google calendar. §12 is what was
+built on top of it.
+
 **TrackTik schedule distribution email.** TrackTik's documentation states that
 publishing a schedule sends it to affected employees by email. That would have
 been an ideal parsing target: structured, recurring, no scraping, no stored
@@ -69,6 +78,8 @@ Four files plus icons, deployable to GitHub Pages as-is.
 ```
 index.html              markup and styles
 app.js                  all logic
+parser.js               screenshot text to shift rows      (added, §9)
+ics.js                  calendar file to shift rows        (added, §12)
 sw.js                   service worker, offline shell + OCR engine caching
 manifest.webmanifest    PWA install metadata
 icon-192.png
@@ -265,9 +276,13 @@ each export and occasional duplicate management.
 it. If it lands, email parsing beats screenshots on every axis. Worth doing
 before investing further in OCR.
 
-**Whether Homebase exposes its calendar feed on his account.** If it does,
-Homebase needs no OCR at all — subscribe to it directly and only TrackTik needs
-screenshots. Never confirmed.
+**Whether Homebase exposes its calendar feed on his account.** ~~Never
+confirmed.~~ Confirmed on 3 September 2026, and better than expected: the app
+has a Calendar Sync screen that pushes into a Google calendar. Homebase needs
+no OCR now. See §12 for what that does and does not close.
+
+What it leaves open is TrackTik, which has no export of any kind, so the OCR
+work in §3.1 stays load-bearing for that half of the schedule.
 
 **No parser output has been seen from a real OCR pass.** This was "neither
 parser has seen a real screenshot"; that half is now closed. Real screenshots
@@ -558,8 +573,10 @@ Carried forward, plus what today added.
 2. **The TrackTik distribution email.** Still one message to his scheduler. If
    it lands, email parsing beats screenshots on every axis and much of §8.4
    becomes unnecessary. Worth asking before investing further in OCR.
-3. **Does Homebase expose its calendar feed on his account?** If so, Homebase
-   needs no OCR at all and only TrackTik needs screenshots. Never confirmed.
+3. ~~**Does Homebase expose its calendar feed on his account?**~~ Answered: it
+   has an in-app Calendar Sync writing to Google, and §12 imports from it. Only
+   TrackTik needs screenshots now. What remains is whether the review flow is
+   too manual to keep up with — see §12's open ends.
 4. **Getting the feed to ICSx⁵** (§4) — still the live blocker, still pointing
    at a Cloudflare Worker. The browser-native escape hatch does not exist:
    `showSaveFilePicker()` with a retained handle would solve the `shifts (1).ics`
@@ -657,6 +674,32 @@ behind three schema changes.
 
 Steps 3 and 6 are the heavy ones. Step 5 is an evening.
 
+**What §12 and §13 did to this table, later the same day.** The roadmap above
+was written before Homebase's Calendar Sync was found, and four rows moved:
+
+- **Step 0 is half done.** §10.3 is answered — Homebase syncs to Google, and
+  §12 imports from it. The TrackTik email in §10.2 is still one message worth
+  sending, and it is now the whole of step 0.
+- **Step 1 got more important, not less.** With Homebase on a feed, the OCR
+  path carries TrackTik alone — the dark screen, which is exactly where the
+  am/pm risk in §6 lives. A real Tesseract pass is now the only unproven part
+  of the input side rather than one of two.
+- **Step 2's `fold()` is done**, forced by §13 emitting real addresses. The
+  §10.5 staleness warnings and §10.6's `METHOD:CANCEL` are still open, and
+  §13 sharpened the first of them: if Calendar Sync publishes only two months
+  and the exported calendar is the one he reads, the horizon is a silent gap
+  in the only place he looks.
+- **Steps 3 and 6 are partly delivered on the calendar side.** §8.1's
+  `LOCATION:` and §8.4's "cancelled" bucket both exist now for shifts that
+  arrive from a feed, because a feed gives an address and a stable identity
+  that OCR cannot. Neither is finished: the site table, the aliases and the
+  merge are untouched, and change detection for screenshot rows still has only
+  the slot to match on. What this changes is the argument — the two hardest
+  steps now have a worked example to copy rather than a design to invent.
+
+None of this reorders the table. It removes work from steps 0 and 2, and gives
+3 and 6 a precedent.
+
 **§4 is a parallel track, not part of this.** Getting the feed to ICSx⁵ remains
 the live blocker for the product, but none of §8 depends on it and it is
 infrastructure rather than enhancement. Worth noting that the minimal-feed idea
@@ -670,3 +713,209 @@ change. So before it starts, confirm §7 still holds — that nothing real is
 being relied on yet. If it no longer holds, `S.version` and the migration path
 are prerequisites of step 3 rather than something deferred, and §7 says exactly
 what that means: both `loadState()` and the backup-restore path have to run it.
+
+§12 and §13 added two fields to the shift record — `extUid` and `place` — which
+is the first test of that agreement since it was written. They pass it on a
+technicality worth stating: both are optional and every read is guarded, so a
+record saved before them behaves exactly as it did. Additive optional fields do
+not need a migration. Step 3 is not like that: it moves a value out of `label`
+into a `siteId`, and a record written before it means something different
+afterwards. That is the case §7 is actually about, and the check above stands.
+
+---
+
+## 12. Calendar import, 3 September 2026
+
+He went looking and found Homebase's own **Calendar Sync**: Settings → Calendar
+Sync, with an Enable toggle, the seven stations to tick, the Google account
+(`raycarson13@gmail.com`) and an alert lead time. Turned on, it writes two
+months of shifts into that Google calendar and the phone syncs them down.
+
+That answers §10.3 and closes the Homebase half of §1's problem far better than
+OCR ever could. It also does not, on its own, put a single shift in this app —
+so the work was in the gap.
+
+### Why an .ics file and not something cleverer
+
+- **The phone's calendar is unreadable from a browser.** There is no web
+  calendar API on Android. This is the same wall the unlock popup hit in §5,
+  and it does not move.
+- **The feed URLs refuse to be read.** Google's *secret address in iCal format*
+  and Homebase's own feed link both answer without CORS headers, so the browser
+  will not hand this page the response. **Fetch from a link** is in the app
+  anyway, because for a feed that does allow it that is the whole win, and its
+  failure message says what is actually likely rather than "network error".
+- **Google Calendar's API** would work and was rejected for the reason §4
+  rejected Drive: a registered OAuth client, an hour-long token with no
+  refresh, and re-authorising on every import.
+
+So: save the `.ics`, or paste the text, and the file does the rest. It works
+offline, needs no account, no key and no infrastructure, and it is the same
+format the app already writes on the way out.
+
+### What a calendar row has that a screenshot row does not
+
+`ics.js` is a second reader beside `parser.js` — pure functions, no DOM, no
+storage, no dependency on the other, sharing only the row shape so both land in
+the same review screen with the same flags and the same commit path.
+
+The difference that matters is the **UID**. A screenshot row has no identity;
+all the importer can do is compare the slot it lands in, which is why §9's
+dedupe had to guess about location changes. A calendar row carries the
+employer's own event ID, so:
+
+- **A shift already on file is recognised and skipped.** Re-importing the same
+  feed is how it stays current, and it costs nothing.
+- **A shift the employer moved shows as a change** — `was 20:00–06:00 Silver
+  Creek Station` — and *replaces* the record rather than appearing beside it.
+  The shift keeps its `id`, so the calendar this app writes rewrites the event
+  it already sent instead of orphaning it. That is the first piece of §8.4
+  built, on the one input where it can be done exactly rather than by guess.
+- **A cancelled shift is named.** `STATUS:CANCELLED` on an event whose UID is
+  on file is the "on file but not in the schedule" bucket §8.4 calls the most
+  valuable and says nobody builds — and here it arrives as fact rather than
+  inference. It is still not acted on automatically: the calendar he synced
+  covers one job, and a silent removal is exactly the failure §8.4 warns about.
+  It is said in the import message and the deletion stays his.
+
+### Three deliberate refusals
+
+- **All-day entries are dropped, not given a time.** A shift is its times.
+  §8.3's rule — a convenience default is fine for a label and never for a time
+  — settles this.
+- **Nothing is removed by an import.** As above.
+- **The window is last week forward.** A Google export carries years of
+  history and none of it is news. The import says how many it skipped.
+
+### The mixing problem, and the filter
+
+Calendar Sync writes into a whole Google account, not a calendar of its own,
+so his dentist appointment and his mother's birthday arrive alongside the
+shifts. There is no reliable structural way to tell them apart — the events
+carry no marker naming Homebase.
+
+So each job gains `co.icsMatch`, a word that has to appear in the title,
+location or description: a station name, the role. It is a blunt instrument
+and it is honest about being one — the import reports how many rows it
+excluded, and leaving it empty takes everything and leans on the review
+screen. If Homebase can be pointed at a calendar of its own, the filter stops
+mattering; that is worth one look at the sync screen.
+
+### Time zones
+
+A feed writes times three ways — UTC, a wall time in a named zone, and a
+floating wall time with no zone at all — and all three have to come out as the
+wall clock on his phone, because that is what a shift is. `ics.js` converts via
+`Intl`, with a second pass over the offset so the hour either side of a
+daylight-saving change is right, and a test pinning 1 November 2026 to prove
+it. An unrecognised zone (Microsoft writes `Central Standard Time`, which is
+not an IANA name) is taken at face value and flagged rather than guessed at.
+
+The tests pin an output zone rather than reading the machine's, so they do not
+pass in one place and fail in another.
+
+### Still open
+
+1. **No real feed has been through it.** The fixture is synthetic — written to
+   the shape Google's exporter produces, with a Homebase-style event in it, not
+   captured from his account. It is marked SYNTHETIC for the same reason the
+   parser fixtures are marked PROVISIONAL. The first real export should be
+   saved as a fixture and read carefully; what the SUMMARY and LOCATION
+   actually contain is the thing to check, since the label depends on it.
+2. **Whether the two-month horizon is enough.** Calendar Sync says it syncs two
+   months. If the schedule is published further out than that, screenshots
+   still have a job on the Homebase side.
+3. **The manual step is still there** — save the file, then add it. Once a real
+   export is in hand it is worth timing: if it is a minute a week, it is done.
+   If it is annoying enough to be skipped, that is a silent-staleness risk of
+   the same family as §10.5, and the answer is the §4 Worker fetching the feed
+   server-side rather than anything clever in the browser.
+4. ~~**Cancellations are told, not shown.**~~ Built in §13: the review screen
+   grew a second row type and a cancellation is now a tick-box. It had to be —
+   once the app is what feeds the calendar he reads, a cancellation it does not
+   act on is a shift that keeps ringing.
+
+---
+
+## 13. Two calendars, and the app between them
+
+Naming Calendar Sync as an import path (§12) left an obvious problem sitting in
+the open: Homebase writes its shifts into a Google calendar, this app writes
+*its* shifts into a calendar too, and both land on the same phone. Every
+Homebase shift would appear twice.
+
+The answer settles what this app is for, so it is worth stating plainly.
+
+```
+Homebase  ──Calendar Sync──▶  "Homebase Raw"     staging. Hidden on the phone.
+                                    │             Machine-readable, not for him.
+                                    │  .ics
+                                    ▼
+TrackTik  ──screenshots────▶  S H I F T   D E C K
+                              normalises, merges, holds the hours and the pay
+                                    │
+                                    │  export ──▶ ICSx⁵
+                                    ▼
+                              "Work Schedule"    the one he reads. The widget
+                                                  and the alarms come off it.
+```
+
+**The app is the normalising step, not a second source.** The employer's own
+sync writes `Security Officer` with nothing to say whose shift it is. Two jobs
+on one calendar that way is unreadable, which is §1's complaint restated: the
+problem was never that the shifts were unavailable, it was that nothing put
+them in one place in one language. What goes out is `DSI- Security Officer -
+Headquarters`, from the job name in Setup, whichever way the shift arrived.
+
+**The staging calendar is a data channel, not a view.** Hidden in the phone's
+calendar app, so nothing renders it and there are no duplicates. This also
+retires the import filter for the Homebase side: a calendar of its own has
+nothing in it but shifts, so `co.icsMatch` becomes the fallback for when
+Homebase will only write to an account's main calendar rather than a chosen
+one. Which of those it does is worth one look at the Calendar field on the
+sync screen — it decides whether the filter matters at all.
+
+### What this made worth building
+
+- **`LOCATION` on the way out.** §8.1 called an address in the `.ics` the
+  single best reason to build the site table — the alarm fires, he taps the
+  event, taps the address, and he is navigating. Homebase puts a real street
+  address on its events, so on that half of the schedule it arrives free of
+  the site table entirely. Shifts keep `place`, the export emits it, and the
+  edit dialog has a field so TrackTik shifts can have one typed in. The site
+  table in §8.1 is still the right destination; this is the part of its value
+  that did not have to wait for it.
+
+- **Folding by octets.** §10.7 had this down as small and unowned: `fold()`
+  sliced by character where the spec counts bytes, so an accented site name
+  could produce an invalid line. Emitting real addresses made it live —
+  Montréal is in scope — so it now walks code points and counts their UTF-8
+  length. A character is never split and no line exceeds 75 octets.
+
+- **Cancellation as a tick-box**, per §12's fourth open end. The reasoning
+  changed with the architecture: while the app was a private view, an
+  unremoved cancellation was untidy. Now that its export *is* the calendar he
+  reads, an unremoved cancellation is an alarm that goes off for a shift that
+  does not exist. It still never removes anything unasked — §8.4's rule that a
+  partial capture is indistinguishable from a week of cancellations holds, and
+  a cancellation is a proposal with a tick in it, not an action.
+
+  One asymmetry to know about: in subscription mode the feed is rebuilt whole,
+  so a removal reaches the phone by itself. In manual-import mode nothing
+  withdraws an event already sent — §10.6's missing `METHOD:CANCEL` — so the
+  app says so at the moment it matters rather than leaving it in a document.
+
+### What this does not fix
+
+**It is still a manual save.** The `.ics` has to be downloaded and added. The
+architecture above changes what the app *is*; it does not change how the bytes
+get in. §12's routes out stand: try the link button once in case Homebase's own
+feed allows a direct read, and otherwise the §4 Worker fetching server-side is
+the one thing that closes it — the same Worker the export side already wants,
+now with a reason on both ends.
+
+**And the horizon question is sharper now.** If Calendar Sync only publishes
+two months, and the Work Schedule calendar is the only one he looks at, then
+anything past that horizon is missing from the only place he checks. §10.5's
+"nothing on file after Friday" warning was already worth building; this makes
+it the next thing.
