@@ -440,9 +440,13 @@ file, still exported and still in the pay figures — it is one tap down rather
 than a week of scrolling in front of the thing you wanted.
 
 **What happens between two shifts is drawn between them.** Both the short-rest
-note and the overlap warning sit in the gap they are about, filled and in
-white so they read at scrolling speed — amber for a short rest, red for an
-overlap. Neither names a shift, because they are the two either side of it.
+note and the overlap warning sit in the gap they are about, filled and in white
+so they read at scrolling speed — amber for a short rest, red for an overlap:
+
+    Heads up — short turnaround (6 hours and 45 minutes off)
+    Warning — shifts overlap. Verify schedule in employer apps and adjust.
+
+Neither names a shift, because they are the two either side of it.
 
 ## What the Schedule tab warns about
 
@@ -475,12 +479,13 @@ Two shifts scheduled over each other is the one failure with no recovery, so it
 is flagged in three places: on the row as you add it, in a red banner over the
 schedule, and in the week list.
 
-In the week list it is **one message between the two shifts** — *"Warning:
-overlap. Tap shift to adjust times or delete."* — rather than a line under each
-of them. Where it sits says which two it means, so it does not name them, and
-what to do about it is a tap on either. The banner above the list still names
-both sides and the size of the overlap, because up there nothing is next to
-anything.
+In the week list it is **one message between the two shifts** — *"Warning —
+shifts overlap. Verify schedule in employer apps and adjust."* — rather than a
+line under each of them. Where it sits says which two it means, so it does not
+name them. It sends you to the employer's app rather than to the shift editor
+on purpose: editing the shift here fixes the screen and leaves you rostered for
+both. The banner above the list still names both sides and the size of the
+overlap, because up there nothing is next to anything.
 
 Which of the two is wrong is not something the app can know, so it is never
 guessed at. Nothing is blocked and nothing is removed automatically.

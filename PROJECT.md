@@ -3579,9 +3579,16 @@ followed, in a sentence longer than the gap it was describing:
 > Only 6h 45m off after Tru-Point 00:15–08:15.
 
 It is now drawn *before* the shift it belongs to, which is to say in the gap
-it is about, and it says `Only 6h 45m off` and stops. The naming was only ever
-there to disambiguate a note that had floated away from its subject; placed
-between the two, the sentence was telling him what he could see.
+it is about:
+
+> **Heads up — short turnaround (6 hours and 45 minutes off)**
+
+The naming was only ever there to disambiguate a note that had floated away
+from its subject; placed between the two, the sentence was telling him what he
+could see. The gap is spelled out rather than given as `6h 45m`, which is right
+in a column of figures beside the shift lengths it gets compared against and
+wrong inside a sentence, where it reads as a code rather than as an amount of
+sleep.
 
 It is also filled now — the signal colour, white letters, a darker border —
 rather than the grey line §25 gave it. §25's reasoning was that a gap is a
@@ -3746,19 +3753,25 @@ two it means.
 
 So it is one banner, in the gap:
 
-> **Warning: overlap. Tap shift to adjust times or delete.**
+> **Warning — shifts overlap. Verify schedule in employer apps and adjust.**
 
 **It names neither side and states no duration.** Both were there to
 disambiguate a line that had floated away from its subject; sitting between
 them, they were describing what he could see. What replaces them is the thing
 neither said — what to do about it. The rest note has nothing to offer there
-and stops at the fact (§25), but an overlap has exactly one next step, and it
-is a tap.
+and stops at the fact (§25), but an overlap has a next step.
 
-**Still not a proposal.** "Adjust times or delete" is where the shift editor
-goes, not which of the two is wrong. §19.4's rule holds: the feed may be right
-and the screenshot stale, or the reverse, and a warning that also gives advice
-is one he has to disagree with rather than read.
+**And the next step is not in this app.** An earlier draft read *"Tap shift to
+adjust times or delete"*, which points at the shift editor — and editing the
+shift here fixes the screen while leaving him rostered for both. Whichever of
+the two is wrong is wrong in Homebase or in DSI's app, which is where he is
+actually double-booked and the only place it can be settled. So the banner
+sends him there.
+
+**Still not a proposal.** It does not say which of the two to change, because
+§19.4's rule holds: the feed may be right and the screenshot stale, or the
+reverse, and a warning that also gives advice is one he has to disagree with
+rather than read. It says go and look.
 
 **It is keyed on whichever of the pair starts later**, because the list is
 drawn in start order and that is the one it can be placed in front of — the

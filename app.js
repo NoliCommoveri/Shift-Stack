@@ -101,6 +101,16 @@ function fmtDur(m){
   const h = Math.floor(m/60), r = m%60;
   return r ? `${h}h ${r}m` : `${h}h`;
 }
+/* The same gap, in words. "6h 45m" is right in a column of figures beside the
+   shift lengths it has to be compared against, and wrong inside a sentence,
+   where it reads as a code rather than as an amount of sleep. */
+function fmtDurWords(m){
+  const h = Math.floor(m/60), r = m%60;
+  const bits = [];
+  if(h) bits.push(`${h} hour${h === 1 ? '' : 's'}`);
+  if(r) bits.push(`${r} minute${r === 1 ? '' : 's'}`);
+  return bits.join(' and ') || '0 minutes';
+}
 // Start of the pay week containing `dateStr`, for a week beginning on `startDow`.
 function weekStart(dateStr, startDow){
   const d = asDate(dateStr);
@@ -1141,9 +1151,10 @@ function renderSchedule(){
         // The overlap goes first where a shift somehow has both: it is the one
         // with no recovery.
         if(clashes.has(s.id)) col.appendChild(el('div','gapwarn',
-          'Warning: overlap. Tap shift to adjust times or delete.'));
+          'Warning \u2014 shifts overlap. Verify schedule in employer apps and adjust.'));
         const rst = rests.get(s.id);
-        if(rst) col.appendChild(el('div','restline', `Only ${fmtDur(rst)} off`));
+        if(rst) col.appendChild(el('div','restline',
+          `Heads up \u2014 short turnaround (${fmtDurWords(rst)} off)`));
 
         col.appendChild(item);
       });
