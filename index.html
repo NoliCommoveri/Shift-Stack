@@ -119,17 +119,23 @@ tr.assumed td:first-child{color:var(--ink)}
 .shift .when{font-weight:500;font-family:"IBM Plex Mono",monospace;font-size:.9rem}
 .shift .where{font-size:.86rem;color:var(--soft)}
 .shift .len{margin-left:auto;font-size:.82rem;color:var(--soft);font-family:"IBM Plex Mono",monospace;padding-top:.15rem}
-.gapwarn{font-size:.8rem;color:var(--bad);padding:.15rem 0 .35rem 1.2rem}
-/* The gap between two shifts, drawn between the two shifts it is about
-   (PROJECT.md §29). It is filled rather than tinted because it is read in the
-   half-second of scrolling past a week, and because sitting in the gap it
-   describes it has to read as a thing in its own right and not as a footnote
-   to the shift above it. */
-.restline{
-  font-size:.8rem;font-weight:500;
-  background:var(--signal);color:#FFF;border:1px solid var(--deep);border-radius:2px;
+/* Both of these are drawn between the two shifts they are about (PROJECT.md
+   §29, §30), and both are filled rather than tinted: they are read in the
+   half-second of scrolling past a week, and sitting in the gap they describe
+   they have to read as a thing in their own right rather than as a footnote to
+   the shift above.
+
+   Same shape, two colours, and the order between them is the point. §25 gave
+   the rest note grey so it could not be mistaken for the double booking, which
+   is the failure with no recovery — but once the rest note was filled, a red
+   *line* under a filled amber block was the worse warning drawn quieter. So
+   the overlap is filled too, in the red that has only ever had this one job. */
+.gapwarn,.restline{
+  font-size:.8rem;font-weight:500;color:#FFF;border-radius:2px;
   padding:.25rem .5rem;margin:.35rem 0 .35rem 1.2rem;
 }
+.restline{background:var(--signal);border:1px solid var(--deep)}
+.gapwarn{background:var(--bad);border:1px solid #7C2016}
 .empty{padding:2rem 0;color:var(--soft)}
 
 /* next shift banner */

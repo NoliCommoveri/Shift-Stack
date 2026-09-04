@@ -1069,16 +1069,18 @@ function renderSchedule(){
     rests.set(b.id, m);
   });
 
-  const clashes = new Map();
-  clashPairs(S.shifts).forEach(({ a, b, mins: m }) => {
-    const name = sh => {
-      const co = coById(sh.companyId);
-      return `${co ? co.name : 'a shift'} ${fmtTime(sh.start)}\u2013${fmtTime(sh.end)} on ${fmtDay(sh.date)}`;
-    };
-    // Both sides say what they run over. Two lines where the old check printed
-    // one, and that is the right trade for the failure with no recovery.
-    if(!clashes.has(a.id)) clashes.set(a.id, { other: name(b), mins: m });
-    if(!clashes.has(b.id)) clashes.set(b.id, { other: name(a), mins: m });
+  // One line between the two, not one under each (§30). Keyed on whichever of
+  // the pair starts later, because the list is drawn in start order and that
+  // is therefore the one the warning can be placed in front of — the same
+  // trick the rest note uses, and it works across a day boundary for the same
+  // reason. `clashPairs` hands back the pair in store order, which says
+  // nothing about which came first, so the comparison is made here.
+  //
+  // A Map rather than a list: a shift can run over two others, and what he
+  // needs told once is that this row is double-booked.
+  const clashes = new Set();
+  clashPairs(S.shifts).forEach(({ a, b }) => {
+    clashes.add((a.date + a.start) <= (b.date + b.start) ? b.id : a.id);
   });
 
   const byWeek = new Map();
@@ -1106,7 +1108,7 @@ function renderSchedule(){
       row.appendChild(el('div','daynum',
         `<b>${d.getDate()}</b><span>${DAYNAMES[d.getDay()].toUpperCase()}</span>`));
       const col = el('div');
-      ds.forEach((s, idx) => {
+      ds.forEach(s => {
         const co = coById(s.companyId);
         const item = el('div','shift');
         // §8.3's hollow tick, on the thing that is actually there: the colour
@@ -1126,32 +1128,24 @@ function renderSchedule(){
           <div class="len">${fmtDur(durMins(s))}</div>`;
         item.onclick = () => editShift(s.id);
 
-        // Before the shift, not after the day (§29). The note is about the
-        // gap in front of this shift, so it is drawn in the gap in front of
-        // this shift — which is also why it no longer names the shift it
-        // follows. It used to, because appended at the end of a day holding
-        // two shifts it had no other way to say which two it meant; sitting
-        // between them, the sentence was saying what the reader could see.
+        // Both of these go *before* the shift rather than after the day (§29,
+        // §30), because both are about the join between this shift and the one
+        // before it, and that is where the reader is looking. It is also why
+        // neither names the shifts any more: sitting between the two, the
+        // sentence was saying what he could already see.
         //
-        // The shift it comes back from is often in the day row above (a
-        // Trupoint night into a DSI afternoon is exactly the case), and there
+        // The other side of the pair is often in the day row above — a
+        // Trupoint night into a DSI afternoon is exactly the case — and there
         // this lands at the top of the day, still between the two.
+        //
+        // The overlap goes first where a shift somehow has both: it is the one
+        // with no recovery.
+        if(clashes.has(s.id)) col.appendChild(el('div','gapwarn',
+          'Warning: overlap. Tap shift to adjust times or delete.'));
         const rst = rests.get(s.id);
         if(rst) col.appendChild(el('div','restline', `Only ${fmtDur(rst)} off`));
 
         col.appendChild(item);
-
-        // Only real overlap. A tight turnaround used to be flagged here too
-        // and it was wrong for these two jobs — going straight from one to the
-        // other is normal, so it fired constantly on nothing and taught him to
-        // scroll past the line that also has to carry the case that matters.
-        //
-        // Not `ds[idx-1]` either: the collision worth catching is a Trupoint
-        // night running into the next morning, and those two sit in different
-        // day rows. `clashes` is worked out across the whole list.
-        const hit = clashes.get(s.id);
-        if(hit) col.appendChild(el('div','gapwarn',
-          `Overlaps ${hit.other} by ${fmtDur(hit.mins)}. He cannot work both.`));
       });
       row.appendChild(col);
       box.appendChild(row);

@@ -3715,3 +3715,57 @@ comes back at 915 of a 915px viewport every time.
 The lesson is about the screenshots rather than the CSS: a page with a fixed
 bar cannot be shown with a full-page capture. Everything above was re-shot at
 viewport size and scrolled, which is also what he is actually looking at.
+
+## 30. Built: one overlap warning, between the two, 4 September 2026
+
+§19 put the overlap warning beside *both* shifts, and said why: a double
+booking is the failure with no recovery, so two lines where the old check
+printed one "is the right trade".
+
+On the screen it was not a trade, it was the same sentence twice:
+
+> 15:00 – 01:00  DSI · Cook Plant ASO
+>   *Overlaps Tru-Point 19:15–07:15 on Sat 5 Sep by 5h 45m. He cannot work both.*
+> 19:15 – 07:15  Tru-Point · Security Officer
+>   *Overlaps DSI 15:00–01:00 on Sat 5 Sep by 5h 45m. He cannot work both.*
+
+Four lines of red for one problem, each naming the shift printed directly
+above or below it. §29.2 had just made the same argument about the rest note
+and the fix is the same: put it between the two, and the placement says which
+two it means.
+
+So it is one banner, in the gap:
+
+> **Warning: overlap. Tap shift to adjust times or delete.**
+
+**It names neither side and states no duration.** Both were there to
+disambiguate a line that had floated away from its subject; sitting between
+them, they were describing what he could see. What replaces them is the thing
+neither said — what to do about it. The rest note has nothing to offer there
+and stops at the fact (§25), but an overlap has exactly one next step, and it
+is a tap.
+
+**Still not a proposal.** "Adjust times or delete" is where the shift editor
+goes, not which of the two is wrong. §19.4's rule holds: the feed may be right
+and the screenshot stale, or the reverse, and a warning that also gives advice
+is one he has to disagree with rather than read.
+
+**It is keyed on whichever of the pair starts later**, because the list is
+drawn in start order and that is the one it can be placed in front of — the
+same trick §29.2 uses, and it works across a day boundary for the same reason.
+A Trupoint night at 22:00–06:00 running into a DSI morning at 03:00 puts the
+banner at the top of Monday, which is still between the two. `clashPairs()`
+returns the pair in store order, which says nothing about which came first, so
+the comparison is made at the call site. A `Set` rather than a `Map`: a shift
+can run over two others, and what has to be said once is that this row is
+double-booked.
+
+**And it is filled now.** §25 gave the rest note grey specifically so it could
+not be mistaken for this red. §29.2 then filled the rest note — and a red
+*line* under a filled amber block is the worse warning drawn quieter, which is
+the inversion that rule existed to prevent. Both are filled, same shape, two
+colours, and the red still has only ever had this one job.
+
+The banner above the week list is untouched. It names both sides and the size
+of the overlap because up there nothing is next to anything, and because it
+exists for the case where nobody is looking at that week at all (§19).
