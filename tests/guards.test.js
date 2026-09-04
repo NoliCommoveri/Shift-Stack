@@ -119,6 +119,28 @@ test('a bare offset is not a time zone', () => {
   assert.equal(G.normalizeTimezone('UTC'), 'UTC');
 });
 
+test('a job that never said which zone it is in is told that it did not', () => {
+  // The §14.10 fault, from the side that could have reported it. The zone was
+  // designed as a per-job field and nothing filled it in, so every feed was
+  // read on Eastern wall time; in Central that is every shift an hour late,
+  // and no screen could say so because no screen was told which zone was
+  // used. `defaulted` is what /status puts on the Setup screen.
+  assert.deepEqual(G.zoneFor({ zone: 'America/Chicago' }),
+                   { zone: 'America/Chicago', defaulted: false });
+  assert.deepEqual(G.zoneFor({}), { zone: G.DEFAULT_ZONE, defaulted: true });
+  assert.deepEqual(G.zoneFor(null), { zone: G.DEFAULT_ZONE, defaulted: true });
+  assert.deepEqual(G.zoneFor({ zone: '  ' }), { zone: G.DEFAULT_ZONE, defaulted: true });
+  // A rejected answer is a fallback too: the job asked for something and did
+  // not get it, which reads on the screen the same way as never asking.
+  assert.deepEqual(G.zoneFor({ zone: 'UTC-6' }), { zone: G.DEFAULT_ZONE, defaulted: true });
+  assert.deepEqual(G.zoneFor({ zone: 'Nowhere/Nothing' }),
+                   { zone: G.DEFAULT_ZONE, defaulted: true });
+  // Surrounding space is not a different zone, and a phone's autocorrect adds
+  // it. Trimmed, and not counted as a fallback.
+  assert.deepEqual(G.zoneFor({ zone: ' America/Chicago ' }),
+                   { zone: 'America/Chicago', defaulted: false });
+});
+
 test('today is where the shifts are, not where the Worker is', () => {
   // 01:30 UTC on the 5th is still the 4th in Toronto, and the seven-day
   // import window is counted from it.

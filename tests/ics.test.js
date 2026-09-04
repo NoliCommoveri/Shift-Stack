@@ -92,6 +92,17 @@ test('the hour either side of a daylight-saving change is right', () => {
   assert.equal(new Date(after).toISOString(),  '2026-11-01T09:30:00.000Z');  // CST, -6
 });
 
+test('the same feed read on the wrong zone is a shift an hour out', () => {
+  // §14.10, stated as the symptom rather than as the arithmetic. Homebase
+  // publishes UTC; the Worker fell back to America/Toronto for any job that
+  // had not been told its zone, and nothing in the app had ever set one. A
+  // 17:00 start in Hattiesburg came out of the cron as 18:00 and every screen
+  // agreed with it.
+  const t = I.parseDT('20260904T220000Z', {});
+  assert.equal(I.resolve(t, 'America/Chicago').parts.h, 17);
+  assert.equal(I.resolve(t, 'America/Toronto').parts.h, 18);
+});
+
 test('an unrecognised zone is taken at face value and says so', () => {
   const t = I.parseDT('20260903T061500', { TZID: 'Central Standard Time' });
   const r = I.resolve(t, ZONE);

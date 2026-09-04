@@ -71,6 +71,24 @@ async function loadState(){
     const v = await idb.get();
     if(v) S = Object.assign(structuredClone(DEFAULTS), v);
   }catch(e){ /* first run, or storage blocked */ }
+  fillZones();
+}
+
+/* Every job needs a zone (§14.10), and a store written before the field
+   existed has none. The phone's own is the answer in every case this app has
+   — he is where his shifts are — so it is filled in rather than asked about,
+   and only the job that disagrees has to be edited.
+
+   Done on load rather than on the next edit because the job it matters most
+   for is the one nobody opens: the Worker's fallback is Eastern, and until
+   this reaches the server the cron goes on filing an hour wrong. `save` is
+   what sends it, and boot pushes straight after. */
+function fillZones(){
+  const mine = deviceZone();
+  if(!mine) return;
+  let filled = 0;
+  (S.companies || []).forEach(co => { if(!zoneOK(co.zone)){ co.zone = mine; filled++; } });
+  if(filled) save();
 }
 let saveTimer = null;
 function save(){
@@ -117,6 +135,46 @@ function fmtDurWords(m){
   if(r) bits.push(`${r} minute${r === 1 ? '' : 's'}`);
   return bits.join(' and ') || '0 minutes';
 }
+/* ---------- which clock a shift is on (§14.10) --------------------------
+   A shift is a wall time somewhere, and "somewhere" is where he is standing.
+   On this phone that is free — `parseICS` with no zone reads a feed into the
+   machine's own clock, which is his — and it was free for so long that the
+   field never got built. The Worker is the half where it is not free: Cron
+   Triggers are UTC-only and a Worker has no locale, so `normalizeTimezone` in
+   worker/guards.js falls back to a hard-coded `America/Toronto` when the job
+   does not say which zone its calendar is in. Nothing ever set that field
+   — §14.10 settled the design and the input was never added — so every
+   cron-filed shift came out on Eastern wall time. An hour west of Toronto
+   that is every Homebase shift an hour late, in the app, on the calendar and
+   in the alarms, with nothing on any screen to say why.
+
+   So the job carries its zone now, both readers are told it rather than left
+   to guess, and this is where the phone's own answer comes from. */
+const deviceZone = () => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; }
+  catch(e){ return ''; }
+};
+
+/* An IANA name and not an offset. `Intl` accepts `-05:00` and modern runtimes
+   accept `UTC+5`, which is the trap worth failing on rather than storing: an
+   offset is wrong for half the year in any zone that keeps daylight saving,
+   and getting that wrong here is a shift an hour out for six months. The same
+   test as `normalizeTimezone` in worker/guards.js, on purpose — a zone this
+   screen accepts and the Worker then throws away would be worse than no
+   field at all. */
+function zoneOK(z){
+  const s = String(z || '').trim();
+  if(!s) return false;
+  if(/[+-]\d/.test(s)) return false;              // UTC+5, GMT-3, -05:00
+  try { new Intl.DateTimeFormat('en-US', { timeZone: s }); return true; }
+  catch(e){ return false; }
+}
+
+/* The zone a job's calendar is read in: what it says, or this phone's, which
+   is the right answer on the phone and the only one available before the
+   field has been filled in. Never a hard-coded city. */
+const jobZone = co => zoneOK(co && co.zone) ? String(co.zone).trim() : deviceZone();
+
 // Start of the pay week containing `dateStr`, for a week beginning on `startDow`.
 function weekStart(dateStr, startDow){
   const d = asDate(dateStr);
@@ -584,12 +642,59 @@ function feedJobName(){
   return co ? co.name : '';
 }
 
+/* Under the zone box. Three states worth different sentences: nothing set,
+   something set that is not a zone, and a zone that is not this phone's —
+   the last is legitimate (a job in another city) and is still the shape the
+   §14.10 bug had, so it is said out loud rather than left to be noticed a
+   week later in an alarm that went off an hour early. */
+function zoneNote(co){
+  const mine = deviceZone();
+  const said = String(co.zone || '').trim();
+  if(said && !zoneOK(said))
+    return esc(`\u201c${said}\u201d is not an IANA zone name, so the server will `
+      + `fall back to Eastern. Write it as Area/City \u2014 ${mine || 'America/Chicago'} `
+      + '\u2014 and not as an offset: an offset is wrong for half the year.');
+  const use = jobZone(co);
+  if(!use)
+    return 'This phone will not say what zone it is in, so type the one the employer\u2019s '
+      + 'calendar is written on \u2014 Area/City, e.g. America/Chicago.';
+  if(!said)
+    return esc(`Empty, so ${use} \u2014 this phone\u2019s \u2014 is used here. The server has no `
+      + 'locale of its own and falls back to Eastern instead, which is an hour out from '
+      + 'here, so this is worth filling in.');
+  if(mine && use !== mine)
+    return esc(`Read and written in ${use}, which is not this phone\u2019s (${mine}). `
+      + 'Right for a job in another city, wrong for one here \u2014 and a shift an hour '
+      + 'out is exactly how it shows.');
+  return esc(`Read and written in ${use}. The employer\u2019s calendar publishes UTC and the `
+    + 'times have to come back out on the clock he actually works to \u2014 the server has no '
+    + 'locale of its own, so it is told this one.');
+}
+
+/* Offered under the zone box rather than imposed: the field takes any IANA
+   name, and this is the short list that saves typing. This phone's own comes
+   first because it is the answer nearly every time. */
+function zoneChoices(){
+  const common = ['America/St_Johns','America/Halifax','America/Toronto','America/New_York',
+                  'America/Chicago','America/Winnipeg','America/Denver','America/Edmonton',
+                  'America/Phoenix','America/Los_Angeles','America/Vancouver','America/Anchorage',
+                  'Pacific/Honolulu','UTC','Europe/London','Europe/Dublin'];
+  const mine = deviceZone();
+  return [...new Set([mine, ...common].filter(Boolean))];
+}
+
 function appNote(co){
   const bits = [];
   // First, because it is the one that decides whether the cron runs at all.
   if(co.icsFeed) bits.push('polled by the server');
   if(co.pkg) bits.push(co.pkg);
   if(co.icsMatch) bits.push(`only \u201c${co.icsMatch}\u201d`);
+  // Only when it is not the phone's. The interesting case is the one that
+  // disagrees; saying "America/Chicago" on every job while standing in
+  // Chicago is noise, and a fold summary has room for one surprise.
+  const zone = jobZone(co);
+  if(zone && zone !== deviceZone()) bits.push(zone);
+  else if(!zone) bits.push('no time zone');
   if(co.holidays){
     const h = holidayPlaces().find(x => x.id === co.holidays);
     if(h) bits.push(h.name);
@@ -2008,6 +2113,10 @@ function renderRoleSuggestions(co, roleHost, host){
 function renderSetup(){
   const box = $('#colist');
   box.innerHTML = '';
+  // One list for every job's zone box. Suggestions only — the field takes any
+  // IANA name, and a phone in a city this list forgot must not be stuck.
+  const zl = $('#zonelist');
+  if(zl) zl.innerHTML = zoneChoices().map(z => `<option value="${esc(z)}"></option>`).join('');
   if(!S.companies.length)
     box.appendChild(el('p','empty','No jobs yet. Add one to get started.'));
 
@@ -2068,6 +2177,11 @@ function renderSetup(){
         on every shift and nothing else \u2014 a site name, the role \u2014 keeps them out. Leave it
         empty to take everything.</p>
 
+      <label class="f"><span>Its calendar\u2019s time zone</span>
+        <input data-k="zone" list="zonelist" type="text" spellcheck="false"
+               placeholder="${esc(deviceZone() || 'America/Chicago')}" value="${esc(co.zone || '')}"></label>
+      <p class="tiny soft zonenote" style="margin:-.35rem 0 0">${zoneNote(co)}</p>
+
       <label class="f"><span>Statutory holidays</span>
         <select data-k="holidays">
           <option value=""${!co.holidays ? ' selected' : ''}>Don\u2019t check</option>
@@ -2121,6 +2235,9 @@ function renderSetup(){
         let v = inp.type === 'checkbox' ? inp.checked : inp.value;
         if(['rate','otAfterHrs','breakMins','breakAfterHrs','weekStart'].includes(k))
           v = v === '' ? null : +v;
+        // A zone with a space either side of it is not a zone, and the box is
+        // where a picked suggestion and a typed name both land.
+        if(k === 'zone') v = String(v).trim();
         co[k] = v;
         // Exactly one job is the one the Worker polls. `feedJob` in
         // worker/guards.js takes the first it finds, so two ticked would make
@@ -2146,6 +2263,14 @@ function renderSetup(){
           `<span class="dot" style="background:${esc(co.color)}"></span>${esc(co.name)}`;
         pay.d.querySelector('.foldnote').innerHTML = payNote(co);
         app.d.querySelector('.foldnote').innerHTML = appNote(co);
+        // The sentence under the zone box changes with every character typed
+        // into it — it is the only thing that says a half-typed zone is not
+        // one yet — and the Server section quotes the same answer.
+        if(k === 'zone'){
+          const zn = card.querySelector('.zonenote');
+          if(zn) zn.innerHTML = zoneNote(co);
+          if(co.icsFeed) renderServerZone(lastStatus);
+        }
       };
     });
     // Roles before sites, and patterns before both: the declared shifts are
@@ -2796,6 +2921,12 @@ const ICS_FROM = () => shiftDays(todayISO(), -7);
 function calendarRows(text){
   const co = coById($('#impco').value);
   const { rows, report } = parseICS(text, {
+    // Told, not inferred. Omitted, `parseICS` reads into whatever clock this
+    // machine keeps, which is the right answer on his phone and is how this
+    // path has always worked — but the cron reads the same feed against the
+    // job's zone (§14.10), and two readers of one calendar that disagree
+    // about the hour produce a duplicate on every poll rather than a match.
+    zone: jobZone(co),
     from: ICS_FROM(),
     match: co ? co.icsMatch : ''
   });
@@ -3102,6 +3233,10 @@ async function server(path, opts = {}){
   return body;
 }
 
+/* The last answer `/status` gave, kept so that editing a job's zone can
+   redraw the line below against it without asking the server again. */
+let lastStatus = null;
+
 /* Shown under the Server section. `alarm` is computed on the Worker rather
    than here so that §14.6's "quietly stopped changing" means one thing in
    both places — the failure this project exists to prevent is not a wrong
@@ -3111,6 +3246,12 @@ function renderServer(st, err){
   if(!note) return;
   alarm.hidden = true;
   polls.innerHTML = '';
+  lastStatus = st || null;
+  // Before every early return below, because the zone is wrong in exactly the
+  // states those return on — a server that has never been checked, a database
+  // with no tables — and it is wrong silently. It reads the config on this
+  // phone whether or not the server answered.
+  renderServerZone(st);
 
   // Drawn before anything the server said, and reached whether or not it was
   // asked. With no job ticked `feedJob` returns nothing, every tick refuses,
@@ -3169,6 +3310,59 @@ function renderServer(st, err){
         : `<span class="flag">refused: ${esc(p.reason || 'no reason recorded')}</span>`));
     polls.appendChild(row);
   });
+}
+
+/* Which clock the cron is reading the employer's calendar on (§14.10).
+
+   The bug this exists to make impossible: the Worker has no locale of its own
+   and `normalizeTimezone` falls back to `America/Toronto`, so a job whose zone
+   never reached the server had its whole schedule filed on Eastern wall time.
+   In Central that is every shift an hour late — on the Schedule, in the pay
+   figures, on the calendar and in the alarms — and every screen agreed with
+   every other, because they were all reading the same wrong number. Nothing
+   was going to catch that but a line saying which zone was actually used.
+
+   `st` is `/status`, which reports the zone the next poll will use and whether
+   it had to fall back to get it. The comparison is against what this phone
+   would do with the same feed, because that is the answer the app shows
+   everywhere else. */
+function renderServerZone(st){
+  const box = $('#srvzone');
+  if(!box) return;
+  box.hidden = true;
+  box.textContent = '';
+  box.className = 'tiny soft';
+
+  const co = S.companies.find(c => c.icsFeed)
+          || (S.companies.length === 1 ? S.companies[0] : null);
+  if(!co) return;
+  const here = jobZone(co);
+  const there = st && st.zone;
+
+  if(there && here && there !== here){
+    box.hidden = false;
+    box.className = 'flag';
+    box.textContent = `The server reads ${co.name}\u2019s calendar in ${there}`
+      + (st.zoneDefaulted ? ' \u2014 its fallback, because the job on the server does not say \u2014'
+                          : '')
+      + `, and this phone reads it in ${here}. Every shift the cron has filed is on the wrong `
+      + 'clock by the difference. Send the config up and the next poll rewrites them; the '
+      + 'calendar picks the corrections up because each rewrite bumps the event\u2019s revision.';
+    return;
+  }
+  if(there){
+    box.hidden = false;
+    box.textContent = `Feed times are read in ${there}`
+      + (st.zoneDefaulted ? ', which is the server\u2019s fallback rather than the job\u2019s own answer.'
+                          : ', on both ends.');
+    return;
+  }
+  if(!here){
+    box.hidden = false;
+    box.className = 'flag';
+    box.textContent = 'No time zone is set for this job and this phone will not say what its '
+      + 'own is, so the server falls back to Eastern. Set it on the job above.';
+  }
 }
 
 /* ---------- what the server actually holds (§34) ---------------------------
@@ -3735,6 +3929,10 @@ $('#addco').onclick = () => {
   const co = {
     id: uid(), name: 'New job', color: palette[S.companies.length % palette.length],
     rate: null, weekStart: 0, otAfterHrs: null, breakMins: null, breakAfterHrs: null,
+    // The clock its calendar is written on. The phone's, until a job says
+    // otherwise — a zone left empty is a cron reading the feed on Eastern
+    // wall time whoever is holding the phone (§14.10).
+    zone: deviceZone(),
     pkg: '', icsFeed: false, icsMatch: '', patterns: []
   };
   S.companies.push(co);

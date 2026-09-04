@@ -88,6 +88,26 @@ function normalizeTimezone(z){
   catch { return DEFAULT_ZONE; }
 }
 
+/* The zone a job's calendar is read in, and whether that is the job's own
+   answer or this file's fallback.
+
+   The fallback used to be invisible, and that is the whole reason this is a
+   function with two fields rather than a call to `normalizeTimezone`. §14.10
+   settled that the zone would be a per-job IANA name in `cfg`; nothing in the
+   app ever wrote one, so every feed was read on Eastern wall time, and for a
+   phone an hour west that is every shift an hour late — on the Schedule, in
+   the pay figures, on the calendar and in the alarms, all agreeing with each
+   other because they were all reading the same wrong number. `defaulted` is
+   what lets `/status` say so on the one screen where it can be fixed.
+
+   True for a zone that was rejected as well as for one that was never given:
+   a job that says `UTC+5` did not get what it asked for either. */
+function zoneFor(job){
+  const said = String((job && job.zone) || '').trim();
+  const zone = normalizeTimezone(said);
+  return { zone, defaulted: zone !== said };
+}
+
 /* Today where the shifts are, not where the Worker is. en-CA formats as
    YYYY-MM-DD, which is the one thing it is useful for. */
 function todayIn(zone, at = new Date()){
@@ -241,6 +261,6 @@ function safeSettings(settings){
   return out;
 }
 
-module.exports = { guard, splitSQL, alarmFor, feedJob, normalizeTimezone, DEFAULT_ZONE,
+module.exports = { guard, splitSQL, alarmFor, feedJob, normalizeTimezone, zoneFor, DEFAULT_ZONE,
                    todayIn, shiftISO, newestStamp, timingSafeEqual, tokenOK,
                    safeSettings, SETTINGS_KEPT, resetPlan, orphanGroups, RESET_TABLES, countEvents };

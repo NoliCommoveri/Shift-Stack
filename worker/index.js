@@ -24,7 +24,7 @@ const { parseICS } = icsMod;
 const { feedICS } = feedMod;
 const { mergeCalendar } = mergeMod;
 const { matchName } = sitesMod;
-const { guard, alarmFor, feedJob, normalizeTimezone, todayIn, shiftISO,
+const { guard, alarmFor, feedJob, normalizeTimezone, zoneFor, todayIn, shiftISO,
         newestStamp, tokenOK, splitSQL, safeSettings, resetPlan,
         orphanGroups, countEvents } = guardsMod;
 
@@ -83,7 +83,7 @@ async function poll(env){
   if(!job) return record(env, 'unknown', { ok: 0, reason: 'no job is configured for the feed' });
   if(!env.ICS_URL) return record(env, job.id, { ok: 0, reason: 'the calendar address is not set' });
 
-  const zone = normalizeTimezone(job.zone);
+  const { zone } = zoneFor(job);
   const today = todayIn(zone);
   const from = shiftISO(today, -7);
 
@@ -293,6 +293,14 @@ async function status(env){
     return json({ needsSetup: true, alarm: null, shifts: {}, polls: [],
                   message: 'The database has no tables yet. Press "Set up the database".' });
 
+  // Which clock the next poll will read the feed on (§14.10). Reported rather
+  // than assumed: the zone is a per-job field the app fills in, and the one
+  // failure it has actually produced was the field being empty and this side
+  // quietly falling back to Eastern — a whole schedule an hour out, with every
+  // screen agreeing because every screen read the same number.
+  const cfg = await readCfg(env) || {};
+  const { zone, defaulted } = zoneFor(feedJob(cfg.companies || []));
+
   const { results: polls } = await env.DB.prepare(
     `SELECT * FROM polls ORDER BY id DESC LIMIT 50`).all();
   const rows = polls || [];
@@ -304,6 +312,7 @@ async function status(env){
   return json({
     shifts: Object.fromEntries((counts.results || []).map(r => [r.source, r.n])),
     lastGood: good ? good.at : null,
+    zone, zoneDefaulted: defaulted,
     // §14.6's two alarms, computed in guards.js so that "quietly stopped
     // changing" means one thing here and on the Setup screen. The failure this
     // project exists to catch is not a wrong shift, it is a calendar that has

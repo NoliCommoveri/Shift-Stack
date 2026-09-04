@@ -181,6 +181,95 @@ test('the feed job can be ticked, and only one job at a time', async (t) => {
   }
 });
 
+/* §14.10, from the end that produced the symptom.
+ *
+ * The zone was designed as a per-job field and no input was ever built for
+ * it, so `normalizeTimezone` in the Worker fell back to America/Toronto for
+ * everybody. On a phone in Central that is every Homebase shift filed an hour
+ * late — on the Schedule, in the pay figures, on the calendar and in the
+ * alarms — and no screen disagreed, because they were all reading the same
+ * wrong number. The page is the only place that knows which zone he is in, so
+ * these assertions are here: the field exists, it starts as the phone's own,
+ * and a server reading the feed on a different clock is said out loud.
+ */
+test('a job is born in the phone\u2019s own time zone, and a server on another says so', async (t) => {
+  const browser = await open();
+  if(!browser) return t.skip('no Playwright browser available');
+
+  try {
+    // The phone is in Central. That is the whole premise of the bug.
+    const page = await browser.newPage({ timezoneId: 'America/Chicago' });
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto('file://' + path.join(ROOT, 'index.html'));
+    await page.waitForFunction(() => typeof S === 'object' && S !== null, null, { timeout: 15000 });
+
+    await page.click('nav button[data-tab="setup"]');
+    await page.click('#addco');
+
+    const born = await page.evaluate(() => ({
+      stored: S.companies[0].zone,
+      field: (document.querySelector('input[data-k="zone"]') || {}).value,
+      note: (document.querySelector('.zonenote') || {}).textContent || ''
+    }));
+    assert.equal(born.stored, 'America/Chicago', 'a new job takes the phone\u2019s zone');
+    assert.equal(born.field, 'America/Chicago', 'and the box on the screen shows it');
+    assert.match(born.note, /America\/Chicago/);
+
+    // A store written before the field existed. Filled on load rather than
+    // asked about: an empty zone is the Worker's Eastern fallback, and the job
+    // nobody opens is the one it costs the most.
+    const filled = await page.evaluate(() => {
+      delete S.companies[0].zone;
+      fillZones();
+      return S.companies[0].zone;
+    });
+    assert.equal(filled, 'America/Chicago');
+
+    // Typed through the handler the page binds, not by assignment — and an
+    // offset is refused in words rather than stored to be thrown away by the
+    // Worker six hours later.
+    const typed = await page.evaluate(() => {
+      const box = document.querySelector('input[data-k="zone"]');
+      box.value = 'UTC-6'; box.dispatchEvent(new Event('input', { bubbles: true }));
+      return { stored: S.companies[0].zone,
+               note: document.querySelector('.zonenote').textContent };
+    });
+    assert.equal(typed.stored, 'UTC-6');
+    assert.match(typed.note, /not an IANA zone name/);
+
+    // The line the whole fix hangs on: the server says which clock it reads
+    // the feed on, and disagreeing with this phone is loud.
+    const clash = await page.evaluate(() => {
+      S.companies[0].zone = 'America/Chicago';
+      S.companies[0].icsFeed = true;
+      renderServer({ shifts: {}, polls: [], zone: 'America/Toronto', zoneDefaulted: true });
+      const z = document.getElementById('srvzone');
+      return { hidden: z.hidden, cls: z.className, text: z.textContent };
+    });
+    assert.equal(clash.hidden, false);
+    assert.equal(clash.cls, 'flag');
+    assert.match(clash.text, /America\/Toronto/);
+    assert.match(clash.text, /America\/Chicago/);
+    assert.match(clash.text, /does not say/);
+
+    // Agreeing is quiet, and still says which zone, because "an hour out" is
+    // not a thing anybody notices without a number to check it against.
+    const agreed = await page.evaluate(() => {
+      renderServer({ shifts: {}, polls: [], zone: 'America/Chicago', zoneDefaulted: false });
+      const z = document.getElementById('srvzone');
+      return { hidden: z.hidden, cls: z.className, text: z.textContent };
+    });
+    assert.equal(agreed.hidden, false);
+    assert.equal(agreed.cls, 'tiny soft');
+    assert.match(agreed.text, /read in America\/Chicago/);
+
+    assert.deepEqual(errors, [], 'the page loaded with no uncaught errors');
+  } finally {
+    await browser.close();
+  }
+});
+
 test('the server\u2019s shifts are read back down, and are read only here', async (t) => {
   const browser = await open();
   if(!browser) return t.skip('no Playwright browser available');

@@ -923,6 +923,11 @@ not an IANA name) is taken at face value and flagged rather than guessed at.
 The tests pin an output zone rather than reading the machine's, so they do not
 pass in one place and fail in another.
 
+Which zone that is, is the job's — `co.zone`, an IANA name, filled in from the
+phone's own when a job is made and offered as a box on the **App and calendar**
+fold. The page could have gone on inferring it and been right; the Worker
+cannot, and the whole of §35 is what happened when it inferred anyway.
+
 ### Still open
 
 1. **No real feed has been through it.** The fixture is synthetic — written to
@@ -1449,7 +1454,10 @@ app within half an hour.
 - ~~Where `zone` comes from~~ — settled. Cron Triggers are UTC-only and the
   Worker has no locale, so it is told: a per-job IANA name in `cfg`, defaulting
   to `America/Toronto`, validated on the way in and never inferred from the
-  runtime. Star-homeschool's `normalizeTimezone()` is the validator to lift —
+  runtime. Settled on paper and not in the app for a month: nothing ever wrote
+  `co.zone`, so every feed was read on the fallback and every Homebase shift in
+  Central arrived an hour late. §35 is the field, the migration and the line
+  that says which zone was used. Star-homeschool's `normalizeTimezone()` is the validator to lift —
   it already rejects a bare offset like `UTC+5`, which is the failure worth
   catching, because an offset is wrong for half the year in any zone that
   observes DST.
@@ -4247,3 +4255,84 @@ The sequence itself is a browser test, and has to be. A unit test can assert
 that `resetPlan` names four tables. Only a loaded page can assert that the token
 is still there when the server is called and gone by the time it finishes, and
 that `autoPush` and `syncDown`, fired deliberately mid-flight, put nothing back.
+
+---
+
+## 35. Fixed: the Homebase shifts were an hour late, 4 September 2026
+
+Every shift the cron filed was on the calendar an hour out. Not the typed
+ones and not the rota's — the Homebase ones, the half of the schedule
+nobody types, which is the half the phone cannot check against anything.
+
+The employer's calendar publishes UTC. `ics.js` turns that into a wall time,
+and it needs to be told which wall: `parseICS` takes a `zone`, and with none
+it reads into the machine's own clock. In the page that is free and always
+right — the machine is his phone and the phone is where he works. In the
+Worker it is not available at all. Cron Triggers are UTC-only and a Worker has
+no locale, so `normalizeTimezone` in `worker/guards.js` falls back to a
+hard-coded `America/Toronto` when the job does not say.
+
+§14.10 settled this a month ago: **a per-job IANA name in `cfg`**. What it did
+not do was build the input. `co.zone` was read by the Worker on every poll and
+written by nothing, ever, so the fallback was not a fallback — it was the
+answer, for every job, on every tick. An hour west of Toronto that is a 17:00
+start filed as 18:00.
+
+### Why nothing caught it
+
+Because everything agreed. The Schedule drew 18:00, the pay figures counted
+the hours from 18:00, the feed published `DTSTART` at 18:00, and the alarms
+counted back from 18:00. There is no screen in this app that compares a shift
+against anything but another shift, and all of them were reading the same
+wrong number. `/status` said the poll was healthy, because it was: the fetch
+worked, the parse worked, the diff applied. Nothing in it named the clock.
+
+That is the same shape as §31 — a file that imports perfectly and is wrong —
+and it wants the same answer: not more care, but a number on a screen that a
+person can disagree with.
+
+### What changed
+
+- **The field exists.** `co.zone` on the **App and calendar** fold, a text box
+  with a datalist of the usual names. Free text and not a menu: a menu that
+  forgot a city would be a phone with no way to say where it is.
+- **It starts as the phone's.** A new job takes `Intl.DateTimeFormat()
+  .resolvedOptions().timeZone`, and `fillZones` on load backfills every job
+  written before the field existed. He is asked nothing, and the job that is
+  wrong is the only one he has to open. Filling it in triggers a save, so it
+  reaches the server on the next push rather than at the next edit.
+- **An offset is refused in words.** `zoneOK` in `app.js` is the same shape
+  test `normalizeTimezone` applies on the other side, so a zone this screen
+  accepts is one the Worker will honour. `UTC-6` is not stored quietly to be
+  thrown away six hours later; the sentence under the box says why.
+- **Both readers are told.** The page's own import passes `jobZone(co)` to
+  `parseICS` rather than leaning on the machine. Two readers of one calendar
+  that disagree about the hour do not just show different times — they match
+  nothing on `icsSame`, and every poll rewrites the whole schedule.
+- **The zone is reported.** `zoneFor(job)` in `worker/guards.js` returns the
+  zone *and* whether it had to fall back to get it, `GET /status` carries both,
+  and the Setup screen prints `Feed times are read in America/Chicago`. When
+  the server's answer and the phone's disagree the line goes red and names both
+  — which is the line that would have made this a five-minute bug.
+
+### The repair
+
+Nothing has to be re-imported. The shifts on file differ from the shifts the
+feed now parses to, so `mergeCalendar` puts them in `replace`, the poll rewrites
+them in place, and `SEQUENCE` goes up — which is what makes a calendar accept a
+revision it already holds (§22). §14.6's guards do not stand in the way: they
+cap removals, and a retimed shift is not one. One tick, and the schedule and
+the calendar are both on the right clock.
+
+### What is tested
+
+`zoneFor` is pure and sits with the other guards: a job with a zone, a job
+without one, a job that asked for `UTC-6` and did not get it — all three come
+back saying which they were. `ics.js` gets the symptom stated as arithmetic:
+one UTC start, read on Chicago and on Toronto, an hour apart.
+
+The rest is a browser test, and has to be. Only a loaded page can assert that a
+job made in a Playwright context pinned to `America/Chicago` is born in Central,
+that `fillZones` repairs a store written before the field, that typing an offset
+gets a sentence instead of silence, and that a `/status` reply naming Toronto
+turns the line red while one naming Chicago leaves it grey.
