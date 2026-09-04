@@ -295,9 +295,12 @@ export default {
     const f = /^\/feed\/(.+)\.ics$/.exec(path);
     if(f && req.method === 'GET') return feed(env, decodeURIComponent(f[1]));
 
+    // The push token, not the feed token. The phone holds exactly one secret;
+    // FEED_TOKEN exists only to sit in the URL ICSx⁵ subscribes to, and
+    // giving the app a second token to paste would be a second thing to get
+    // wrong for no gain.
     if(path === '/status' && req.method === 'GET'){
-      if(!tokenOK(env.FEED_TOKEN, bearer(req) || url.searchParams.get('t') || ''))
-        return new Response('no', { status: 401 });
+      if(!tokenOK(env.PUSH_TOKEN, bearer(req))) return new Response('no', { status: 401 });
       return status(env);
     }
 

@@ -1194,7 +1194,13 @@ lock rather than the only one. Nothing else subscribes, so there is no Google
 fetcher to keep unauthenticated for.
 
 **`GET /status`** — the poll ring buffer and the current counts, for the app's
-Setup screen. Same token as the feed.
+Setup screen. ~~Same token as the feed.~~ **The push token**, changed when the
+Setup screen was built: the phone then holds exactly one secret. `FEED_TOKEN`
+exists to sit in the URL ICSx⁵ subscribes to, nothing on the phone reads it,
+and asking him to paste a second token into Setup would have been a second
+thing to get wrong for no gain. `POST /migrate` takes the push token for the
+same reason — it is a write, and it is how §14.9 step 4 applies the schema
+without anyone opening the D1 console.
 
 ### 14.5 The cron
 

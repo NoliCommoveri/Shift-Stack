@@ -2116,16 +2116,25 @@ function renderSetup(){
   });
 
   $('#leads').value = (S.settings.leads || []).join(', ');
+  const tok = document.getElementById('pushtoken');
+  if(tok && tok.value !== (S.settings.pushToken || '')) tok.value = S.settings.pushToken || '';
+  renderServer(null);
   const sub = S.settings.feedMode !== 'import';
   const modeSel = document.getElementById('feedmode');
   if(modeSel) modeSel.value = sub ? 'subscribe' : 'import';
   const btn = document.getElementById('exportics');
-  if(btn) btn.textContent = sub ? 'Save the feed file' : 'Save new shifts';
+  // In subscription mode the button either sends or saves, and it has to say
+  // which: the two leave the shifts in different places, and a label that
+  // lied about it would be found out at the calendar rather than here.
+  if(btn) btn.textContent = sub ? (pushToken() ? 'Send to the server' : 'Save the feed file')
+                                : 'Save new shifts';
   const all = document.getElementById('exportall');
   if(all) all.hidden = sub;
   const help = document.getElementById('feedhelp');
   if(help) help.textContent = sub
-    ? 'Always save over the same shifts.ics that ICSx\u2075 points at. It holds every shift, so the calendar mirrors it exactly and never duplicates.'
+    ? (pushToken()
+        ? 'The server holds every shift and ICSx\u2075 reads it from there, so the calendar mirrors it exactly and never duplicates.'
+        : 'Always save over the same shifts.ics that ICSx\u2075 points at. It holds every shift, so the calendar mirrors it exactly and never duplicates.')
     : 'Only shifts not sent before are included, so importing again will not duplicate anything.';
   const un = S.shifts.filter(s => !s.sent).length;
   const note = document.getElementById('unsent');
@@ -2957,9 +2966,129 @@ function renderReview(){
    title. The folder is `icsFold` and not `fold` because `fold` in this file
    is the Setup screen's `<details>` helper, and this file is loaded last.
    ---------------------------------------------------------------------- */
+/* ---------- the server --------------------------------------------------
+   §14. The Worker serves this page, so every call below is a relative path
+   to its own origin: there is no base URL in Setup, because a configurable
+   one would be a way to get it wrong rather than a feature. Opened from
+   anywhere else — a file:// copy, the old Pages URL — these simply fail, and
+   the .ics download stays as the fallback for exactly that (§14.7).
+
+   The push token is the only secret the phone holds. FEED_TOKEN lives in the
+   URL ICSx⁵ subscribes to and never comes near this page.
+   ---------------------------------------------------------------------- */
+const pushToken = () => (S.settings.pushToken || '').trim();
+
+async function server(path, opts = {}){
+  const token = pushToken();
+  if(!token) throw new Error('No push token set.');
+  const res = await fetch(path, {
+    ...opts,
+    headers: { ...(opts.headers || {}), authorization: `Bearer ${token}` }
+  });
+  if(res.status === 401) throw new Error('The server did not accept that token.');
+  if(!res.ok) throw new Error(`The server answered ${res.status}.`);
+  return res.json();
+}
+
+/* Shown under the Server section. `alarm` is computed on the Worker rather
+   than here so that §14.6's "quietly stopped changing" means one thing in
+   both places — the failure this project exists to prevent is not a wrong
+   shift, it is a calendar nothing has updated and nothing has mentioned. */
+function renderServer(st, err){
+  const note = $('#srvnote'), alarm = $('#srvalarm'), polls = $('#srvpolls');
+  if(!note) return;
+  alarm.hidden = true;
+  polls.innerHTML = '';
+
+  if(err){ note.textContent = err; return; }
+  if(!st){
+    note.textContent = pushToken()
+      ? 'Not checked yet.'
+      : 'No push token yet, so the shifts are not going anywhere but this phone.';
+    return;
+  }
+
+  const n = st.shifts || {};
+  const bits = [];
+  if(n.feed) bits.push(`${n.feed} from the calendar`);
+  if(n.manual) bits.push(`${n.manual} entered here`);
+  if(n.pattern) bits.push(`${n.pattern} from the rota`);
+  note.textContent = (bits.length ? bits.join(', ') : 'No shifts on the server yet')
+    + (st.lastGood ? `. Last good poll ${whenWords(st.lastGood)}.` : '. No successful poll yet.');
+
+  if(st.alarm){ alarm.hidden = false; alarm.textContent = st.alarm; }
+
+  // The last few polls, refusals included. §14.8 measures rather than claims,
+  // and this is where the measurement is readable.
+  (st.polls || []).slice(0, 8).forEach(p => {
+    const row = el('div', null,
+      `${esc(whenWords(p.at))} — ` + (p.ok
+        ? esc(`${p.events} events` +
+              (p.added || p.replaced || p.removed
+                ? `, ${[p.added && p.added + ' added', p.replaced && p.replaced + ' changed',
+                        p.removed && p.removed + ' removed'].filter(Boolean).join(', ')}`
+                : ', nothing changed'))
+        : `<span class="flag">refused: ${esc(p.reason || 'no reason recorded')}</span>`));
+    polls.appendChild(row);
+  });
+}
+
+/* Relative to now, in words, because an ISO stamp in a status line is a thing
+   to decode rather than read. */
+function whenWords(iso){
+  const mins = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  if(!Number.isFinite(mins)) return 'at an unknown time';
+  if(mins < 1) return 'just now';
+  if(mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const h = Math.round(mins / 60);
+  if(h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`;
+  const d = Math.round(h / 24);
+  return `${d} day${d === 1 ? '' : 's'} ago`;
+}
+
+/* What the phone owns, sent whole: the config, and every shift that did not
+   come from the feed. The Worker replaces its half with this and leaves the
+   cron's rows alone (§14.3). */
+async function pushToServer(){
+  const mine = S.shifts.filter(s => s.source !== 'feed');
+  return server('/push', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      cfg: { companies: S.companies, sites: S.sites, roles: S.roles, settings: S.settings },
+      shifts: mine
+    })
+  });
+}
+
 function buildICS(only){
   return feedICS(only, S);
 }
+/* The same export, sent rather than saved. It marks the shifts sent only on
+   a confirmed write: a failed push that quietly marked them would leave the
+   next export believing there was nothing to send, which is the silent
+   staleness §4 refused to accept. */
+async function pushExport(){
+  const btn = $('#exportics');
+  const was = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = 'Sending\u2026'; }
+  try {
+    const r = await pushToServer();
+    S.shifts.forEach(s => s.sent = true);
+    S.settings.lastExport = new Date().toISOString();
+    // The rebuild *is* the cancellation here: a deleted shift is simply not in
+    // what was sent, so the feed drops the event on the next sync (§22).
+    S.tombstones = [];
+    save(); renderAll();
+    $('#srvnote').textContent = `Sent ${r.shifts} shift${r.shifts === 1 ? '' : 's'} to the server.`;
+  } catch (e) {
+    renderServer(null, `Not sent — ${e.message}`);
+    alert(`The shifts were not sent: ${e.message}\n\nThey are still here, and "Save the feed file" will write the .ics instead.`);
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = was; }
+  }
+}
+
 function download(name, text, type){
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], {type}));
@@ -3168,6 +3297,27 @@ $('#addco').onclick = () => {
 };
 
 $('#feedmode').onchange = e => { S.settings.feedMode = e.target.value; save(); renderSetup(); };
+$('#pushtoken').oninput = e => { S.settings.pushToken = e.target.value.trim(); save(); };
+
+$('#srvcheck').onclick = async () => {
+  $('#srvnote').textContent = 'Checking\u2026';
+  try { renderServer(await server('/status')); }
+  catch (e) { renderServer(null, e.message); }
+};
+
+/* Applying the schema is a button rather than a command, because §14.9's
+   guardrail is that nobody is asked to run a CLI or paste SQL into the D1
+   console. Every statement is `IF NOT EXISTS`, so pressing it twice is
+   harmless — which matters, since there is no way to tell from here whether
+   the first press took. */
+$('#srvmigrate').onclick = async () => {
+  $('#srvnote').textContent = 'Setting up the database\u2026';
+  try {
+    const r = await server('/migrate', { method: 'POST' });
+    $('#srvnote').textContent = `Database ready — ${r.statements} statements applied. Check the server to see it.`;
+  } catch (e) { renderServer(null, e.message); }
+};
+
 $('#leads').oninput = e => {
   S.settings.leads = e.target.value.split(',').map(x => parseFloat(x.trim()))
                       .filter(n => !isNaN(n) && n > 0);
@@ -3180,6 +3330,11 @@ function doExport(all){
   // what makes duplicates impossible.
   if(S.settings.feedMode === 'subscribe'){
     if(!S.shifts.length){ alert('No shifts to export yet.'); return; }
+    // With a server, the feed is a POST and ICSx⁵ reads it from the Worker.
+    // Without one — no token, or the app opened somewhere the Worker does not
+    // serve — the file download is still the whole mechanism, which is why it
+    // stays rather than becoming a fallback nobody has tested (§14.7).
+    if(pushToken()){ pushExport(); return; }
     download('shifts.ics', buildICS(S.shifts), 'text/calendar;charset=utf-8');
     S.shifts.forEach(s => s.sent = true);
     S.settings.lastExport = new Date().toISOString();
