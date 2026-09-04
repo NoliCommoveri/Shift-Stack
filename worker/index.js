@@ -25,7 +25,7 @@ const { feedICS } = feedMod;
 const { mergeCalendar } = mergeMod;
 const { matchName } = sitesMod;
 const { guard, alarmFor, feedJob, normalizeTimezone, todayIn, shiftISO,
-        newestStamp, tokenOK, splitSQL, safeSettings } = guardsMod;
+        newestStamp, tokenOK, splitSQL, safeSettings, whyNoFeedJob } = guardsMod;
 
 const JSON_HEAD = { 'content-type': 'application/json; charset=utf-8' };
 const nowISO = () => new Date().toISOString();
@@ -79,7 +79,7 @@ async function readStore(env){
 async function poll(env){
   const store = await readStore(env);
   const job = feedJob(store.companies);
-  if(!job) return record(env, 'unknown', { ok: 0, reason: 'no job is configured for the feed' });
+  if(!job) return record(env, 'unknown', { ok: 0, reason: whyNoFeedJob(store.companies) });
   if(!env.ICS_URL) return record(env, job.id, { ok: 0, reason: 'the calendar address is not set' });
 
   const zone = normalizeTimezone(job.zone);

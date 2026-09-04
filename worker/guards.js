@@ -69,6 +69,21 @@ function feedJob(companies){
   return cos.find(c => c.icsFeed) || (cos.length === 1 ? cos[0] : null);
 }
 
+/* Why there is no job, in words that name the next action. The two states that
+   land here are not the same problem and used to print the same sentence:
+   an empty `cfg` row means the phone has never pushed, and a full one with
+   nothing ticked means it has pushed and the question was never asked. Setup
+   shows this line verbatim, every fifteen minutes, so it is the whole of the
+   diagnosis he gets. */
+function whyNoFeedJob(companies){
+  const cos = companies || [];
+  if(!cos.length)
+    return 'no job is configured for the feed: nothing has been sent from the phone yet — ' +
+           'open Setup, put the push token in, and export once';
+  return `no job is configured for the feed: ${cos.length} jobs are set up and none is ticked ` +
+         `as the one the server fetches — tick it under that job's "App and calendar"`;
+}
+
 /* Cron Triggers are UTC-only and this Worker has no locale, so the zone is
    told to it and never inferred. A bare offset like `UTC+5` or `-05:00` is
    rejected, because an offset is wrong for half the year in any zone that
@@ -184,4 +199,4 @@ function safeSettings(settings){
 
 module.exports = { guard, splitSQL, alarmFor, feedJob, normalizeTimezone, DEFAULT_ZONE,
                    todayIn, shiftISO, newestStamp, timingSafeEqual, tokenOK,
-                   safeSettings, SETTINGS_KEPT };
+                   safeSettings, SETTINGS_KEPT, whyNoFeedJob };

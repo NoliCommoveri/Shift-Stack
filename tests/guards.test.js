@@ -268,3 +268,27 @@ test('it copies rather than aliases, so the caller cannot be edited through it',
   assert.notEqual(kept, src);
   assert.ok('pushToken' in src, 'safeSettings must not strip its argument in place');
 });
+
+
+/* ---------- and why there is no job --------------------------------------
+ * The two states that reach here are different problems with different next
+ * actions, and they used to print one sentence between them. Setup shows this
+ * line verbatim every fifteen minutes, so it is the whole diagnosis.
+ */
+test('an empty config says nothing has been pushed, not that a job is missing', () => {
+  const why = G.whyNoFeedJob([]);
+  assert.match(why, /nothing has been sent from the phone/);
+  assert.match(why, /export once/);
+});
+
+test('two jobs and no tick says which screen to go to', () => {
+  const why = G.whyNoFeedJob([{ id: 'c1' }, { id: 'c2' }]);
+  assert.match(why, /2 jobs are set up/);
+  assert.match(why, /App and calendar/);
+  // And it must not tell him to push, which he has already done.
+  assert.ok(!/export once/.test(why));
+});
+
+test('the two reasons are not the same sentence', () => {
+  assert.notEqual(G.whyNoFeedJob([]), G.whyNoFeedJob([{ id: 'c1' }, { id: 'c2' }]));
+});

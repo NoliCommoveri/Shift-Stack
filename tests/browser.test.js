@@ -106,6 +106,39 @@ test('the app loads with no uncaught errors, and writes a real calendar', async 
     assert.match(ics, /\r\nDTEND:20260905T070000\r\n/);
     assert.match(ics, /\r\nTRIGGER:-PT2H\r\n/);
 
+    // The field the cron picks a job by has to be one the page can actually
+    // set. `feedJob` has read `icsFeed` since §14 and nothing wrote it: the
+    // unit test below constructs `{ icsFeed: true }` by hand and passes, while
+    // a phone with two jobs refused every poll forever with no control on any
+    // screen to fix it. Asserted through the DOM, because the bug was the
+    // absence of a checkbox and only the DOM knows whether one is there.
+    const feedPick = await page.evaluate(() => {
+      S.companies = [{ id: 'c1', name: 'DSI', color: '#333', patterns: [] },
+                     { id: 'c2', name: 'Trupoint', color: '#444', patterns: [] }];
+      S.settings.open = { c1: true, c2: true };
+      renderSetup();
+      const boxes = [...document.querySelectorAll('[data-k="icsFeed"]')];
+      if(boxes.length !== 2) return { boxes: boxes.length };
+      // Tick the second job the way a finger does, not by assignment.
+      boxes[1].checked = true;
+      boxes[1].dispatchEvent(new Event('input', { bubbles: true }));
+      const after = S.companies.map(c => !!c.icsFeed);
+      // And then the first, which must take the flag off the second: one
+      // ICS_URL, one job.
+      const again = [...document.querySelectorAll('[data-k="icsFeed"]')];
+      again[0].checked = true;
+      again[0].dispatchEvent(new Event('input', { bubbles: true }));
+      return { boxes: boxes.length, after, exclusive: S.companies.map(c => !!c.icsFeed) };
+    });
+    assert.equal(feedPick.boxes, 2, 'every job offers the feed checkbox');
+    assert.deepEqual(feedPick.after, [false, true], 'ticking a job sets icsFeed on it');
+    assert.deepEqual(feedPick.exclusive, [true, false], 'only one job can be the feed job');
+
+    // The whole point of the field: the Worker must now find a job. This is
+    // the same function the cron calls, run against what the page produced.
+    const { feedJob } = require('../worker/guards.js');
+    assert.equal(feedJob([{ id: 'c1', icsFeed: true }, { id: 'c2', icsFeed: false }]).id, 'c1');
+
     assert.deepEqual(errors, [], 'the page loaded with no uncaught errors');
   } finally {
     await browser.close();

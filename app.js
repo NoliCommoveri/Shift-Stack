@@ -564,6 +564,8 @@ function payNote(co){
 
 function appNote(co){
   const bits = [];
+  // First, because it is the one that stops the cron dead when it is wrong.
+  if(co.icsFeed) bits.push('fetched by the server');
   if(co.pkg) bits.push(co.pkg);
   if(co.icsMatch) bits.push(`only \u201c${co.icsMatch}\u201d`);
   if(co.holidays){
@@ -2011,6 +2013,13 @@ function renderSetup(){
     app.body.innerHTML = `
       <label class="f"><span>Android app package, for the open button</span>
         <input data-k="pkg" type="text" placeholder="com.tracktik.shift" value="${esc(co.pkg||'')}"></label>
+      <label class="f"><span>The server fetches this job's calendar</span>
+        <input data-k="icsFeed" type="checkbox" ${co.icsFeed ? 'checked' : ''}></label>
+      <p class="tiny soft" style="margin:-.35rem 0 0">Tick the job whose calendar the Worker
+        polls \u2014 the one whose secret address is set as ICS_URL. With one job it is assumed;
+        with two the cron cannot guess, and refuses every poll until this is ticked. Only one
+        job can have it.</p>
+
       <label class="f"><span>Calendar import: only events mentioning\u2026</span>
         <input data-k="icsMatch" type="text" placeholder="Station" value="${esc(co.icsMatch||'')}"></label>
       <p class="tiny soft" style="margin:-.35rem 0 0">An employer's calendar sync writes into a
@@ -2068,11 +2077,17 @@ function renderSetup(){
     card.querySelectorAll('[data-k]').forEach(inp => {
       inp.oninput = () => {
         const k = inp.dataset.k;
-        let v = inp.value;
+        let v = inp.type === 'checkbox' ? inp.checked : inp.value;
         if(['rate','otAfterHrs','breakMins','breakAfterHrs','weekStart'].includes(k))
           v = v === '' ? null : +v;
         co[k] = v;
+        // One calendar address is configured on the Worker, so one job can own
+        // it. Ticking here unticks the others rather than leaving two set and
+        // letting `feedJob` pick whichever it met first.
+        if(k === 'icsFeed' && v)
+          S.companies.forEach(other => { if(other.id !== co.id) other.icsFeed = false; });
         save();
+        if(k === 'icsFeed'){ renderSetup(); return; }
         if(k === 'name' || k === 'color'){ renderLaunchers(); }
         // Every figure on the pay tab hangs off these, and a rate typed with
         // the tab already drawn used to sit there stale until something else
@@ -3324,7 +3339,7 @@ $('#addco').onclick = () => {
   const co = {
     id: uid(), name: 'New job', color: palette[S.companies.length % palette.length],
     rate: null, weekStart: 0, otAfterHrs: null, breakMins: null, breakAfterHrs: null,
-    pkg: '', icsMatch: '', patterns: []
+    pkg: '', icsMatch: '', icsFeed: false, patterns: []
   };
   S.companies.push(co);
   // Folded open, both levels (§28). Every other job defaults shut because a
