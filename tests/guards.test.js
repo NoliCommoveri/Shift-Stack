@@ -207,3 +207,64 @@ test('the splitter keeps nothing empty and survives an empty file', () => {
   assert.deepEqual(G.splitSQL(null), []);
   assert.deepEqual(G.splitSQL('SELECT 1;;;  ;\n-- x\nSELECT 2'), ['SELECT 1', 'SELECT 2']);
 });
+
+
+/* ---------- what the server is allowed to hold ---------------------------
+ * The phone used to send `S.settings` whole, so `pushToken` — the secret that
+ * authorises the very request carrying it — was stored in the `cfg` row as
+ * cleartext, next to the employer's secret calendar address. Neither was ever
+ * read: the Worker authenticates against `env.PUSH_TOKEN` and polls
+ * `env.ICS_URL`. The row simply held two credentials, in a place with a far
+ * wider readership than a secret binding.
+ *
+ * These are the tests standing where nothing stood, and the whitelist is the
+ * point: a setting added to the page next year must be withheld by default.
+ */
+const SENSITIVE = ['pushToken', 'icsUrl'];
+
+const fullSettings = {
+  leads: [12, 2],
+  feedMode: 'subscribe',
+  icsUrl: 'https://calendar.google.com/calendar/ical/abc123secret/basic.ics',
+  pushToken: 'a-real-token-nobody-should-store',
+  lastExport: '2026-09-04T11:00:00.000Z',
+  open: { server: true }
+};
+
+test('the push token never reaches the stored config', () => {
+  const kept = G.safeSettings(fullSettings);
+  for(const k of SENSITIVE)
+    assert.ok(!(k in kept), `${k} must not survive into the cfg row`);
+  // Not merely absent under its own name — absent from the row entirely, which
+  // is what a grep of a D1 dump would actually be looking for.
+  assert.ok(!JSON.stringify(kept).includes(fullSettings.pushToken));
+  assert.ok(!JSON.stringify(kept).includes('abc123secret'));
+});
+
+test('what the feed builder reads still gets through', () => {
+  // feed.js:121 reads settings.leads and nothing else, so this is the whole
+  // reason the server holds any settings at all. Withholding it would move the
+  // leak's cost onto the alarms in the calendar.
+  assert.deepEqual(G.safeSettings(fullSettings).leads, [12, 2]);
+});
+
+test('it is a whitelist, so a setting added later is withheld by default', () => {
+  const kept = G.safeSettings({ ...fullSettings, apiKeyForSomethingNew: 'sk-live-oops' });
+  assert.deepEqual(Object.keys(kept).sort(), G.SETTINGS_KEPT.slice().sort()
+                     .filter(k => k in fullSettings));
+  assert.ok(!JSON.stringify(kept).includes('sk-live-oops'));
+});
+
+test('a missing or malformed settings object is an empty one, not a throw', () => {
+  // The Worker validates cfg.companies and nothing deeper, so `settings` can
+  // arrive as undefined, null or a string from any client that gets it wrong.
+  for(const bad of [undefined, null, 'nope', 42, []])
+    assert.deepEqual(G.safeSettings(bad), {});
+});
+
+test('it copies rather than aliases, so the caller cannot be edited through it', () => {
+  const src = { leads: [12, 2], pushToken: 't' };
+  const kept = G.safeSettings(src);
+  assert.notEqual(kept, src);
+  assert.ok('pushToken' in src, 'safeSettings must not strip its argument in place');
+});

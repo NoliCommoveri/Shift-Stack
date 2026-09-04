@@ -151,5 +151,37 @@ function splitSQL(sql){
     .filter(Boolean);
 }
 
+/* What of `settings` the server is allowed to hold. PROJECT.md §14.3.
+
+   The phone used to send `S.settings` whole, which meant `pushToken` — the
+   secret that authorises writes to this Worker — was stored in the `cfg` row
+   as cleartext, alongside `icsUrl`, the employer's secret calendar address.
+   Neither was ever read back: the Worker validates against `env.PUSH_TOKEN`
+   and polls `env.ICS_URL`, both of which are dashboard secrets. So the row
+   held two credentials it had no use for, in a place with a much wider
+   readership than a binding — the D1 console, any dump, every backup — and a
+   rotated token went on living there as a stale copy.
+
+   A whitelist rather than a blacklist, so that a setting added to the page
+   later is withheld by default instead of leaking by default. The list is
+   short because it is derived rather than chosen: it is exactly what
+   `feedICS` reads off the store (`settings.leads`, feed.js:121), which is the
+   only thing on this side that touches settings at all. It grows when the
+   Worker starts reading something, and not before.
+
+   The page whitelists too, so the secret never travels. This is the half that
+   matters, because sw.js caches app.js in the shell: a phone that installed
+   the app before the fix keeps running the old push for as long as its cache
+   stands, and only the server can refuse what it sends. */
+const SETTINGS_KEPT = ['leads'];
+
+function safeSettings(settings){
+  const from = (settings && typeof settings === 'object') ? settings : {};
+  const out = {};
+  for(const k of SETTINGS_KEPT) if(k in from) out[k] = from[k];
+  return out;
+}
+
 module.exports = { guard, splitSQL, alarmFor, feedJob, normalizeTimezone, DEFAULT_ZONE,
-                   todayIn, shiftISO, newestStamp, timingSafeEqual, tokenOK };
+                   todayIn, shiftISO, newestStamp, timingSafeEqual, tokenOK,
+                   safeSettings, SETTINGS_KEPT };

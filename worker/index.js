@@ -25,7 +25,7 @@ const { feedICS } = feedMod;
 const { mergeCalendar } = mergeMod;
 const { matchName } = sitesMod;
 const { guard, alarmFor, feedJob, normalizeTimezone, todayIn, shiftISO,
-        newestStamp, tokenOK, splitSQL } = guardsMod;
+        newestStamp, tokenOK, splitSQL, safeSettings } = guardsMod;
 
 const JSON_HEAD = { 'content-type': 'application/json; charset=utf-8' };
 const nowISO = () => new Date().toISOString();
@@ -210,12 +210,19 @@ async function push(req, env){
       return bad("the phone does not write source='feed' shifts");
   }
 
+  // The settings are narrowed to what this side actually reads before anything
+  // is written. The phone narrows them too, but a phone that installed the app
+  // before that change keeps sending the old shape — sw.js holds app.js in the
+  // shell cache — so this is the half that makes it true. Storing `pushToken`
+  // and `icsUrl` put two credentials in a row that never had a use for either.
+  const kept = { ...cfg, settings: safeSettings(cfg.settings) };
+
   const stamp = nowISO();
   const writes = [
     env.DB.prepare(
       `INSERT INTO cfg (id, json, updated_at) VALUES (1, ?, ?)
        ON CONFLICT(id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at`
-    ).bind(JSON.stringify(cfg), stamp),
+    ).bind(JSON.stringify(kept), stamp),
     // The phone owns its half whole: what it did not send, it deleted. The
     // WHERE clause is §14.3's column ownership — the cron's rows are not the
     // phone's to clear.
