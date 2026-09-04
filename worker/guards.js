@@ -151,6 +151,65 @@ function splitSQL(sql){
     .filter(Boolean);
 }
 
+/* ---------- the teardown (§34) --------------------------------------------
+   Testing on a second phone leaves marks this app has no other way to rub
+   out. §14.3 gives the phone and the cron a column each and lets neither
+   touch the other's, which is right in every ordinary case and is exactly
+   what makes a test irreversible: the phone's own "Delete everything" cannot
+   reach a `source='feed'` row, and a job set up a second time is a new random
+   company id, so the cron's next pass files a whole second copy of the
+   employer's calendar under it and nothing on either side can see that the
+   first copy is now orphaned.
+
+   So the teardown is a server-side operation, and it is deliberately blunt:
+   every row, every table, no filtering by source or company. Anything
+   narrower would need to know which rows were the test's, and the whole
+   reason this exists is that by then nobody does.
+
+   The statement list is here rather than in index.js so it can be read and
+   asserted without a database. The order is not arbitrary — `shifts` first,
+   so that a batch which somehow half-applies has dropped the rows the feed
+   is built from before it drops the config that names them. An empty feed is
+   a recoverable state; a feed built from shifts whose companies have gone is
+   the orphan case again.
+   ---------------------------------------------------------------------- */
+const RESET_TABLES = ['shifts', 'cfg', 'raw', 'polls'];
+
+function resetPlan(opts){
+  const drop = !!(opts && opts.drop);
+  return RESET_TABLES.map(t => drop ? `DROP TABLE IF EXISTS ${t}` : `DELETE FROM ${t}`);
+}
+
+/* How many events a rendered feed actually contains.
+
+   Counted off the file rather than off the table, because the file is what
+   ICSx⁵ fetches and the table is only what it was supposed to be built from —
+   the gap between those two is where §31 lived for three commits. Anchored
+   with an explicit `\r?` rather than trusting `$`: it does match before a CR
+   in JavaScript, so the plain version happens to work, but "happens to" is not
+   what this file is for and the next person to read it should not have to
+   look it up. */
+function countEvents(text){
+  return (String(text || '').match(/^BEGIN:VEVENT\r?$/gm) || []).length;
+}
+
+/* Rows filed against a company that no longer exists in `cfg`.
+
+   This is the fault the whole teardown is for, and it is invisible from every
+   screen the app already had: the Schedule draws these as "Unassigned", the
+   Pay tab walks the company list and so never counts them at all, and the
+   feed writes them into the calendar with no employer on the title. Naming
+   them is what turns "the calendar has two of everything" from a mystery into
+   a line on the Setup screen.
+
+   `groups` is the GROUP BY company_id, source rollup; `companies` is the cfg
+   list. A row whose company_id matches nothing live is an orphan whatever its
+   source, but only the cron can make one it cannot then see. */
+function orphanGroups(groups, companies){
+  const live = new Set((companies || []).map(c => c && c.id).filter(Boolean));
+  return (groups || []).filter(g => g && !live.has(g.company_id));
+}
+
 /* What of `settings` the server is allowed to hold. PROJECT.md §14.3.
 
    The phone used to send `S.settings` whole, which meant `pushToken` — the
@@ -184,4 +243,4 @@ function safeSettings(settings){
 
 module.exports = { guard, splitSQL, alarmFor, feedJob, normalizeTimezone, DEFAULT_ZONE,
                    todayIn, shiftISO, newestStamp, timingSafeEqual, tokenOK,
-                   safeSettings, SETTINGS_KEPT };
+                   safeSettings, SETTINGS_KEPT, resetPlan, orphanGroups, RESET_TABLES, countEvents };

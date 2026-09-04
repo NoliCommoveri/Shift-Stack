@@ -421,10 +421,12 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
   </label>
   <div class="rowbtns">
     <button class="ghost" id="srvcheck">Check the server</button>
+    <button class="ghost" id="srvtrace">What the server holds</button>
     <button class="ghost" id="srvmigrate">Set up the database</button>
   </div>
   <p class="tiny soft" id="srvnote" style="margin-top:.5rem"></p>
   <p class="flag" id="srvalarm" style="margin-top:.35rem" hidden></p>
+  <div id="srvtracebox" class="tiny soft" style="margin-top:.5rem"></div>
   <div id="srvpolls" class="tiny soft" style="margin-top:.5rem"></div>
 
   <h2 style="margin-top:1.8rem">Backup</h2>
@@ -444,6 +446,28 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
       Start over clears jobs, shifts and settings — the whole store. While the app
       is still being built this is the intended way to move to a new data shape.
     </p>
+    <details style="margin-top:.9rem">
+      <summary>Undo a test on this phone</summary>
+      <p class="tiny soft" style="margin-top:.5rem">For testing against the real server on a
+        phone that is not the one this is for. It cancels every event this app has put in a
+        calendar, clears every row the server holds — the cron’s as well as this
+        phone’s — checks that the feed really is empty, and only then wipes this
+        device and forgets the token. In that order, because every step before the last one
+        needs the token to work.</p>
+      <label class="tick" style="margin:.2rem 0 .5rem">
+        <input type="checkbox" id="tddrop">
+        Drop the database tables as well</label>
+      <p class="tiny soft" style="margin:-.25rem 0 .55rem">Puts the database back to the state a
+        fresh deploy is in. Tidier, and it stops the cron writing so much as a refusal — but
+        the next phone to hold the token must press “Set up the database” before its
+        first push will land. Leave it unticked if he is being handed the app today.</p>
+      <div class="rowbtns">
+        <button class="ghost danger" id="teardown">Undo everything</button>
+      </div>
+      <ol class="tiny soft" id="tdlog" style="margin:.6rem 0 0; padding-left:1.1rem"></ol>
+      <p class="tiny soft" id="tdnote" style="margin-top:.5rem"></p>
+    </details>
+
     <div class="rowbtns">
       <button class="ghost" id="flushcache">Reload the app files</button>
     </div>

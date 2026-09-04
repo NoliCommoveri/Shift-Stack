@@ -268,3 +268,81 @@ test('it copies rather than aliases, so the caller cannot be edited through it',
   assert.notEqual(kept, src);
   assert.ok('pushToken' in src, 'safeSettings must not strip its argument in place');
 });
+
+/* ---------- the teardown (§34) -------------------------------------------
+ * Testing on a second phone is only safe if it can be undone, and §14.3 is
+ * what makes undoing it hard: the phone cannot delete a `feed` row and the
+ * cron cannot see a row filed under a company id the config no longer names.
+ * These are the two decisions that follow from that.
+ */
+
+test('the reset clears every table the app writes to', () => {
+  const plan = G.resetPlan({});
+  assert.deepEqual(plan, ['DELETE FROM shifts', 'DELETE FROM cfg',
+                          'DELETE FROM raw', 'DELETE FROM polls']);
+  // shifts before cfg: a batch that somehow half-applied must not leave the
+  // feed being built out of rows whose companies have gone, which is the
+  // orphan case this whole thing exists to clean up.
+  assert.ok(plan.indexOf('DELETE FROM shifts') < plan.indexOf('DELETE FROM cfg'));
+});
+
+test('dropping puts the database back to where a fresh deploy starts', () => {
+  const plan = G.resetPlan({ drop: true });
+  assert.equal(plan.length, G.RESET_TABLES.length);
+  // IF EXISTS on every one, because a reset may follow a reset, and a
+  // half-dropped database is a state somebody will reach.
+  plan.forEach(sql => assert.match(sql, /^DROP TABLE IF EXISTS \w+$/));
+});
+
+test('a reset with no options does not drop anything', () => {
+  // The default matters more than it looks: dropping the tables means the
+  // next phone must press "Set up the database" before its first push lands.
+  [undefined, null, {}, { drop: false }].forEach(opts => {
+    G.resetPlan(opts).forEach(sql => assert.match(sql, /^DELETE FROM/));
+  });
+});
+
+test('shifts filed against a job no phone has any more are named', () => {
+  const companies = [{ id: 'co-live', name: 'Trupoint' }];
+  const groups = [
+    { company_id: 'co-live', source: 'feed', n: 14 },
+    { company_id: 'co-dead', source: 'feed', n: 14 },   // the second setup's copy
+    { company_id: 'co-live', source: 'manual', n: 3 }
+  ];
+  const orphans = G.orphanGroups(groups, companies);
+  assert.equal(orphans.length, 1);
+  assert.equal(orphans[0].company_id, 'co-dead');
+});
+
+test('no config at all makes every shift an orphan, not none', () => {
+  // The state right after a push from a phone that has no jobs set up. Every
+  // row is unreachable, and saying so is the point.
+  const groups = [{ company_id: 'co-a', source: 'feed', n: 9 }];
+  assert.equal(G.orphanGroups(groups, []).length, 1);
+  assert.equal(G.orphanGroups(groups, null).length, 1);
+  assert.equal(G.orphanGroups(null, []).length, 0);
+});
+
+test('a company with no id cannot adopt orphans', () => {
+  // A half-written cfg row must not make a dead group look live by matching
+  // undefined against undefined.
+  const groups = [{ company_id: null, source: 'manual', n: 2 }];
+  assert.equal(G.orphanGroups(groups, [{ name: 'no id here' }]).length, 1);
+});
+
+test('the feed’s events are counted off the rendered file', () => {
+  const { feedICS } = require('../feed.js');
+  const store = { companies: [{ id: 'c1', name: 'Trupoint' }], sites: [], roles: [],
+                  settings: { leads: [2] },
+                  shifts: [{ id: 'a', companyId: 'c1', date: '2026-09-09', start: '15:00', end: '23:00', label: 'X' },
+                           { id: 'b', companyId: 'c1', date: '2026-09-10', start: '19:00', end: '07:00', label: 'Y' }] };
+  // Against a real file, CRLF and all. An .ics is CRLF-delimited by spec, and
+  // a count that only worked on LF would report an empty feed as proof that a
+  // teardown had succeeded — the one number in §34 nobody would double-check.
+  assert.equal(G.countEvents(feedICS(store.shifts, store)), 2);
+  assert.equal(G.countEvents(feedICS([], store)), 0);
+  assert.equal(G.countEvents(''), 0);
+  assert.equal(G.countEvents(null), 0);
+  // VALARM blocks are BEGIN: lines too, and there are two per shift here.
+  assert.ok(/BEGIN:VALARM/.test(feedICS(store.shifts, store)));
+});

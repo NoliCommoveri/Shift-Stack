@@ -25,7 +25,8 @@ const { feedICS } = feedMod;
 const { mergeCalendar } = mergeMod;
 const { matchName } = sitesMod;
 const { guard, alarmFor, feedJob, normalizeTimezone, todayIn, shiftISO,
-        newestStamp, tokenOK, splitSQL, safeSettings } = guardsMod;
+        newestStamp, tokenOK, splitSQL, safeSettings, resetPlan,
+        orphanGroups, countEvents } = guardsMod;
 
 const JSON_HEAD = { 'content-type': 'application/json; charset=utf-8' };
 const nowISO = () => new Date().toISOString();
@@ -312,6 +313,107 @@ async function status(env){
   });
 }
 
+/* ---------- the trace (§34) -----------------------------------------------
+   Everything the phone needs to see the whole path in one answer, so that
+   testing against the real Worker is something that can be checked rather
+   than hoped about.
+
+   `/status` was already here and is not this. It answers "is the cron still
+   running", which is a question about time; this answers "what is actually in
+   the database and what would the calendar get", which is a question about
+   rows. The two failures this project has actually produced — a feed of
+   "[object Object]" and a second copy of an employer's calendar under a dead
+   company id — were both invisible to the first question and obvious to the
+   second.
+
+   The feed is rendered rather than counted from the table, because rendering
+   it is the only way to be sure the thing ICSx⁵ fetches is the thing the rows
+   say it should be. It costs one build of a file that is at most a few
+   hundred events.
+   ---------------------------------------------------------------------- */
+async function trace(env){
+  if(!(await tablesExist(env)))
+    return json({ needsSetup: true, companies: [], groups: [], orphans: [],
+                  feed: { events: 0, bytes: 0 }, at: nowISO() });
+
+  const cfg = await readCfg(env) || {};
+  const companies = (cfg.companies || []).map(c => ({
+    id: c && c.id, name: c && c.name, feed: !!(c && c.icsFeed) }));
+  const job = feedJob(cfg.companies || []);
+
+  // By company as well as by source. `/status` groups by source alone, which
+  // is precisely the shape that cannot show an orphan: two copies of the same
+  // employer's calendar are both `feed`, and the count simply doubles with
+  // nothing to say why.
+  const { results } = await env.DB.prepare(
+    `SELECT company_id, source, COUNT(*) AS n, MIN(date) AS first, MAX(date) AS last
+       FROM shifts GROUP BY company_id, source ORDER BY company_id, source`).all();
+  const groups = results || [];
+
+  const store = await readStore(env);
+  const body = feedICS(store.shifts, store);
+
+  const last = await env.DB.prepare(
+    `SELECT at, ok, reason, events, added, replaced, removed FROM polls ORDER BY id DESC LIMIT 1`
+  ).first();
+
+  return json({
+    companies,
+    jobId: job ? job.id : null,
+    groups,
+    orphans: orphanGroups(groups, cfg.companies || []),
+    feed: { events: countEvents(body), bytes: body.length },
+    lastPoll: last || null,
+    at: nowISO()
+  });
+}
+
+/* ---------- the teardown (§34) --------------------------------------------
+   One button's worth of server, and the only thing in this file that crosses
+   §14.3's line between the phone's rows and the cron's. It is allowed to
+   because it is not a sync: it is the end of a test, and what it is undoing
+   is precisely the state neither side can see well enough to undo on its own.
+
+   Counted before it is cleared, and the counts come back. "Cleared" with no
+   number is indistinguishable from "there was nothing there", and the whole
+   point of pressing this is to be told what the test left behind.
+
+   `drop` is the harder option and is not the default. Clearing the rows
+   leaves the schema standing, so the next phone to hold the token can push
+   the moment it is set up; dropping the tables puts the database back to the
+   state a fresh deploy is in, which is tidier and means the cron writes
+   literally nothing — `record` throws into the handler's own catch — but the
+   next phone must press "Set up the database" before its first push will
+   land. That is a real trap on the morning somebody is being handed a
+   working app, so it is asked for explicitly or not done.
+   ---------------------------------------------------------------------- */
+async function reset(req, env){
+  let body = null;
+  try { body = await req.json(); } catch { body = null; }
+  const drop = !!(body && body.drop);
+
+  const exists = await tablesExist(env);
+  if(!exists && !drop)
+    return json({ ok: true, already: true, dropped: false, before: {}, at: nowISO() });
+
+  const before = exists ? await tableCounts(env) : {};
+  const plan = resetPlan({ drop });
+  await env.DB.batch(plan.map(sql => env.DB.prepare(sql)));
+
+  return json({ ok: true, dropped: drop, statements: plan.length, before, at: nowISO() });
+}
+
+/* One row of four counts, so the teardown can say what it removed. Separate
+   statements would be four round trips to say one sentence. */
+async function tableCounts(env){
+  const r = await env.DB.prepare(
+    `SELECT (SELECT COUNT(*) FROM shifts) AS shifts,
+            (SELECT COUNT(*) FROM cfg)    AS cfg,
+            (SELECT COUNT(*) FROM raw)    AS raw,
+            (SELECT COUNT(*) FROM polls)  AS polls`).first();
+  return r || {};
+}
+
 /* Applied from the app's Settings screen. Nobody is asked to paste SQL into
    the D1 console (§14.9), and running it twice is harmless by construction. */
 async function migrate(env){
@@ -387,6 +489,22 @@ async function route(req, env){
   if(path === '/shifts' && req.method === 'GET'){
     if(!tokenOK(env.PUSH_TOKEN, bearer(req))) return new Response('no', { status: 401 });
     return feedShifts(env);
+  }
+
+  // Read-only, and behind the push token like everything else that describes
+  // his schedule. This is the screen §34 gives him for checking a test against
+  // the real server before it matters.
+  if(path === '/trace' && req.method === 'GET'){
+    if(!tokenOK(env.PUSH_TOKEN, bearer(req))) return new Response('no', { status: 401 });
+    return trace(env);
+  }
+
+  // The teardown (§34). POST, and behind the same token: it is the most
+  // destructive thing this Worker can be asked to do, and the app asks twice
+  // before it gets here.
+  if(path === '/reset' && req.method === 'POST'){
+    if(!tokenOK(env.PUSH_TOKEN, bearer(req))) return new Response('no', { status: 401 });
+    return reset(req, env);
   }
 
   if(path === '/migrate' && req.method === 'POST'){
