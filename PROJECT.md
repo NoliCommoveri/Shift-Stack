@@ -1,6 +1,13 @@
 # Shift Deck — project state
 
-_Last updated 4 September 2026_ — §31 is a bug and its post-mortem: the
+_Last updated 4 September 2026_ — §34 answers a question about testing on a
+second phone and finds a way to duplicate a calendar that nothing in the app or
+the Worker could see or undo: the company id is minted per setup, so setting the
+same job up twice files a whole second copy of the employer's calendar under the
+new one, and §14.3's column ownership means neither side can then delete it. It
+adds `GET /trace` — the shift table grouped by company id, which is the one
+shape that shows an orphan — and `POST /reset`, plus an ordered teardown that
+cancels, clears, verifies, and only then forgets the token. §31 is a bug and its post-mortem: the
 calendar export wrote `[object Object]` in place of every title, address and
 UID from §28 onwards, because two of the seven scripts sharing one global
 scope both declared `fold`. Real screenshots of both apps landed (§3.1, §5),
@@ -4095,3 +4102,148 @@ Fixed where it was: the render reads, and the array is created by the button
 that adds the first pattern. The browser test asserts the general rule rather
 than that one line — draw the whole app twice, and the payload must not move.
 Any render that writes to the store fails it.
+
+---
+
+## 34. Built: testing on another phone, and undoing it, 4 September 2026
+
+Ray asked whether testing the app on his own phone could leave his husband with
+duplicate calendar events. The answer turned out to be yes, by a route nothing
+in the app or the Worker could see, let alone clean up — and the reason is
+§14.3, the rule that makes the ordinary sync safe.
+
+### 34.1 How a test duplicates a calendar
+
+The company id is the hinge. It is `uid()`, minted when the job is created in
+Setup, and nothing else in the system ever derives one: the cron stamps its rows
+with `feedJob(store.companies).id`, and `feedJob` refuses rather than guesses
+when the config names no job. So a server with no config writes nothing at all —
+the poll records `no job is configured for the feed` and stops. That part is
+sound.
+
+What is not sound is what happens when the same job is set up a **second** time.
+It gets a new random id, the push replaces the `cfg` row whole, and on the next
+tick:
+
+```js
+const mine = store.shifts.filter(s => s.companyId === job.id && s.source === 'feed');
+```
+
+matches nothing. Every event in the employer's calendar comes back as an `add`.
+`guard` waves it through, correctly by its own lights — `if(!held.length) return
+null` is there so the very first poll is not refused as a massacre — and the
+unique index is on `(company_id, ext_uid)`, so a new company id collides with
+nothing. The database now holds two copies of the whole calendar, and
+`feed()` builds the file from `SELECT json FROM shifts` with no WHERE at all,
+so ICSx⁵ mirrors both.
+
+The second setup does not have to be on a second phone. **Delete everything and
+start over**, then recreate the job, does it on the only phone there is.
+
+### 34.2 Why nothing could clean it up
+
+Both halves of §14.3's bargain fail closed here, in the same direction:
+
+- The phone cannot delete the rows. The push's clause is `DELETE FROM shifts
+  WHERE source != 'feed'`, so "Delete all shifts" clears the typed half and
+  leaves the duplicated half untouched.
+- The cron cannot delete them either. Its `remove` list comes from
+  `report.cancelledRows` matched against `byUid`, and `byUid` is built from
+  `mine` — which is filtered by the *current* job id. Rows under the dead id are
+  outside its view permanently.
+- "Delete everything and start over" does not even try. It writes `DEFAULTS`
+  straight to IndexedDB, deliberately bypassing `save()` — the only thing that
+  schedules a push — and throws away the token on the way, so `autoPush` stops
+  at its first line. Nothing leaves the phone, and the device has just destroyed
+  the credential it would need to say otherwise.
+- Re-running the migration does nothing: `schema.sql` is `CREATE TABLE IF NOT
+  EXISTS` throughout, by design (§14.9).
+
+And every screen reads the state as something other than what it is. The
+Schedule draws the orphans as "Unassigned". The Pay tab walks `S.companies` and
+so never counts them. The clash banner fires on all of them and blames the shift
+they collide with rather than the copy they are.
+
+### 34.3 `GET /trace` — the question `/status` does not ask
+
+`/status` answers "is the cron still running": counts by source, the poll ring
+buffer, §14.6's two alarms. That is a question about *time*, and it is the right
+one for the failure §14.6 was built around — a calendar that has quietly stopped
+changing.
+
+`/trace` answers a question about *rows*, because both failures this project has
+actually shipped were invisible to the first one. A feed full of `[object
+Object]` polled perfectly (§31). A duplicated calendar polls perfectly too.
+
+It returns the config's jobs with their ids, the shift table grouped **by
+company id as well as by source** — the shape `/status` cannot have, since two
+copies of one calendar are both `feed` and the count merely doubles — the
+orphans named by `orphanGroups`, and the event count of the feed *as actually
+rendered*, not as counted from the table. Rendering it is the only way to be
+sure the thing ICSx⁵ fetches is the thing the rows say it is.
+
+Behind the push token, like everything else that describes his schedule.
+
+### 34.4 `POST /reset` — the one thing allowed across §14.3's line
+
+Deliberately blunt: every row, every table, no filtering by source or by
+company. Anything narrower would have to know which rows the test wrote, and the
+whole reason this exists is that by then nobody does.
+
+Counted before it clears, and the counts come back — "cleared" with no number is
+indistinguishable from "there was nothing there", and being told what the test
+left behind is the point of pressing it.
+
+`drop` is offered and is not the default. Dropping the tables is tidier and
+stops the cron writing so much as a refusal, but the next phone must press "Set
+up the database" before its first push will land — a real trap on the morning
+somebody is being handed a working app. So it is asked for explicitly.
+
+### 34.5 The order, which is the whole design
+
+The teardown is a sequence, and everything of value in it is in the ordering:
+
+1. **Cancellations first**, while the shifts that name them are still on the
+   device. It goes through `retire`, the same path every ordinary delete takes,
+   so it covers both jobs — the cron's rows are events in the calendar exactly
+   like the typed ones — skips anything never sent, and counts the sequence
+   number up, since a calendar may ignore a revision no newer than the one it
+   holds (§22).
+2. **Clear the server.** In subscription mode this *is* the deletion: the feed
+   empties, and ICSx⁵ mirrors rather than appends. In manual-import mode there
+   is no such moment, which is why step 1 is not optional there.
+3. **Verify.** A 200 says the statements ran. `/trace` says the feed ICSx⁵
+   fetches is actually empty, which is what was being claimed.
+4. **Forget the token**, on its own and written immediately. That alone makes
+   the device inert — both `autoPush` and `syncDown` stop at their first line
+   without one — so if anything below fails the phone is still safe.
+5. **Wipe the device.**
+
+If step 3 finds rows still there it stops without touching anything local, and
+says so. A phone that still holds the token is a phone that can try again; one
+that does not is a dead end, and that asymmetry is worth more than tidiness.
+
+`teardown.running` guards the gap between 2 and 5. Without it the sixty-second
+timer, a tab switch, or the `visibilitychange` on the way to the file picker
+would each push the whole schedule straight back into the database that was just
+emptied — and it would look exactly like the teardown had not worked. It is
+never unset once the server has been cleared.
+
+What the app cannot do is reach into the calendar app, so the last line of the
+log is an instruction: sync ICSx⁵ once and look at the calendar before handing
+the phone over. Nor can it revoke the shared secret — only forget it. Rotating
+`PUSH_TOKEN` in the Cloudflare dashboard is the real revocation, and the note
+says so.
+
+### 34.6 What is tested where
+
+The split follows the one this codebase already uses. `resetPlan` and
+`orphanGroups` are pure and live in `worker/guards.js` with unit tests —
+including that `shifts` is cleared before `cfg`, so a batch that somehow half-
+applied cannot leave the feed being built from rows whose companies have gone,
+which is the orphan case again.
+
+The sequence itself is a browser test, and has to be. A unit test can assert
+that `resetPlan` names four tables. Only a loaded page can assert that the token
+is still there when the server is called and gone by the time it finishes, and
+that `autoPush` and `syncDown`, fired deliberately mid-flight, put nothing back.

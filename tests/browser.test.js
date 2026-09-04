@@ -432,3 +432,174 @@ test('a change sends itself, and a failed send is not marked sent', async (t) =>
     await browser.close();
   }
 });
+
+/* The teardown (§34).
+ *
+ * Page-only, like everything else in this file, and for the sharpest version
+ * of the reason: what it does is a sequence — cancel, clear, verify, wipe —
+ * and the whole value of it is the order. A unit test can assert that
+ * `resetPlan` names four tables. Only a loaded page can assert that the token
+ * is still there when the server is called and gone by the time it finishes,
+ * and that nothing pushed the schedule back up in between.
+ */
+test('the teardown cancels, clears, verifies, and only then wipes', async (t) => {
+  const browser = await open();
+  if(!browser) return t.skip('no Playwright browser available');
+
+  try {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto('file://' + path.join(ROOT, 'index.html'));
+    await page.waitForFunction(() => typeof S === 'object' && S !== null, null, { timeout: 15000 });
+    await page.click('nav button[data-tab="setup"]');
+
+    const run = await page.evaluate(async () => {
+      const calls = [], files = [];
+      window.confirm = () => true;
+      window.download = (name, text) => files.push({ name, text });
+
+      S.companies = [{ id: 'c1', name: 'Trupoint', color: '#333', icsFeed: true },
+                     { id: 'c2', name: 'DSI', color: '#666' }];
+      S.settings.pushToken = 'tok';
+      S.settings.feedMode = 'subscribe';
+      S.shifts = [
+        // The cron's half. `sent` is true in subscription mode by
+        // construction, and these are events in the calendar like any other.
+        { id: 'f1', companyId: 'c1', date: '2026-09-09', start: '15:00', end: '23:00',
+          label: 'Rosemont', source: 'feed', sent: true, seq: 2 },
+        // The phone's half, and an overnight one, so the cancellation has to
+        // carry tomorrow's date as its end.
+        { id: 'm1', companyId: 'c2', date: '2026-09-10', start: '19:00', end: '07:00',
+          label: 'De la Montagne', source: 'ocr', sent: true },
+        // Never sent: there is no event out there, so nothing to cancel.
+        { id: 'm2', companyId: 'c2', date: '2026-09-11', start: '08:00', end: '16:00',
+          label: 'Nowhere', source: 'ocr', sent: false }
+      ];
+      S.tombstones = [];
+
+      let pushedDuring = 0;
+      window.fetch = async (path, opts) => {
+        calls.push({ path, method: (opts && opts.method) || 'GET',
+                     body: opts && opts.body, auth: !!(opts && opts.headers && opts.headers.authorization) });
+        if(path === '/push'){ pushedDuring++; return { ok: true, status: 200, json: async () => ({ ok: true }) }; }
+        if(path === '/reset') return { ok: true, status: 200, json: async () => ({
+          ok: true, dropped: false, before: { shifts: 3, cfg: 1, raw: 1, polls: 12 } }) };
+        if(path === '/trace') return { ok: true, status: 200, json: async () => ({
+          companies: [], groups: [], orphans: [], feed: { events: 0, bytes: 0 },
+          at: new Date().toISOString() }) };
+        return { ok: true, status: 200, json: async () => ({}) };
+      };
+
+      // Every route that would put the schedule back on a server that was
+      // just emptied, fired while the teardown is mid-flight.
+      const racing = runTeardown();
+      const midFlightToken = pushToken();
+      await autoPush();
+      await syncDown(true);
+      await racing;
+
+      return {
+        calls, files, pushedDuring, midFlightToken,
+        token: S.settings.pushToken || '',
+        shifts: S.shifts.length,
+        companies: S.companies.length,
+        blocked: teardown.running,
+        log: [...document.querySelectorAll('#tdlog li')].map(li => li.textContent)
+      };
+    });
+
+    // The file first, while the shifts it names are still here to name.
+    assert.equal(run.files.length, 1);
+    assert.match(run.files[0].name, /^shifts-cancelled-\d{4}-\d{2}-\d{2}\.ics$/);
+    const ics = run.files[0].text;
+    assert.match(ics, /METHOD:CANCEL/);
+    // Both jobs. The cron's rows are events in the calendar exactly like the
+    // typed ones, and a teardown that left them behind would leave the half
+    // this phone cannot delete from the server either.
+    assert.match(ics, /\r\nUID:f1@shiftdeck\r\n/);
+    assert.match(ics, /\r\nUID:m1@shiftdeck\r\n/);
+    assert.ok(!/m2@shiftdeck/.test(ics), 'a shift never sent has no event to cancel');
+    // Newer than the revision the calendar holds, or it is entitled to ignore it.
+    assert.match(ics, /\r\nSEQUENCE:3\r\n/);
+    assert.match(ics, /\r\nDTEND:20260911T070000\r\n/, 'the overnight one ends the next day');
+
+    // Then the server: cleared, then read back rather than assumed.
+    const paths = run.calls.map(c => c.path);
+    assert.deepEqual(paths, ['/reset', '/trace']);
+    assert.equal(run.calls[0].method, 'POST');
+    assert.deepEqual(JSON.parse(run.calls[0].body), { drop: false });
+    assert.ok(run.calls.every(c => c.auth), 'both go up with the token');
+
+    // Nothing raced the schedule back into the database it had just emptied.
+    assert.equal(run.pushedDuring, 0, 'no push landed while the teardown ran');
+    assert.ok(run.midFlightToken, 'the token was still there for the server calls');
+
+    // And the device, last.
+    assert.equal(run.token, '', 'the token is forgotten');
+    assert.equal(run.shifts, 0);
+    assert.equal(run.companies, 0);
+    assert.ok(run.blocked, 'the phone stays inert until it is reloaded');
+    assert.match(run.log.join(' | '), /Verified/);
+
+    assert.deepEqual(errors, [], 'the page loaded with no uncaught errors');
+  } finally {
+    await browser.close();
+  }
+});
+
+test('a server that did not empty stops the teardown with the token intact', async (t) => {
+  const browser = await open();
+  if(!browser) return t.skip('no Playwright browser available');
+
+  try {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto('file://' + path.join(ROOT, 'index.html'));
+    await page.waitForFunction(() => typeof S === 'object' && S !== null, null, { timeout: 15000 });
+    await page.click('nav button[data-tab="setup"]');
+
+    const run = await page.evaluate(async () => {
+      window.confirm = () => true;
+      window.download = () => {};
+      S.companies = [{ id: 'c1', name: 'Trupoint', color: '#333' }];
+      S.settings.pushToken = 'tok';
+      S.shifts = [{ id: 'm1', companyId: 'c1', date: '2026-09-10', start: '08:00', end: '16:00',
+                    label: 'Rosemont', source: 'ocr', sent: true }];
+      window.fetch = async (path) => {
+        if(path === '/reset') return { ok: true, status: 200, json: async () => ({
+          ok: true, before: { shifts: 1, cfg: 1, raw: 0, polls: 3 } }) };
+        // The rows the reset was meant to remove, still there.
+        return { ok: true, status: 200, json: async () => ({
+          companies: [], groups: [{ company_id: 'c9', source: 'feed', n: 14 }],
+          orphans: [{ company_id: 'c9', source: 'feed', n: 14 }],
+          feed: { events: 14, bytes: 900 }, at: new Date().toISOString() }) };
+      };
+      await runTeardown();
+      return {
+        token: S.settings.pushToken || '',
+        shifts: S.shifts.length,
+        // `retire` files one of these for every sent shift on the way to
+        // building the cancellations. If the run stops, the shifts are still
+        // here, and a leftover record would stand on the Schedule as "a
+        // deleted shift is still in the calendar, with its alarms".
+        tombstones: (S.tombstones || []).length,
+        note: document.getElementById('tdnote').textContent,
+        log: [...document.querySelectorAll('#tdlog li')].map(li => li.textContent).join(' | ')
+      };
+    });
+
+    // The phone that can still reach the server is the only thing that can
+    // finish the job, so it keeps what it needs to.
+    assert.equal(run.token, 'tok', 'the token survives a failed teardown');
+    assert.equal(run.shifts, 1, 'nothing local is wiped while the server still holds rows');
+    assert.equal(run.tombstones, 0, 'a stopped run leaves no warning about deletions it did not make');
+    assert.match(run.log, /Still there: 14 rows and 14 calendar events/);
+    assert.match(run.note, /not emptied/);
+
+    assert.deepEqual(errors, [], 'the page loaded with no uncaught errors');
+  } finally {
+    await browser.close();
+  }
+});

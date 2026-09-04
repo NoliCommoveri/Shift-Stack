@@ -3171,6 +3171,80 @@ function renderServer(st, err){
   });
 }
 
+/* ---------- what the server actually holds (§34) ---------------------------
+   "Check the server" answers a question about time — is the cron still
+   running, when was the last good poll — and that is the question §14.6 was
+   built around, because the failure it was built for is a calendar that has
+   quietly stopped changing.
+
+   This answers a question about rows, and it exists because the two failures
+   this project has actually shipped were both invisible to the first one. A
+   feed full of "[object Object]" polled perfectly (§31). A second copy of the
+   employer's calendar under a company id no phone has any more polls perfectly
+   too, and shows up on every other screen as nothing worse than a schedule
+   with more shifts in it than expected: the Schedule draws those rows as
+   "Unassigned", the Pay tab walks the company list and so never counts them,
+   and the clash banner blames the shift they collide with rather than the copy
+   they are.
+
+   So this is the screen to look at while testing, and the one thing on it that
+   matters is the orphan line. Everything else is context for reading it. */
+function renderTrace(t, err){
+  const box = $('#srvtracebox');
+  if(!box) return;
+  box.innerHTML = '';
+  if(err){ box.appendChild(el('div', 'flag', esc(err))); return; }
+  if(!t) return;
+  if(t.needsSetup){
+    box.appendChild(el('div', null, 'The database has no tables yet, so it holds nothing.'));
+    return;
+  }
+
+  const cos = t.companies || [];
+  box.appendChild(el('div', null,
+    cos.length
+      ? 'Jobs on the server: ' + cos.map(c =>
+          `${esc(c.name || 'unnamed')}${c.id === t.jobId ? ' (polled)' : ''} <code>${esc(c.id)}</code>`
+        ).join(', ')
+      : '<span class="flag">No jobs on the server — the cron has nothing to file shifts against '
+        + 'and refuses every fifteen minutes.</span>'));
+
+  const groups = t.groups || [];
+  if(!groups.length) box.appendChild(el('div', null, 'No shifts on the server.'));
+  groups.forEach(g => {
+    const co = cos.find(c => c.id === g.company_id);
+    box.appendChild(el('div', null,
+      `${g.n} ${esc(g.source)} ` + (g.n === 1 ? 'shift' : 'shifts')
+      + `, ${esc(g.first || '?')} to ${esc(g.last || '?')} — `
+      + (co ? esc(co.name || 'unnamed')
+           : `<span class="flag">no job by that id (${esc(g.company_id)})</span>`)));
+  });
+
+  // The line the whole endpoint is for. Loud, and it names the fix, because
+  // by the time this is true nothing else in the app can even see the rows.
+  const orph = t.orphans || [];
+  if(orph.length){
+    const n = orph.reduce((a, g) => a + (g.n || 0), 0);
+    box.appendChild(el('p', 'flag',
+      `${n} shift${n === 1 ? '' : 's'} on the server belong${n === 1 ? 's' : ''} to a job that `
+      + 'no longer exists. They are in the calendar and nothing here can delete them — '
+      + 'a job set up twice gets a new id both times. Use "Undo a test on this phone" '
+      + 'in the Danger zone, or clear them in the D1 console.'));
+  }
+
+  box.appendChild(el('div', null,
+    `The feed serves ${t.feed ? t.feed.events : 0} event`
+    + `${t.feed && t.feed.events === 1 ? '' : 's'} right now`
+    + (t.feed && t.feed.bytes ? `, ${Math.round(t.feed.bytes / 102.4) / 10} kB.` : '.')));
+
+  // The stamp goes in this box rather than in `srvnote`, which `renderServer`
+  // resets to "Not checked yet." on every redraw of the Setup screen — and
+  // Setup redraws on every keystroke in it. A reading with no time on it is
+  // one nobody can tell is stale, which is the failure this endpoint exists
+  // to catch, pointed at the endpoint itself.
+  box.appendChild(el('div', null, `Read ${esc(whenWords(t.at))}.`));
+}
+
 /* Relative to now, in words, because an ISO stamp in a status line is a thing
    to decode rather than read. */
 function whenWords(iso){
@@ -3291,7 +3365,20 @@ async function pushToServer(){
 let pushTimer = null;
 const PUSH_WAIT_MS = 4000;
 
+/* Set for the length of the teardown and, once the server has actually been
+   cleared, never unset again on this page. §34 explains why it cannot simply
+   be a local in the function: the thing it stops is asynchronous and comes
+   from a timer and an event listener, not from the call stack that set it. */
+const teardown = { running: false };
+
 async function autoPush(){
+  // The teardown clears the server and then this device, and between those two
+  // there is a phone still holding a token, a config and a schedule. The
+  // sixty-second timer, a tab switch, or the visibilitychange on the way to
+  // the file picker would each push the whole lot back up into a database that
+  // was just emptied — and it would look like the teardown had simply not
+  // worked. §34.
+  if(teardown.running) return null;
   if(!pushToken()) return null;
   const body = pushBody();
   if(body === sentBody) return null;              // the server already has this
@@ -3408,6 +3495,7 @@ async function pullFromServer(){
 let lastPull = 0;
 const PULL_FLOOR_MS = 5 * 60 * 1000;
 async function syncDown(force){
+  if(teardown.running) return null;
   if(!pushToken()) return null;
   if(!force && Date.now() - lastPull < PULL_FLOOR_MS) return null;
   lastPull = Date.now();
@@ -3810,6 +3898,174 @@ $('#wipeall').onclick = async () => {
   renderAll(); renderReview();
   alert('Cleared. The app is back to a fresh install.');
 };
+/* ---------- undoing a test (§34) -------------------------------------------
+   Testing this app on a phone that is not the one it is for leaves marks in
+   three places, and §14.3's column ownership — the rule that makes the ordinary
+   sync safe — is what makes them permanent. The phone owns `manual` and
+   `pattern` rows and cannot touch a `feed` row; the cron owns `feed` rows and
+   can only see the ones filed under the job id the config currently names. Set
+   the same job up twice and it gets a new random id both times, so the cron
+   files a second copy of the whole employer's calendar under the new one and
+   neither side can see, let alone delete, the first.
+
+   "Delete everything and start over" does not help and is worth being precise
+   about, because it reads as though it would: it writes DEFAULTS straight to
+   IndexedDB, deliberately bypassing `save()` — which is the only thing that
+   schedules a push — and it throws away the push token on the way, so
+   `autoPush` refuses at its first line. Nothing leaves the phone. The server
+   keeps every row, and the device has just destroyed the credential it would
+   need to say otherwise.
+
+   So this runs the steps in the one order that works, and reports each one. The
+   token goes last because every step before it needs the token. The local wipe
+   goes after the verify because a phone that still holds the token is a phone
+   that can try again, and a phone that does not is a dead end.
+
+   What it cannot do is reach into the calendar app. In subscription mode it
+   does not need to: emptying the server empties the feed, and ICSx⁵ mirrors
+   rather than appends, so the events go on the next sync. In manual-import mode
+   there is no such moment — an import only ever adds — so the cancellation file
+   is the whole mechanism, and it is saved first, while the shifts it names are
+   still on the device to name them.
+   ---------------------------------------------------------------------- */
+function tdSay(text, cls){
+  const log = $('#tdlog');
+  if(log) log.appendChild(el('li', cls || null, esc(text)));
+}
+
+async function runTeardown(){
+  const btn = $('#teardown'), log = $('#tdlog'), note = $('#tdnote');
+  const drop = !!$('#tddrop').checked;
+  if(log) log.innerHTML = '';
+  if(note) note.textContent = '';
+
+  if(!confirm('Undo everything this phone did?\n\n'
+            + 'Cancels every event this app put in a calendar, clears every row on the '
+            + 'server — including the ones the cron wrote — and then wipes this device '
+            + 'and forgets the token.')) return;
+  if(!confirm(drop
+      ? 'Last check. The database tables will be dropped as well, so the next phone must '
+        + 'press "Set up the database" before its first push will land.'
+      : 'Last check. This cannot be undone from here.')) return;
+
+  btn.disabled = true;
+  teardown.running = true;
+  let cleared = false;
+
+  // `retire` is the right way to build the cancellations and it is also a
+  // mutation: it files a tombstone for every sent shift, and a tombstone means
+  // "the calendar holds an event for a shift that is gone". If this run stops
+  // early the shifts are not gone, and leaving those records behind would put a
+  // standing "N deleted shifts are still in the calendar, with alarms" on the
+  // Schedule about work nobody did. Kept, and put back on every path that does
+  // not finish clearing the server.
+  const heldTombs = (S.tombstones || []).slice();
+
+  try {
+    // 1. The cancellations, before anything is deleted — `retire` reads the
+    //    shifts to build them and they are about to be gone. It skips anything
+    //    never sent, so what comes out is exactly the events that are really
+    //    out there, both jobs, feed rows included.
+    retire(S.shifts);
+    const dead = owedCancels();
+    if(dead.length){
+      download(`shifts-cancelled-${todayISO()}.ics`,
+               buildCancelICS(dead), 'text/calendar;charset=utf-8');
+      tdSay(`Saved cancellations for ${dead.length} event${dead.length === 1 ? '' : 's'}. `
+          + (S.settings.feedMode === 'import'
+              ? 'Open that file in the calendar app — in manual-import mode it is the only '
+                + 'thing that takes those events off the phone.'
+              : 'Belt and braces: in subscription mode emptying the feed is what removes '
+                + 'them, but anything imported by hand during the test needs this file.'));
+    } else {
+      tdSay('No events to cancel — nothing here has been sent to a calendar.');
+    }
+
+    // 2. The server. Everything, both sides of §14.3's line.
+    if(!pushToken()){
+      tdSay('No push token on this phone, so there is nothing of yours on the server.');
+    } else {
+      const r = await server('/reset', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ drop })
+      });
+      cleared = true;
+      const b = r.before || {};
+      tdSay(r.already
+        ? 'The server had no tables to clear.'
+        : `Server cleared: ${b.shifts || 0} shift${b.shifts === 1 ? '' : 's'}, `
+          + `${b.cfg || 0} config row${b.cfg === 1 ? '' : 's'}, ${b.raw || 0} stored feed, `
+          + `${b.polls || 0} poll record${b.polls === 1 ? '' : 's'}`
+          + (r.dropped ? ' — and the tables dropped.' : '.'));
+
+      // 3. Verified rather than assumed. A 200 says the statements ran; this
+      //    says the feed ICSx⁵ fetches is actually empty, which is the thing
+      //    that was being claimed.
+      const t = await server('/trace');
+      const left = (t.groups || []).reduce((a, g) => a + (g.n || 0), 0);
+      const events = t.feed ? t.feed.events : 0;
+      if(left || events){
+        tdSay(`Still there: ${left} row${left === 1 ? '' : 's'} and ${events} calendar `
+            + `event${events === 1 ? '' : 's'}. Stopping here — this phone keeps its token `
+            + 'so it can try again.', 'flag');
+        if(note) note.textContent = 'The server was not emptied, so nothing has been wiped here.';
+        S.tombstones = heldTombs;
+        save();
+        return;
+      }
+      tdSay('Verified: no rows on the server, and the feed serves no events.');
+      tdSay(drop
+        ? 'The cron has no tables to write to, so it will not run again.'
+        : 'The cron has no job configured now, so every tick refuses and writes nothing else.');
+      tdSay('Open ICSx⁵ and sync once, then check the calendar is empty before you '
+          + 'hand the phone over.');
+    }
+
+    // 4. The token first and on its own, because that alone makes this device
+    //    inert — `autoPush` and `syncDown` both stop at their first line
+    //    without one. If anything below fails, the phone is still safe.
+    S.settings.pushToken = '';
+    try { await idb.put(S); } catch (e) { /* the wipe below is the real one */ }
+    tdSay('Token forgotten on this phone.');
+
+    // 5. And the device.
+    pending = [];
+    S = structuredClone(DEFAULTS);
+    clearTimeout(saveTimer);
+    clearTimeout(pushTimer);
+    await idb.put(S);
+    renderAll(); renderReview();
+    tdSay('This device wiped — jobs, shifts, settings, all of it.');
+    if(note) note.textContent = 'Done. Nothing of this test is left on the server or on this phone. '
+      + 'If you want the shared secret itself retired, rotate PUSH_TOKEN in the Cloudflare '
+      + 'dashboard — this app can only forget it, not revoke it.';
+  } catch (e) {
+    tdSay(`Stopped: ${e.message}`, 'flag');
+    if(note) note.textContent = cleared
+      ? 'The server was cleared but this device was not. Press it again.'
+      : 'Nothing was changed. Check the token and the server, then press it again.';
+    // Cleared means the feed really has dropped those events, so the records
+    // are true and stay. Not cleared means nothing happened and they are not.
+    if(!cleared){ S.tombstones = heldTombs; save(); }
+  } finally {
+    btn.disabled = false;
+    // Left running once the server has been cleared: a phone that reaches here
+    // with rows still on it must not push them back up on the next timer tick.
+    teardown.running = cleared;
+  }
+}
+
+$('#teardown').onclick = runTeardown;
+
+$('#srvtrace').onclick = async () => {
+  const box = $('#srvtracebox');
+  box.innerHTML = '';
+  box.appendChild(el('div', null, 'Reading the server\u2026'));
+  try { renderTrace(await server('/trace')); }
+  catch (e) { renderTrace(null, e.message); }
+};
+
 $('#flushcache').onclick = async () => {
   try{
     if('caches' in window) await Promise.all((await caches.keys()).map(k => caches.delete(k)));
