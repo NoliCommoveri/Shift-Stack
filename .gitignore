@@ -3,3 +3,6 @@
 # installed locally, and nothing that ships needs them.
 node_modules/
 package-lock.json
+
+# wrangler's local state and build cache.
+.wrangler/

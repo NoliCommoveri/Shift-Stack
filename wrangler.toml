@@ -1,0 +1,40 @@
+# Shift Deck. PROJECT.md §14.
+#
+# A plain Worker, not Pages, and the distinction is load-bearing: Cron
+# Triggers do not run on Pages (§14.9 step 3), and the fifteen-minute poll is
+# the whole point of building this. A git-connected Worker takes all of its
+# configuration from this file, so what is here is what deploys — there is
+# nothing to set in the dashboard except the secrets, which by design are not
+# in the repo.
+
+name = "shift-deck"
+main = "worker/index.js"
+compatibility_date = "2026-09-01"
+
+# The app is served by the Worker itself rather than from GitHub Pages, which
+# is what makes every call in the page a relative path to its own origin: no
+# CORS, no preflight, no second URL to configure in Setup, and the push token
+# never travels cross-origin (§14.4).
+[assets]
+directory = "./"
+binding = "ASSETS"
+
+# `directory = "./"` means everything not excluded is publicly downloadable,
+# so .assetsignore at the repo root is not optional. Its `.git/` line least of
+# all: wrangler's default ignore list does not skip it (§14.9).
+
+[[d1_databases]]
+binding = "DB"
+database_name = "shift-deck"
+database_id = "506df86a-3a17-4e57-8a49-0a02c8e9afc4"
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+# The schema ships as text and is applied from the app's own Settings screen,
+# which is how both other D1 apps in the account do it — nobody is asked to
+# paste SQL into the D1 console (§14.9).
+[[rules]]
+type = "Text"
+globs = ["worker/*.sql"]
+fallthrough = true
