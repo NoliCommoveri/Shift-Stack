@@ -3,8 +3,8 @@
   "private": true,
   "description": "Tests only. The app itself has no dependencies and no build step — the files in the repo root are what gets served.",
   "scripts": {
-    "test": "node --test tests/parser.test.js tests/ics.test.js tests/patterns.test.js tests/holidays.test.js tests/sites.test.js tests/pay.test.js tests/feed.test.js tests/merge.test.js tests/globals.test.js tests/guards.test.js",
-    "test:update": "UPDATE=1 node --test tests/parser.test.js tests/ics.test.js tests/patterns.test.js tests/holidays.test.js tests/sites.test.js tests/pay.test.js tests/feed.test.js tests/merge.test.js tests/globals.test.js tests/guards.test.js"
+    "test": "node --test tests/parser.test.js tests/ics.test.js tests/patterns.test.js tests/holidays.test.js tests/sites.test.js tests/pay.test.js tests/globals.test.js tests/feed.test.js tests/merge.test.js tests/guards.test.js",
+    "test:update": "UPDATE=1 node --test tests/parser.test.js tests/ics.test.js tests/patterns.test.js tests/holidays.test.js tests/sites.test.js tests/pay.test.js tests/globals.test.js tests/feed.test.js tests/merge.test.js tests/guards.test.js"
   },
   "devDependencies": {
     "playwright": "^1.62.1"

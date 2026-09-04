@@ -21,15 +21,14 @@
 /* Node gets the collaborators by require; the browser already has them as
    globals, since this file loads after ics.js, patterns.js and sites.js.
 
-   Every one is aliased to a local name rather than used bare. That is not
-   style: `fold` was a global in ics.js and a *different* global of the same
-   name in app.js, the later script won, and every UID, SUMMARY, DESCRIPTION
-   and LOCATION line this function wrote came out as "[object Object]". The
-   file still opened, still had the right number of events, and every one of
-   them was unreadable. Aliasing means this file cannot be broken from the
-   outside by a name it does not control. */
+   Every one is aliased to a local name rather than used bare, which is the
+   habit §31 paid for: `fold` was ics.js's line folder and app.js's `<details>`
+   builder at the same time, the later script won, and every UID, SUMMARY,
+   DESCRIPTION and LOCATION the writer produced came out as "[object Object]".
+   Aliasing means this file cannot be broken from the outside by a name it
+   does not control, whoever declares it next. */
 const _dep = _need(
-  ['fold', 'icsEscape', 'icsStamp', 'shiftUID', 'restGaps', 'isShortRest', 'eventTitle', 'addressFor'],
+  ['icsFold', 'icsEscape', 'icsStamp', 'shiftUID', 'restGaps', 'isShortRest', 'eventTitle', 'addressFor'],
   () => Object.assign({}, require('./ics.js'), require('./patterns.js'), require('./sites.js')));
 
 /* Three environments load this file and each hands over its collaborators a
@@ -56,7 +55,7 @@ function _need(names, load){
   return out;
 }
 
-const icsFold   = _dep.fold;
+const foldLine  = _dep.icsFold;
 const icsEsc    = _dep.icsEscape;
 const icsNow    = _dep.icsStamp;
 const uidFor    = _dep.shiftUID;
@@ -126,7 +125,7 @@ function feedICS(only, store, opts){
     const title = titleFor(co && co.name, s, feedById(store.sites, s.siteId), feedById(store.roles, s.roleId)) +
                   (s.source === 'pattern' ? ' (from the rota)' : '');
     L.push('BEGIN:VEVENT',
-      icsFold(`UID:${uidFor(s.id)}`),
+      foldLine(`UID:${uidFor(s.id)}`),
       `DTSTAMP:${now}`,
       // A calendar may ignore a revision no newer than the one it holds, so a
       // shift that has been moved or retimed since it was sent has to say so.
@@ -138,18 +137,18 @@ function feedICS(only, store, opts){
       // normalising step: an employer's own sync writes "Security Officer"
       // with nothing to say whose shift it is, and two jobs' worth of those
       // on one calendar is unreadable.
-      icsFold('SUMMARY:' + icsEsc(title)),
-      icsFold('DESCRIPTION:' + icsEsc(`${fmtDur(durMins(s))} scheduled`
+      foldLine('SUMMARY:' + icsEsc(title)),
+      foldLine('DESCRIPTION:' + icsEsc(`${fmtDur(durMins(s))} scheduled`
         + (rests.has(s.id) ? `\nOnly ${fmtDur(rests.get(s.id))} off before this one.` : ''))));
     // §8.1's single best reason to have built any of this: the two-hour alarm
     // fires, he taps the event, taps the address, and he is navigating. The
     // shift's own address wins over the site's standing one — a feed row
     // carries what the employer published for that night.
     const where = placeFor(s, feedById(store.sites, s.siteId));
-    if(where) L.push(icsFold('LOCATION:' + icsEsc(where)));
+    if(where) L.push(foldLine('LOCATION:' + icsEsc(where)));
     leads.forEach(h => {
       L.push('BEGIN:VALARM','ACTION:DISPLAY',
-        icsFold('DESCRIPTION:' + icsEsc(title)),
+        foldLine('DESCRIPTION:' + icsEsc(title)),
         `TRIGGER:-PT${h}H`, 'END:VALARM');
     });
     // It fires as the shift before it ends, not on the morning of this one.
@@ -161,7 +160,7 @@ function feedICS(only, store, opts){
     if(rest){
       const rh = Math.floor(rest / 60), rm = rest % 60;
       L.push('BEGIN:VALARM','ACTION:DISPLAY',
-        icsFold('DESCRIPTION:' + icsEsc(`Heads up: only ${fmtDur(rest)} off between shifts.`)),
+        foldLine('DESCRIPTION:' + icsEsc(`Heads up: only ${fmtDur(rest)} off between shifts.`)),
         `TRIGGER:-PT${rh}H${rm ? rm + 'M' : ''}`, 'END:VALARM');
     }
     L.push('END:VEVENT');

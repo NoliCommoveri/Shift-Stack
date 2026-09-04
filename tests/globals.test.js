@@ -1,21 +1,22 @@
-/* No two scripts may claim the same global. Run with:  npm test
+/* The shared global scope. Run with:  npm test
  *
- * The app has no build step and no modules: every file in index.html is a
- * classic script, so every top-level `function f` and `const f` is a property
- * of one shared global object, and the last script to declare a name wins
- * silently.
+ * The app has no build step and no modules: index.html loads seven plain
+ * scripts, and every top-level `function` and `const` in them lands in one
+ * global scope, where the last file loaded wins. Nothing warns about it —
+ * not the browser, not the other tests, which `require` each file into a
+ * scope of its own and so never see the collision at all.
  *
- * That is not theoretical. `fold` was line-folding in ics.js and a `<details>`
- * builder in app.js; app.js loads last, so the calendar writer called the
- * wrong one and wrote "[object Object]" into every UID, SUMMARY, DESCRIPTION
- * and LOCATION line it produced. The file still opened. It had the right
- * number of events. Every one of them was unreadable, and it shipped, because
- * nothing in the repo was in a position to notice.
+ * §31 is what that costs. app.js grew a `fold` for the Setup screen's
+ * `<details>` while ics.js already had a `fold` for RFC 5545 line folding.
+ * app.js loads last, so every line the exporter folded came out as the
+ * string "[object Object]": no SUMMARY, so the phone showed every shift as
+ * "My event"; no LOCATION, so no address to tap; no UID, so no event could
+ * be updated or cancelled. The file imported cleanly and the tests stayed
+ * green for three commits.
  *
- * Extracting feed.js came within one rename of doing it twice more — `hhmm`
- * is a formatter in ics.js and was a parser in feed.js, which would have
- * broken calendar import outright. So the rule gets a test rather than a
- * comment: one name, one owner, across every script the page loads.
+ * So the scope is a thing to test. The list of scripts is read out of
+ * index.html rather than written here, because a file added to the page and
+ * not to this test is exactly the file this test exists for.
  */
 const test = require('node:test');
 const assert = require('node:assert');
@@ -24,40 +25,41 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 
-/* The load order the browser actually uses, read from index.html rather than
-   listed here — a file added to the page and not to this list would be
-   exactly the gap this test exists to close. */
-const scripts = [...fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8')
-  .matchAll(/<script src="([^"]+\.js)"><\/script>/g)].map(m => m[1]);
-
-/* Top level means column zero in these files: everything nested is indented,
-   and nothing here is minified. Good enough to catch a real collision, and it
-   does not need to be a parser to do it. */
-const DECL = /^(?:function|const|let|var)\s+([A-Za-z_$][\w$]*)/;
-
-function globalsOf(file){
-  const out = new Set();
-  for(const line of fs.readFileSync(path.join(ROOT, file), 'utf8').split('\n')){
-    const m = DECL.exec(line);
-    if(m) out.add(m[1]);
-  }
-  return out;
+/* The scripts index.html loads, in the order it loads them. */
+function pageScripts(){
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  return [...html.matchAll(/<script\s+src="([^"]+)"/g)].map(m => m[1]);
 }
 
-test('index.html loads every script the app needs', () => {
-  assert.ok(scripts.length >= 8, `only found ${scripts.length} scripts`);
-  assert.equal(scripts[scripts.length - 1], 'app.js', 'app.js loads last');
-  for(const f of scripts) assert.ok(fs.existsSync(path.join(ROOT, f)), `${f} is missing`);
+/* Top-level declarations, which is what this codebase puts in the global
+   scope. Column zero is the test: every file here indents anything nested,
+   so a declaration starting a line is a global and one that does not, is not.
+   A blunt rule, deliberately — it needs no parser and it cannot be quietly
+   defeated by adding a file. */
+function globalsIn(src){
+  const found = new Set();
+  const re = /^(?:function\s*\*?\s*([A-Za-z_$][\w$]*)|(?:const|let|var|class)\s+([A-Za-z_$][\w$]*))/gm;
+  for(const m of src.matchAll(re)) found.add(m[1] || m[2]);
+  return found;
+}
+
+test('index.html loads the scripts the app is made of', () => {
+  const files = pageScripts();
+  assert.ok(files.length >= 2, 'no <script src> found in index.html');
+  files.forEach(f => assert.ok(fs.existsSync(path.join(ROOT, f)), `${f} is on the page but not in the repo`));
 });
 
-test('no global is declared by two scripts', () => {
+test('no two scripts declare the same global', () => {
   const owner = new Map();
   const clashes = [];
-  for(const file of scripts){
-    for(const name of globalsOf(file)){
-      if(owner.has(name)) clashes.push(`${name}: ${owner.get(name)} and ${file}`);
-      else owner.set(name, file);
-    }
-  }
-  assert.deepEqual(clashes, [], 'two scripts declare the same top-level name; the later one silently wins');
+  pageScripts().forEach(f => {
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    globalsIn(src).forEach(name => {
+      if(owner.has(name)) clashes.push(`${name}: ${owner.get(name)} then ${f}`);
+      else owner.set(name, f);
+    });
+  });
+  assert.deepEqual(clashes, [],
+    'a name declared twice means the later script silently replaces the earlier one:\n  '
+    + clashes.join('\n  '));
 });

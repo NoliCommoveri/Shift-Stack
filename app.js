@@ -93,7 +93,7 @@ function fmtTime(t){
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
 }
 /* `durMins` and `fmtDur` come from feed.js, which needs both to write the
-   calendar file and is loaded first. */
+   calendar file and is loaded before this one. */
 /* The same gap, in words. "6h 45m" is right in a column of figures beside the
    shift lengths it has to be compared against, and wrong inside a sentence,
    where it reads as a code rather than as an amount of sleep. */
@@ -519,7 +519,7 @@ const foldOpen = (key, fallback) => {
 /* Returns the `<details>` and the empty body to fill. `head` is the fold's
    name and `note` is what it says while shut — both are HTML, and callers
    escape their own. */
-function foldCard(key, head, note, open){
+function fold(key, head, note, open){
   const d = el('details', 'fold');
   d.open = foldOpen(key, open);
   d.appendChild(el('summary', null,
@@ -1970,7 +1970,7 @@ function renderSetup(){
     // fold inside that (§28). Name and colour stay put: they are how he tells
     // one job from the other, and burying the field that says which job this
     // is inside a section called something else would be perverse.
-    const job = foldCard(co.id,
+    const job = fold(co.id,
       `<span class="dot" style="background:${esc(co.color)}"></span>${esc(co.name)}`,
       jobNote(co), false);
     job.d.classList.add('job');
@@ -1984,7 +1984,7 @@ function renderSetup(){
       </div>`);
     inner.appendChild(head);
 
-    const pay = foldCard(co.id + '/pay', 'Pay and hours', payNote(co), false);
+    const pay = fold(co.id + '/pay', 'Pay and hours', payNote(co), false);
     pay.body.innerHTML = `
       <div class="grid2">
         <label class="f"><span>Hourly rate</span><input data-k="rate" type="number" step="0.01" value="${co.rate ?? ''}"></label>
@@ -2001,7 +2001,7 @@ function renderSetup(){
         below. This one is what a shift is worth when nothing more specific says otherwise.</p>`;
     inner.appendChild(pay.d);
 
-    const app = foldCard(co.id + '/app', 'App and calendar', appNote(co), false);
+    const app = fold(co.id + '/app', 'App and calendar', appNote(co), false);
     app.body.innerHTML = `
       <label class="f"><span>Android app package, for the open button</span>
         <input data-k="pkg" type="text" placeholder="com.tracktik.shift" value="${esc(co.pkg||'')}"></label>
@@ -2024,7 +2024,7 @@ function renderSetup(){
         day, and a shift quietly dropped is a shift missed.</p>`;
     inner.appendChild(app.d);
 
-    const rota = foldCard(co.id + '/rota', 'Shifts this job normally runs', rotaNote(co), false);
+    const rota = fold(co.id + '/rota', 'Shifts this job normally runs', rotaNote(co), false);
     rota.body.innerHTML = `
       <p class="tiny soft" style="margin:0 0 .4rem">Times read off a screenshot are checked
         against these. One exactly twelve hours out is an am/pm misread and is corrected;
@@ -2034,7 +2034,7 @@ function renderSetup(){
       <div class="sugbox"></div>`;
     inner.appendChild(rota.d);
 
-    const roleFold = foldCard(co.id + '/roles', 'Roles',
+    const roleFold = fold(co.id + '/roles', 'Roles',
       tableNote(rolesFor(co.id), 'none \u2014 every shift at the job\u2019s rate',
                 live => { const paid = live.filter(r => r.rate != null);
                           return paid.length ? ' \u00b7 ' + paid.map(r => money(r.rate)).join(', ') : ''; }),
@@ -2048,7 +2048,7 @@ function renderSetup(){
       <div class="rolesugbox"></div>`;
     inner.appendChild(roleFold.d);
 
-    const siteFold = foldCard(co.id + '/sites', 'Sites',
+    const siteFold = fold(co.id + '/sites', 'Sites',
       tableNote(sitesFor(co.id), 'none yet'), false);
     siteFold.body.innerHTML = `
       <p class="tiny soft" style="margin:0 0 .4rem">The places this job sends him, and
@@ -2951,13 +2951,12 @@ function renderReview(){
 }
 
 /* ---------- calendar file ------------------------------------------------
-   `fold`, `icsEscape`, `icsStamp` and `shiftUID` come from ics.js, which is
-   loaded first and now owns the file format in both directions. What is left
-   here is the half that needs the store: which shifts, whose job, what title.
+   `icsFold`, `icsEscape`, `icsStamp` and `shiftUID` come from ics.js, which
+   is loaded first and now owns the file format in both directions. What is
+   left here is the half that needs the store: which shifts, whose job, what
+   title. The folder is `icsFold` and not `fold` because `fold` in this file
+   is the Setup screen's `<details>` helper, and this file is loaded last.
    ---------------------------------------------------------------------- */
-/* The writer itself is feed.js now, because the Worker's cron has to produce
-   a byte-identical file from D1 (§14.7). What stays here is the one thing the
-   page knows and the Worker is handed: the store. */
 function buildICS(only){
   return feedICS(only, S);
 }
