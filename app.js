@@ -92,15 +92,8 @@ function fmtTime(t){
   const [h,m] = t.split(':').map(Number);
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
 }
-function durMins(sh){
-  let d = mins(sh.end) - mins(sh.start);
-  if(d <= 0) d += 1440;                 // overnight
-  return d;
-}
-function fmtDur(m){
-  const h = Math.floor(m/60), r = m%60;
-  return r ? `${h}h ${r}m` : `${h}h`;
-}
+/* `durMins` and `fmtDur` come from feed.js, which needs both to write the
+   calendar file and is loaded before this one. */
 /* The same gap, in words. "6h 45m" is right in a column of figures beside the
    shift lengths it has to be compared against, and wrong inside a sentence,
    where it reads as a code rather than as an amount of sleep. */
@@ -2681,10 +2674,8 @@ function applyClashes(rows){
    a Google export holds years of history and none of it is news. */
 const ICS_FROM = () => shiftDays(todayISO(), -7);
 
-function icsSame(a, b){
-  return a.date === b.date && a.start === b.start && a.end === b.end &&
-         whereKey(a) === whereKey(b);
-}
+/* `icsSame` is merge.js's now, along with the UID matching that used it —
+   the Worker's cron has to answer "already on file" the same way (§14.7). */
 
 function calendarRows(text){
   const co = coById($('#impco').value);
@@ -2967,71 +2958,7 @@ function renderReview(){
    is the Setup screen's `<details>` helper, and this file is loaded last.
    ---------------------------------------------------------------------- */
 function buildICS(only){
-  const now = icsStamp();
-  const leads = (S.settings.leads || []).filter(n => n > 0);
-  // §25's alarm, and the one place in this file that has to look outside the
-  // list it was handed. Rest is a property of a *pair*, and in manual-import
-  // mode `only` is the shifts not sent before — so the shift on the other side
-  // of the gap is routinely not in it. Worked out over the whole store.
-  const rests = new Map();
-  restGaps(S.shifts).filter(g => isShortRest(g.mins))
-                    .forEach(g => rests.set(g.b.id, g.mins));
-  const L = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Shift Deck//EN','CALSCALE:GREGORIAN',
-             'METHOD:PUBLISH','X-WR-CALNAME:Work Schedule'];
-  only.forEach(s => {
-    const co = coById(s.companyId);
-    const endDate = mins(s.end) <= mins(s.start) ? shiftDays(s.date,1) : s.date;
-    // The hollow tick is in the app; the alarm is on the phone, and the phone
-    // is where §8.3's stated risk actually lands. The title carries the mark,
-    // and the alarm body reuses the title, so a 05:00 buzz for a shift nothing
-    // has confirmed says which kind it is (§20.5).
-    const title = eventTitle(co && co.name, s, siteById(s.siteId), roleById(s.roleId)) +
-                  (isProposed(s) ? ' (from the rota)' : '');
-    L.push('BEGIN:VEVENT',
-      icsFold(`UID:${shiftUID(s.id)}`),
-      `DTSTAMP:${now}`,
-      // A calendar may ignore a revision no newer than the one it holds, so a
-      // shift that has been moved or retimed since it was sent has to say so.
-      // The cancellation in ics.js counts from the same number (§22).
-      `SEQUENCE:${s.seq || 0}`,
-      `DTSTART:${s.date.replace(/-/g,'')}T${s.start.replace(':','')}00`,
-      `DTEND:${endDate.replace(/-/g,'')}T${s.end.replace(':','')}00`,
-      // Every event says which job it is. That is the whole point of the
-      // normalising step: an employer's own sync writes "Security Officer"
-      // with nothing to say whose shift it is, and two jobs' worth of those
-      // on one calendar is unreadable.
-      icsFold('SUMMARY:' + icsEscape(title)),
-      icsFold('DESCRIPTION:' + icsEscape(`${fmtDur(durMins(s))} scheduled`
-        + (rests.has(s.id) ? `\nOnly ${fmtDur(rests.get(s.id))} off before this one.` : ''))));
-    // An address here is a tappable link to a map. The two-hour alarm fires,
-    // he taps the event, taps the address, and he is navigating.
-    // §8.1's single best reason to have built any of this: the two-hour alarm
-    // fires, he taps the event, taps the address, and he is navigating. The
-    // shift's own address wins over the site's standing one — a feed row
-    // carries what the employer published for that night.
-    const where = shiftAddress(s);
-    if(where) L.push(icsFold('LOCATION:' + icsEscape(where)));
-    leads.forEach(h => {
-      L.push('BEGIN:VALARM','ACTION:DISPLAY',
-        icsFold('DESCRIPTION:' + icsEscape(title)),
-        `TRIGGER:-PT${h}H`, 'END:VALARM');
-    });
-    // It fires as the shift before it ends, not on the morning of this one.
-    // The gap here is 08:00 to 15:00 as often as not, and a notice that
-    // arrives at 09:00 reaches him driving home off a twelve-hour night with
-    // the decision already made. At the clock-out he is awake and can still
-    // choose what to do with the afternoon.
-    const rest = rests.get(s.id);
-    if(rest){
-      const rh = Math.floor(rest / 60), rm = rest % 60;
-      L.push('BEGIN:VALARM','ACTION:DISPLAY',
-        icsFold('DESCRIPTION:' + icsEscape(`Heads up: only ${fmtDur(rest)} off between shifts.`)),
-        `TRIGGER:-PT${rh}H${rm ? rm + 'M' : ''}`, 'END:VALARM');
-    }
-    L.push('END:VEVENT');
-  });
-  L.push('END:VCALENDAR');
-  return L.join('\r\n');
+  return feedICS(only, S);
 }
 function download(name, text, type){
   const a = document.createElement('a');

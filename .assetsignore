@@ -1,0 +1,20 @@
+# Everything under `directory` in wrangler.toml is served publicly, and
+# wrangler's default ignore list does not skip .git. Without the first line
+# below, the entire commit history is downloadable from the deployed site.
+.git
+.git/**
+.github
+.github/**
+node_modules
+node_modules/**
+tests
+tests/**
+worker
+worker/**
+wrangler.toml
+package.json
+package-lock.json
+.assetsignore
+.gitignore
+PROJECT.md
+README.md
