@@ -376,3 +376,110 @@ test('generation fills only the dates it is given', () => {
   assert.deepEqual(T.generateWeek(DSI, rest).map(r => r.date),
     ['2026-09-09','2026-09-11']);
 });
+
+/* ---------- rest between shifts (§25) ----------------------------------- */
+
+/* The four shifts §25 was raised about, as one chain. Three gaps, and only the
+   third is a thing to say: he goes straight back on after the 00:15, sleeps
+   properly before the night, and then has an afternoon of it. */
+const CHAIN = [
+  { id:'a', date:'2026-09-01', start:'15:00', end:'23:00' },
+  { id:'b', date:'2026-09-02', start:'00:15', end:'04:15' },
+  { id:'c', date:'2026-09-02', start:'20:00', end:'08:00' },
+  { id:'d', date:'2026-09-03', start:'15:00', end:'23:00' }
+];
+
+test('the real week is measured, and only the afternoon of it is worth saying', () => {
+  const got = T.restGaps(CHAIN);
+  assert.deepEqual(got.map(g => [g.a.id, g.b.id, g.mins]),
+    [['a','b',75], ['b','c',945], ['c','d',420]]);
+  assert.deepEqual(got.filter(g => T.isShortRest(g.mins)).map(g => g.mins), [420]);
+});
+
+test('the band is closed at the bottom and open at the top', () => {
+  // Exactly two hours is worth saying; exactly eight is a night's sleep.
+  assert.equal(T.isShortRest(120), true);
+  assert.equal(T.isShortRest(119), false);
+  assert.equal(T.isShortRest(479), true);
+  assert.equal(T.isShortRest(480), false);
+  assert.equal(T.isShortRest(null), false);
+});
+
+test('going straight from one job to the other says nothing at all', () => {
+  // §19.1's case, and the whole reason that warning was deleted. A gap this
+  // size is his ordinary week and the app must stay quiet about it.
+  const tight = [{ date:'2026-09-01', start:'07:00', end:'15:00' },
+                 { date:'2026-09-01', start:'15:45', end:'23:00' }];
+  const [g] = T.restGaps(tight);
+  assert.equal(g.mins, 45);
+  assert.equal(T.isShortRest(g.mins), false);
+});
+
+test('a handover is no rest, and an overlap is not rest either', () => {
+  // Zero is the shift ending as the next starts. Negative is §19's clash,
+  // which has its own warning and must not also produce a sleep note.
+  assert.deepEqual(T.restGaps([{ date:'2026-09-01', start:'07:00', end:'15:00' },
+                               { date:'2026-09-01', start:'15:00', end:'23:00' }]), []);
+  assert.deepEqual(T.restGaps([{ date:'2026-09-01', start:'19:15', end:'07:15' },
+                               { date:'2026-09-02', start:'06:00', end:'14:00' }]), []);
+});
+
+test('rest is measured across midnight, not inside a date', () => {
+  // §19.2's reason, on the other check: the night ends on a different date
+  // from the one it started, and a per-day reading would compare the wrong
+  // pair or none at all.
+  const [g] = T.restGaps([{ date:'2026-09-05', start:'19:15', end:'07:15' },
+                          { date:'2026-09-06', start:'13:15', end:'21:15' }]);
+  assert.equal(g.mins, 360);
+  assert.equal(T.isShortRest(g.mins), true);
+});
+
+test('a shift wholly inside another does not shorten the rest after it', () => {
+  // Sorting by start would pair the short shift with what follows and report
+  // the hours he is still on the night shift as time off. The sweep carries
+  // the furthest end reached, so the rest is measured from 08:00.
+  const got = T.restGaps([{ id:'night', date:'2026-09-05', start:'20:00', end:'08:00' },
+                          { id:'in',    date:'2026-09-05', start:'22:00', end:'23:00' },
+                          { id:'back',  date:'2026-09-06', start:'15:00', end:'23:00' }]);
+  assert.deepEqual(got.map(g => [g.a.id, g.b.id, g.mins]), [['night','back',420]]);
+});
+
+test('a shift nobody can read breaks the chain rather than being stepped over', () => {
+  // With the half-read row skipped, 08:00 to 15:00 looks like seven hours off
+  // and is not — there is a shift in the middle of it. Saying nothing is the
+  // right silence: that row is already flagged and asking to be completed.
+  const murky = [{ id:'night', date:'2026-09-05', start:'20:00', end:'08:00' },
+                 { id:'half',  date:'2026-09-06', start:'', end:'' },
+                 { id:'back',  date:'2026-09-06', start:'15:00', end:'23:00' }];
+  assert.deepEqual(T.restGaps(murky), []);
+  // Every gap touching that day goes quiet, including the evening one — an
+  // unreadable row on the 6th could just as well be at 23:30 as at noon.
+  const evening = T.restGaps([...murky, { id:'next', date:'2026-09-07', start:'06:00', end:'14:00' }]);
+  assert.deepEqual(evening, []);
+  // Days it does not sit on are unaffected.
+  const clear = T.restGaps([...murky,
+    { id:'next', date:'2026-09-07', start:'06:00', end:'14:00' },
+    { id:'after', date:'2026-09-07', start:'19:00', end:'23:00' }]);
+  assert.deepEqual(clear.map(g => [g.a.id, g.b.id, g.mins]), [['next','after',300]]);
+});
+
+test('a row with no date at all silences nothing', () => {
+  // It has no place on the timeline and no day to block, so it is simply not
+  // there — the same answer clashMins gives it.
+  const got = T.restGaps([{ id:'x', date:'2026-09-05', start:'20:00', end:'08:00' },
+                          { id:'nowhere', date:'', start:'09:00', end:'17:00' },
+                          { id:'y', date:'2026-09-06', start:'15:00', end:'23:00' }]);
+  assert.deepEqual(got.map(g => [g.a.id, g.b.id, g.mins]), [['x','y',420]]);
+});
+
+test('one shift, or none, has no rest to report', () => {
+  assert.deepEqual(T.restGaps([]), []);
+  assert.deepEqual(T.restGaps(null), []);
+  assert.deepEqual(T.restGaps([CHAIN[0]]), []);
+});
+
+test('restGaps never mutates what it is given', () => {
+  const before = JSON.stringify(CHAIN);
+  T.restGaps(CHAIN);
+  assert.equal(JSON.stringify(CHAIN), before);
+});

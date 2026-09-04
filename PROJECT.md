@@ -2887,3 +2887,176 @@ Worth noting where it was found, though — not in the app, but in the comment
 above `fmtTime()` claiming something the fields underneath it did not do. The
 comments in this codebase are load-bearing enough to be worth auditing that
 way again.
+
+---
+
+## 25. Built: how long he is off between shifts, 4 September 2026
+
+Ray raised it from a real week. Four shifts, in order:
+
+| | shift | rest before it | |
+|---|---|---|---|
+| 1 | 15:00–23:00 | — | |
+| 2 | 00:15–04:15 next day | 1h 15m | silent |
+| 3 | 20:00–08:00 | 15h 45m | silent |
+| 4 | 15:00–23:00 | **7h** | **says so** |
+
+His three numbers, in his words: under two hours he is not even coming home;
+over eight he has time to sleep at least six and a half; in between he needs to
+know to plan a four-hour nap rather than a full night.
+
+### 25.1 §19 has to be answered first
+
+§19.1 deleted a turnaround warning and gave a reason that reads like a
+prohibition on this one: *"There is no threshold that makes it right, because
+the thing it was measuring is not a problem."*
+
+It is not the same warning, and the difference is which case is silent. The old
+one fired on any two shifts under an hour apart — which for these two jobs is
+the ordinary week, since going straight from one to the other is normal — so it
+fired constantly on nothing and taught him to scroll past the line that also
+had to carry the double booking. **That case is silent here by construction.**
+Under two hours is the bottom of the band, not the top of it.
+
+The table above is the check on that claim, and it is worth keeping: one
+warning out of three gaps, on the week the feature was asked for.
+
+The residual risk is real and named rather than solved. A 7h gap is not rare in
+his pattern, so this could still become wallpaper. Two things hold it back — the
+banner appears only when the shift he is going back to is within two days
+(§25.3), and the week-list line is not red (§25.5) — and if it does go quiet on
+him anyway, §19.1's remedy applies: delete it rather than tune it.
+
+### 25.2 The message states the gap and stops
+
+Ray settled the wording, and the first draft was wrong in an instructive way.
+It computed a sleep figure — gap minus commute, minus eating, minus winding
+down — and told him to set a four-hour alarm.
+
+That draft did not survive its own arithmetic. "8h means at least 6.5h asleep"
+implies an hour and a half of overhead; "7h means a 4h nap" implies three. Both
+are his numbers and they cannot both be one constant, because they are not
+measurements — they are two reasonable feelings about two different evenings.
+
+So the app does not have the number and stops pretending to:
+
+```
+Heads up: only 6h off between shifts.
+```
+
+He knows what six hours means for him on a given night; what he does not know,
+until this tells him, is that it is six. §19.4 said the clash warning names both
+sides and proposes no fix because the app cannot know which shift is wrong. The
+same shape for a different reason: here the app knows the fact perfectly well
+and has no business with the decision that follows it.
+
+### 25.3 Three surfaces, one of which is the point
+
+**The alarm, in the exported calendar.** This is the one that matters, because
+it is the only one that reaches him with the app closed. `VALARM` on the shift
+he is coming back to, `TRIGGER` at the *start* of the gap rather than on the
+morning of the shift — `-PT7H` on a 15:00 start fires at 08:00, as the night
+shift ends.
+
+That anchor is the whole design of it. The gap is routinely 08:00 to 15:00, and
+a notice arriving at 09:00 reaches him driving home off twelve hours with the
+decision already made. At the clock-out he is awake and can still choose what
+to do with the afternoon.
+
+**The banner**, over the schedule, ranked below the clash and the stale
+calendar and above the horizon notes. The order is by cost, as §19.3's is: a
+clash is a shift he will miss, a stale calendar is an alarm that will not fire,
+this is a shift he will work tired, and a short horizon is only a job to do.
+
+Near horizon only — it appears when the shift he is going back to is today,
+tomorrow, or the day after. The gap is a fact about next Thursday too, but it
+is only *actionable* on the day, and a standing note about a week away is the
+permanently amber screen §23 refused to build.
+
+**A line in the week list**, on the shift he comes back to.
+
+### 25.4 Two things the sweep has to get right
+
+`restGaps()` in `patterns.js`, on §19.2's absolute timeline for §19.2's reason:
+Trupoint runs 19:15–07:15 and 00:15–08:15, so the rest that matters is nearly
+always measured across midnight and a per-day check could not see it.
+
+Neither of these is a sort and a subtraction:
+
+- **The previous shift is not the one before it in the list.** A shift wholly
+  inside another — which happens, and which §19 flags separately — would end
+  the pair early and report hours he is still at work as time off. A 20:00–08:00
+  night with a 22:00–23:00 inside it would measure the next day's rest from
+  23:00 and call 16 hours what is really 7. The sweep carries the furthest end
+  reached, not the end of the last shift started.
+- **A shift nobody can read breaks the chain.** A row with a date and no usable
+  times has no place on the timeline. Stepping over it joins the shifts either
+  side and measures a gap with a shift sitting in it — wrong number, wrong two
+  shifts named, and possibly a "7h off" over a night he is working. So no gap
+  is reported across a day holding one. That is a silence about something real,
+  and it is the right way round: the row is already flagged and asking to be
+  completed, which is the same answer §19 gives an unreadable row.
+
+Zero is a handover and negative is a clash. Neither is rest, and the clash has
+its own warning this one must not muddy.
+
+### 25.5 Small things that are decisions
+
+**The band is closed at the bottom and open at the top.** Exactly two hours is
+worth saying; exactly eight is a night's sleep. One predicate, `isShortRest()`,
+so the three surfaces cannot drift apart on the boundary.
+
+**The week-list line is not red.** The clash gets `--bad` because it is a fault
+in the schedule. This is a fact about the night, and colouring a fact like a
+fault is how the line that means something gets scrolled past.
+
+**`buildICS` looks outside the list it was handed.** Rest is a property of a
+*pair*, and in manual-import mode `only` is the shifts not sent before — so the
+shift on the other side of the gap is routinely not in it. The alarm is worked
+out over the whole store and the export is filtered afterwards. Tested with a
+one-event file whose partner shift is absent, because getting this wrong would
+have produced a file that is correct in subscription mode and silently missing
+alarms in the other.
+
+### 25.6 What manual-import mode still cannot do
+
+The alarm is a property of a pair, so adding a shift changes the alarm on a
+shift the calendar may already hold. Subscription mode is immune — the feed is
+rebuilt whole on every save, which is the same immunity §22 records for
+deletions. Manual import only ever appends, so an alarm written before the
+other half of the pair existed goes stale and nothing says so.
+
+Not fixed, and the option is recorded rather than taken: `seq` could be bumped
+on a shift whose rest changed, making it a revision like a retime (§22). That
+is the correct fix and it is more moving parts than this feature is worth
+today. Until then the banner is the backstop in manual mode, and subscription
+is the recommended mode for reasons that now include this one.
+
+### 25.7 Where this leaves the order
+
+Unchanged: §8.1's site table, then §8.4, with §4/§14's Worker still the live
+product blocker.
+
+But this feature has a second half that only the Worker can build, and it is
+worth writing down now while the reasoning is fresh. A `VALARM` is a good
+notification and not the one Ray asked for — it depends on an export having
+happened and on ICSx⁵ having synced since. Once §14's Worker exists, D1 holds
+every shift and the `*/15` cron is already running, so a Web Push on the same
+tick costs no new infrastructure and stays inside the free plan: 3 cron
+triggers against the 1 §14.5 uses, and one JWT signature against the 10ms CPU
+ceiling that section already flags as the number to watch.
+
+The cheap shape, worked out and not yet built: **payload-less push, and the
+service worker fetches the line.** RFC 8291 payload encryption is real work;
+having the worker read the shifts out of IndexedDB instead would work — storage
+is IndexedDB already, which a service worker can open, where `localStorage`
+would have ruled it out — but only after §14.7's pass two lands, since until
+the phone reads `source='feed'` shifts back down its own store does not hold the
+Trupoint side of the pair, and the gap that started this is cross-job. A
+same-origin `fetch` back to the Worker needs neither. That leaves VAPID's JWT as
+the only crypto, which is one ECDSA P-256 signature that WebCrypto emits in the
+raw `r||s` form JWS wants.
+
+One rule for when that lands: **the `VALARM` comes out.** Two buzzes for the
+same seven hours is precisely how a warning gets muted, and §19 is the record of
+that happening in this app once already.

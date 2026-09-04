@@ -116,6 +116,7 @@ tr.assumed td:first-child{color:var(--ink)}
 .shift .where{font-size:.86rem;color:var(--soft)}
 .shift .len{margin-left:auto;font-size:.82rem;color:var(--soft);font-family:"IBM Plex Mono",monospace;padding-top:.15rem}
 .gapwarn{font-size:.8rem;color:var(--bad);padding:.15rem 0 .35rem 1.2rem}
+.restline{font-size:.8rem;color:var(--soft);padding:.15rem 0 .35rem 1.2rem}
 .empty{padding:2rem 0;color:var(--soft)}
 
 /* next shift banner */
@@ -174,6 +175,9 @@ input[type=file]{display:none}
    to do here: a double booking, which has no recovery, and a calendar too far
    behind to be carrying the right alarms for what is about to happen. */
 .horizon.clash,.horizon.late{color:var(--bad);border-left-color:var(--bad)}
+/* §25 states a fact about the night, not a fault in the schedule, so it is
+   not given the red the clash gets — that red has one job. */
+.horizon.rest{color:var(--signal)}
 .kill{background:none;border:none;color:var(--soft);font-size:1.15rem;cursor:pointer;padding:.3rem .45rem;border-radius:2px}
 .kill:hover{color:var(--bad);background:#F3DEDA}
 
