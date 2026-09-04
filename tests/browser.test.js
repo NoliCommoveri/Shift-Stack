@@ -240,29 +240,49 @@ test('the server\u2019s shifts are read back down, and are read only here', asyn
     assert.equal(kept.n, null);
     assert.deepEqual(kept.ids, ['f1', 'mine'], 'an unmigrated server deletes nothing');
 
-    // `sent` is this phone's record of what it wrote into a calendar file, and
-    // the server has never had an opinion about it. Dropped on every pull, the
-    // same events would go into the next manual-import export and duplicate.
-    const flags = await page.evaluate(async () => {
-      S.shifts.find(s => s.id === 'f1').sent = true;
-      window.fetch = async () => ({ ok: true, status: 200,
-        json: async () => ({ shifts: [
-          { id: 'f1', companyId: 'c2', date: '2026-09-09', start: '15:00', end: '23:00',
-            label: 'Rosemont', source: 'feed', seq: 3 },
-          { id: 'f2', companyId: 'c2', date: '2026-09-10', start: '15:00', end: '23:00',
-            label: 'Rosemont', source: 'feed', seq: 0 }
-        ] })
-      });
+    // `sent` means "the calendar has this", and which calendar decides the
+    // answer. Two shifts, one the phone has seen before and one it has not.
+    const twoRows = () => ({ ok: true, status: 200,
+      json: async () => ({ shifts: [
+        { id: 'f1', companyId: 'c2', date: '2026-09-09', start: '15:00', end: '23:00',
+          label: 'Rosemont', source: 'feed', seq: 3 },
+        { id: 'f2', companyId: 'c2', date: '2026-09-10', start: '15:00', end: '23:00',
+          label: 'Rosemont', source: 'feed', seq: 0 }
+      ] })
+    });
+
+    // Subscription: the feed ICSx⁵ reads is built from the server's own rows,
+    // so a shift that came from there is in the calendar already. Marked false,
+    // the Schedule would warn about a shift the calendar was showing — a
+    // permanent amber about nothing (§19.1).
+    const sub = await page.evaluate(async (rows) => {
+      S.settings.feedMode = 'subscribe';
+      window.fetch = new Function('return ' + rows)();
       await pullFromServer();
       const by = id => S.shifts.find(s => s.id === id);
-      return { keptSent: by('f1').sent, freshSent: by('f2').sent, seq: by('f1').seq };
-    });
-    assert.equal(flags.keptSent, true, 'a shift already exported stays exported');
-    assert.equal(flags.freshSent, false, 'one the phone has never seen has not been sent');
-    // `seq` is the Worker's, though: it is the one that bumps it when the
+      return { f1: by('f1').sent, f2: by('f2').sent, seq: by('f1').seq };
+    }, twoRows.toString().replace('twoRows', 'async function'));
+    assert.equal(sub.f1, true);
+    assert.equal(sub.f2, true, 'in subscription mode the server\u2019s feed already holds it');
+    // `seq` is the Worker's either way: it is the one that bumps it when the
     // employer moves a shift, and a calendar may ignore a revision no newer
     // than the one it already holds (§22).
-    assert.equal(flags.seq, 3, 'the revision number comes down from the server');
+    assert.equal(sub.seq, 3, 'the revision number comes down from the server');
+
+    // Manual import: the calendar is fed by files this phone writes, so the
+    // local flag is the only record of whether one was in a file. Dropped, the
+    // same events go into the next export and duplicate (§13).
+    const imp = await page.evaluate(async (rows) => {
+      S.settings.feedMode = 'import';
+      S.shifts.find(s => s.id === 'f1').sent = true;
+      S.shifts.find(s => s.id === 'f2').sent = false;
+      window.fetch = new Function('return ' + rows)();
+      await pullFromServer();
+      const by = id => S.shifts.find(s => s.id === id);
+      return { f1: by('f1').sent, f2: by('f2').sent };
+    }, twoRows.toString().replace('twoRows', 'async function'));
+    assert.equal(imp.f1, true, 'a shift already written into a file stays written');
+    assert.equal(imp.f2, false, 'one that was never in a file has not been sent');
 
     // Opening a feed shift shows it and offers no way to change it — the next
     // poll would undo the edit within fifteen minutes.
@@ -285,6 +305,127 @@ test('the server\u2019s shifts are read back down, and are read only here', asyn
       return document.getElementById('sched').innerHTML;
     });
     assert.match(marked, /class="fromfeed">from the calendar</);
+
+    assert.deepEqual(errors, [], 'the page loaded with no uncaught errors');
+  } finally {
+    await browser.close();
+  }
+});
+
+/* Shifts go out without the button.
+ *
+ * The failure this replaces is silent by nature — a shift added on a phone at
+ * the end of twelve hours, never sent, and no alarm at five the next morning —
+ * so what has to be asserted is not that a push happens but exactly when one
+ * does not: nothing to say, and no marking on a write that failed.
+ */
+test('a change sends itself, and a failed send is not marked sent', async (t) => {
+  const browser = await open();
+  if(!browser) return t.skip('no Playwright browser available');
+
+  try {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto('file://' + path.join(ROOT, 'index.html'));
+    await page.waitForFunction(() => typeof S === 'object' && S !== null, null, { timeout: 15000 });
+
+    // A counting stub, so "did not push" is as visible as "pushed".
+    await page.evaluate(() => {
+      window.posts = [];
+      window.fetch = async (url, opts) => {
+        window.posts.push(JSON.parse(opts.body));
+        return { ok: true, status: 200, json: async () => ({ ok: true, shifts: 1 }) };
+      };
+      S.companies = [{ id: 'c1', name: 'Trupoint', color: '#333' }];
+      S.settings.pushToken = 'tok';
+      S.shifts = [{ id: 'a', companyId: 'c1', date: '2026-09-07', start: '19:00',
+                    end: '07:00', label: 'Station', source: 'ocr' }];
+    });
+
+    const first = await page.evaluate(async () => {
+      await autoPush();
+      return { posts: window.posts.length, sent: S.shifts[0].sent,
+               shipped: window.posts[0].shifts.length };
+    });
+    assert.equal(first.posts, 1, 'the change went out');
+    assert.equal(first.shipped, 1);
+    assert.equal(first.sent, true, 'a confirmed write marks it sent');
+
+    // Nothing has changed, so nothing is said. `save()` runs on every keystroke
+    // in Setup and on every fold opened; without this they would each be a
+    // request.
+    const quiet = await page.evaluate(async () => {
+      await autoPush();
+      await autoPush();
+      return window.posts.length;
+    });
+    assert.equal(quiet, 1, 'an unchanged payload is not sent again');
+
+    // `sent` is this phone's bookkeeping and must not itself be a change, or
+    // marking one would ask for a push to say so, for ever.
+    assert.ok(!('sent' in (await page.evaluate(() => window.posts[0].shifts[0]))),
+      'the sent flag is stripped from the payload');
+
+    // A real change does go.
+    const second = await page.evaluate(async () => {
+      S.shifts.push({ id: 'b', companyId: 'c1', date: '2026-09-08', start: '07:00',
+                      end: '19:00', label: 'Station', source: 'ocr' });
+      await autoPush();
+      return { posts: window.posts.length, shipped: window.posts[1].shifts.length };
+    });
+    assert.equal(second.posts, 2);
+    assert.equal(second.shipped, 2);
+
+    // The one that matters. A push that failed must leave the shifts unmarked,
+    // or §23's warning goes quiet about a calendar that never received them and
+    // the alarms simply never fire.
+    const failed = await page.evaluate(async () => {
+      window.fetch = async () => { throw new Error('offline'); };
+      S.shifts.push({ id: 'c', companyId: 'c1', date: '2026-09-09', start: '07:00',
+                      end: '19:00', label: 'Station', source: 'ocr' });
+      const r = await autoPush();
+      return { r, sent: S.shifts.map(s => !!s.sent) };
+    });
+    assert.equal(failed.r, null, 'a failed push is quiet, not thrown');
+    assert.deepEqual(failed.sent, [true, true, false], 'the unsent shift stays unsent');
+
+    // And it is retried rather than forgotten: `sentBody` was not advanced, so
+    // the next nudge carries it.
+    const retried = await page.evaluate(async () => {
+      window.fetch = async (url, opts) => {
+        window.posts.push(JSON.parse(opts.body));
+        return { ok: true, status: 200, json: async () => ({ ok: true, shifts: 3 }) };
+      };
+      await autoPush();
+      return { posts: window.posts.length, sent: S.shifts.map(s => !!s.sent) };
+    });
+    assert.equal(retried.posts, 3, 'the next attempt picks it up');
+    assert.deepEqual(retried.sent, [true, true, true]);
+
+    // Drawing the screen must not change what gets sent. `renderPatterns` used
+    // to fill in a missing `patterns` array on the way past, so a job saved
+    // before §18 would have pushed itself once more after every launch — for
+    // ever, and over a difference nothing asked for. Any render that writes to
+    // the store does this, so the assertion is on the whole render.
+    const stable = await page.evaluate(() => {
+      S.companies.push({ id: 'c9', name: 'Old job', color: '#999' });  // no patterns key
+      const before = pushBody();
+      renderAll(); renderAll();
+      return { before, after: pushBody() };
+    });
+    assert.equal(stable.after, stable.before, 'rendering does not change the payload');
+
+    // With no token nothing leaves the device, which is §4's rule and is not
+    // negotiable just because the sending is automatic now.
+    const noToken = await page.evaluate(async () => {
+      S.settings.pushToken = '';
+      S.shifts.push({ id: 'd', companyId: 'c1', date: '2026-09-10', start: '07:00',
+                      end: '19:00', label: 'Station', source: 'ocr' });
+      await autoPush();
+      return window.posts.length;
+    });
+    assert.equal(noToken, 3, 'no token, no request');
 
     assert.deepEqual(errors, [], 'the page loaded with no uncaught errors');
   } finally {

@@ -4010,3 +4010,88 @@ phone fetches it.
 `FILES` list out of sw.js and fails if they disagree, the same way
 `globals.test.js` reads that list rather than holding one: a file added to the
 page and not to the shell is exactly the file the test exists for.
+
+## 33. Built: shifts send themselves, 4 September 2026
+
+The button was the whole mechanism for getting the phone's half to the server,
+and it was the wrong shape for what it does.
+
+A shift is added at the end of a shift, on a phone, by somebody who has just
+finished twelve hours. The step between "it is in the app" and "it is in the
+calendar" is a step that gets missed, and missing it is silent in the way this
+project exists to refuse: the shift is on the Schedule, the app looks right, and
+the alarm at five the next morning does not fire. §4 designed that failure out
+of every other path in the app and left it standing at the one place a human had
+to remember something.
+
+### 33.1 Hung on `save`, not on a list of triggers
+
+Every mutation in the app already calls `save()`. So `save()` schedules the
+push, and the coverage is complete rather than nearly complete — a list of
+trigger points written by hand would have been missing the one that mattered,
+and there would have been no way to know which.
+
+Debounced four seconds: a rate typed into Setup is eight keystrokes and one
+change. Flushed immediately when the app is backgrounded, because Android can
+stop the page at any point after that and a pending timer stops with it.
+
+### 33.2 What makes that affordable: comparing the payload
+
+`save()` runs on every keystroke and every fold opened. Almost none of those
+change what the server holds.
+
+So `pushBody()` builds the request as the string it will be sent as, and
+`autoPush` compares it with the last string the server accepted. That test is
+exact in both directions: it cannot push for a change that does not reach the
+server, and it cannot miss one that does. A dirty flag would have been the
+first; a hash would have risked the second.
+
+`sent` is stripped from what goes up. It records what *this phone* has put into
+a calendar, which is not the server's business — the same argument the pull
+already makes in the other direction — and it also has to go, or the flag set on
+a successful push would change the payload and ask for another push to say so,
+for ever.
+
+### 33.3 Failure is quiet, and is not lost
+
+Being offline is the ordinary case here, not an error to report: half the car
+parks he works in have no signal.
+
+So a failed push says nothing and throws nothing. `sentBody` is only advanced on
+success, so the next save, the next resume, the next minute tick, or the next
+launch tries again with whatever is current by then. Four chances, and the last
+one covers a phone that was closed with a push still owed.
+
+The important half is that the shifts stay **unmarked**. `sent` is set only on a
+confirmed write, so §23's warning — "2 shifts are not in the calendar, the
+soonest tomorrow" — stays on the Schedule for exactly as long as it is true, and
+goes when the push lands. The existing machinery is the failure report; nothing
+new had to be built to say it, and nothing nags about a button.
+
+What did change is what that warning tells him to do. It used to end "Save the
+feed file in Setup", which with a server is telling him to press a button that
+is not what is holding this up. With a token set it now says they send
+themselves, and to check the server if the warning stays.
+
+### 33.4 The button is still there, and now means "now"
+
+Renamed to **Send now**, unconditional where the automatic path is not: he
+pressed it, and a button that decides for itself that the server already has
+this would look broken on the one occasion he is pressing it because he doubts
+that. It still does the full round trip — push, then read the cron's half back.
+
+Without a token none of this exists and the `.ics` download is unchanged. The
+token is the consent, and §4's rule is untouched: nothing leaves the device
+without one, automatic or not.
+
+### 33.5 Found by it: rendering was writing to the store
+
+`renderPatterns` filled in a missing `patterns` array on the way past. Harmless
+for as long as nothing compared the store with itself — and the moment something
+did, a job saved before §18 sent itself once more on the first render after
+every launch, for ever, over a difference nobody asked for.
+
+Fixed where it was: the render reads, and the array is created by the button
+that adds the first pattern. The browser test asserts the general rule rather
+than that one line — draw the whole app twice, and the payload must not move.
+Any render that writes to the store fails it.

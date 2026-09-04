@@ -180,11 +180,17 @@ count in the pay figures, and the overlap and short-rest warnings finally see
 both employers. They are read only here: change the shift in the employer's app
 and it arrives within fifteen minutes.
 
-**Up, when you say so.** Screenshots, typed shifts and rota fills stay on the
-phone until you press **Send to the server** in Setup. Deleting one of them is
-the same: the server keeps it until the next push. There is no cancellation
-file to save in this mode — the feed is rebuilt whole on every request, so a
+**Up, by itself.** Screenshots, typed shifts, rota fills, rate changes, a
+renamed site — anything you change goes to the server a few seconds later,
+without being asked. Deleting a shift is the same, and there is no cancellation
+file to save in this mode: the feed is rebuilt whole on every request, so a
 shift that is gone is simply not in it.
+
+Offline it waits and keeps trying — on the next change, when you come back to
+the app, every minute it is open, and at the next launch. Until a send lands the
+shifts stay marked as not in the calendar, so the Schedule keeps saying so
+rather than going quiet about a calendar that never got them. **Send now** in
+Setup does it immediately if you want to watch it happen.
 
 **Out, by itself.** ICSx⁵ reads the feed from the Worker on its own schedule
 and mirrors it. Nothing appends, so nothing duplicates.
@@ -645,10 +651,8 @@ it always meant, and prices at the job's rate.
   tick. That keeps the review row to one control, and the cost is that ignoring
   an amber row teaches the table the spelling it was warning you about. The
   spelling shows on the site's card in Setup and is one tap to forget.
-- Shifts entered on the phone reach the server only when you press **Send to
-  the server**. Nothing pushes on its own. The employer's own calendar is the
-  half that flows without being asked; screenshots, typed shifts and rota fills
-  are carried by that button, and so are deletions of them.
+- Sending is automatic only with a server. Without a push token nothing leaves
+  the phone, and the calendar is fed by saving the `.ics` by hand as before.
 - A shift the server fetched is read only on the phone. The next poll would
   undo the change fifteen minutes later, so the app shows it and points you at
   the employer's app instead.
