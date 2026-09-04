@@ -3549,3 +3549,246 @@ under it is worse than none.
 
 Removing a job prunes its keys. Nothing reads a stale one, but a store that
 only ever grows eventually holds more dead jobs than live ones.
+
+## 29. Built: what each list opens on, 4 September 2026
+
+Four findings from watching the app used on a phone, all of them about the
+same thing: a screen that opens showing something other than what it was
+opened for.
+
+### 29.1 The schedule opened on last week
+
+`renderSchedule()` cut the list at `today - 7`. A fixed seven-day offset lands
+mid-week, so the top of the screen was the tail of a week already worked,
+sliced in half, and this week began somewhere below the fold. Every open of
+the tab started with a scroll.
+
+The cut is now `weekStart(today)` and the past is behind a button: *Show 8
+earlier shifts*, drawn above the list because what it opens goes above the
+list — the button does not move when it is pressed. Nothing is dropped. Last
+Tuesday is still on file, still in the export, still in the pay figures.
+
+### 29.2 The rest note was at the end of the day
+
+§25 put the short-rest note on the shift he comes back to. It was appended
+after that shift's row, which on the day that actually triggers it — a
+Trupoint night at 00:15–08:15 and a DSI afternoon at 15:00–23:00 — put it
+underneath *both*, at the bottom of the day. So it had to name the shift it
+followed, in a sentence longer than the gap it was describing:
+
+> Only 6h 45m off after Tru-Point 00:15–08:15.
+
+It is now drawn *before* the shift it belongs to, which is to say in the gap
+it is about:
+
+> **Heads up — short turnaround (6 hours and 45 minutes off)**
+
+The naming was only ever there to disambiguate a note that had floated away
+from its subject; placed between the two, the sentence was telling him what he
+could see. The gap is spelled out rather than given as `6h 45m`, which is right
+in a column of figures beside the shift lengths it gets compared against and
+wrong inside a sentence, where it reads as a code rather than as an amount of
+sleep.
+
+It is also filled now — the signal colour, white letters, a darker border —
+rather than the grey line §25 gave it. §25's reasoning was that a gap is a
+fact about the night and not a fault in the schedule, so it must not be given
+the red the clash gets. That still holds: it is not red. But grey text at
+0.8rem in the middle of a week list is not read at all, and a warning nobody
+reads is worse than one pitched slightly loud. The red still has one job.
+
+The shift he is coming back from is often in the day row above. There this
+lands at the top of a day rather than between two rows, which is still between
+the two shifts, and still reads correctly.
+
+### 29.3 The pay tab showed eight weeks and counting
+
+`slice(0, 8)` per job, plus eight in the combined table. What the tab is
+actually for is checking a deposit against what he thinks he worked, and that
+question is asked about the last few weeks — the rest is a lookup.
+
+It now opens on **next week, this week and the three before it** — five weeks,
+with everything older behind *Show earlier weeks* at the bottom. Three back is
+a fortnightly deposit plus a week of slack.
+
+The window is worked out in days from the week's start rather than by
+comparing week-start strings, because two jobs can begin their weeks on
+different days (`co.weekStart`, §27) and the combined table holds keys from
+both.
+
+**One week forward, and exactly one.** A week's pay is worth knowing the week
+before it, which is while a thin week is still something he can do something
+about. A fortnight out it is worth nothing, because what the tab would print
+is the rota's opinion of a week rather than money — the forecast §20.4 refused
+to let stand.
+
+So there is no button on the far side. Weeks past next week are dropped, not
+folded: a *Show later* was built, and taken out on his reading, because a fold
+implies a figure behind it worth opening and there is not one. This took two
+passes to land — it was first built with no forward weeks at all, on a reading
+of "pay doesn't need display until week prior" that turned out to mean the
+opposite of what it was taken for. Hours that far ahead are on the Schedule
+tab, where they are hours and not dollars.
+
+### 29.4 The mixed-rate week could not be read as a row
+
+§27 put the per-role hours under the date, and the reasoning was right — a
+gross with two rates hidden inside it cannot be checked against a paystub. The
+execution was wrong. Three roles in a week is four lines of small text in the
+first column beside three numbers that have to stay readable as numbers, and
+the row stopped looking like a row:
+
+> Sep 3
+> 12.00 h Security Officer at $17.00
+> 8.00 h Security Agent at $12.00
+> 8.00 h Training at $12.00      28.00   2.50   $413.68
+
+The rates now live behind a **Breakdown** button on the row, in a modal.
+
+**On every week, not only a mixed one.** The button was first put only on weeks
+that needed the room, which was fixing the crowding rather than the question:
+what an hour is worth, and how much of the week was overtime, are the two
+figures a gross gets checked against, and a single-rate week has both of them
+just as much as a mixed one.
+
+**Two tables, and the split is the point.** *The hours* prices what was worked
+— role, hours, an hour — and carries no money column at all. *The pay* is the
+week the way a stub says it: regular hours at the regular rate, overtime at
+time and a half, gross underneath. They are kept apart because once there is
+overtime they foot to different figures — 42 h of $18.00 work is $756 of hours
+and $774 of pay — and one column carrying both is a column that gets added up
+wrong.
+
+    The hours
+    Cook Plant ASO    42.00   $18.00
+
+    The pay
+    Regular           40.00   $18.00   $720.00
+    Overtime           2.00   $27.00    $54.00
+    Gross             42.00        –   $774.00
+
+This is the second half of what moving it out bought. The inline per-role
+lines never added up to the gross once a week had overtime in it: the premium
+is charged on the weighted average of the rates (§27) and it appeared nowhere
+on screen, so the numbers he could see did not reconcile with the one he was
+checking. Now they do, in both shapes.
+
+**Which shape depends on whether every hour has a price.** §27's identity —
+`H·r + ot·r·(m-1) == (H-ot)·r + ot·r·m` — is what lets the stub's own split be
+printed from figures `pay.js` computed the other way, and the tests hold it.
+It only holds while every hour is rated. When some are not, the regular rate is
+the average of the ones that *are* and the overtime threshold counted the ones
+that are not, so pricing the unrated hours at the average to make the rows line
+up would be inventing a rate — the one thing §27.10 says this never does. That
+week is shown the way the arithmetic actually ran instead: priced hours, the
+premium on top, and the unpriced hours named and left out of the money.
+
+A week with no overtime says so rather than dropping the row, because a
+missing row reads as a figure that failed to load rather than as the answer to
+"how much of this was overtime".
+
+The averaging is explained only on weeks that have overtime in them. On a
+mixed week the regular rate is a weighted average carried at full precision,
+so the row does not multiply out at the two decimals it is printed to —
+28.00 h at $14.14 reads as $395.92 against a stated $396.00 — and on a screen
+built for reconciling against a deposit, eight cents he cannot account for is
+worse than a sentence. That sentence was first printed on every mixed week,
+and on one with no overtime it was a paragraph about a row that is not on the
+screen: it opens on "the regular rate", which is a term that exists to work
+out overtime, under a table that says there was none.
+
+So the cents are answered where they occur, by one word in the cell —
+`$14.14 avg` — and the paragraph is kept for the week that has an overtime
+line to justify it, where it explains that line as well as the rounding.
+
+Two things stayed in the column, because they are not arithmetic: the
+unconfirmed-hours note (§20.4) and the hours-at-no-rate note. Both are about
+whether the figure beside them can be trusted at all, and that has to be
+readable without opening anything.
+
+### 29.5 Where the two flags live
+
+`pastOpen` and `payOpen` are module-level variables, deliberately not in the
+store. `renderAll()` runs on every edit, so they have to survive a redraw —
+opening the past and then editing a shift in it must not fold it away again —
+but they should not survive the app being closed. Opening it tomorrow, the
+thing to see is this week again. This is the opposite call to §28's folds, and
+for the opposite reason: a fold in Setup records a decision about a job that
+still holds next week, while these record where he happens to be looking now.
+
+### 29.6 The nav bar was not floating
+
+Reported off the screenshots above: the tab bar appeared halfway down the
+Schedule tab, over the short-rest banner, instead of pinned to the bottom.
+
+It is not a bug in the app, and it is worth recording because the report was
+entirely reasonable — it is exactly what the picture showed. Playwright's
+`fullPage: true` stitches a tall image out of a scrolling capture, and a
+`position: fixed` element is painted once, at wherever it sat in the viewport,
+and then stranded mid-image. Measured in a real viewport at the top, the
+middle and the bottom of the scroll, `nav.getBoundingClientRect().bottom`
+comes back at 915 of a 915px viewport every time.
+
+The lesson is about the screenshots rather than the CSS: a page with a fixed
+bar cannot be shown with a full-page capture. Everything above was re-shot at
+viewport size and scrolled, which is also what he is actually looking at.
+
+## 30. Built: one overlap warning, between the two, 4 September 2026
+
+§19 put the overlap warning beside *both* shifts, and said why: a double
+booking is the failure with no recovery, so two lines where the old check
+printed one "is the right trade".
+
+On the screen it was not a trade, it was the same sentence twice:
+
+> 15:00 – 01:00  DSI · Cook Plant ASO
+>   *Overlaps Tru-Point 19:15–07:15 on Sat 5 Sep by 5h 45m. He cannot work both.*
+> 19:15 – 07:15  Tru-Point · Security Officer
+>   *Overlaps DSI 15:00–01:00 on Sat 5 Sep by 5h 45m. He cannot work both.*
+
+Four lines of red for one problem, each naming the shift printed directly
+above or below it. §29.2 had just made the same argument about the rest note
+and the fix is the same: put it between the two, and the placement says which
+two it means.
+
+So it is one banner, in the gap:
+
+> **Warning — shifts overlap. Verify schedule in employer apps and adjust.**
+
+**It names neither side and states no duration.** Both were there to
+disambiguate a line that had floated away from its subject; sitting between
+them, they were describing what he could see. What replaces them is the thing
+neither said — what to do about it. The rest note has nothing to offer there
+and stops at the fact (§25), but an overlap has a next step.
+
+**And the next step is not in this app.** An earlier draft read *"Tap shift to
+adjust times or delete"*, which points at the shift editor — and editing the
+shift here fixes the screen while leaving him rostered for both. Whichever of
+the two is wrong is wrong in Homebase or in DSI's app, which is where he is
+actually double-booked and the only place it can be settled. So the banner
+sends him there.
+
+**Still not a proposal.** It does not say which of the two to change, because
+§19.4's rule holds: the feed may be right and the screenshot stale, or the
+reverse, and a warning that also gives advice is one he has to disagree with
+rather than read. It says go and look.
+
+**It is keyed on whichever of the pair starts later**, because the list is
+drawn in start order and that is the one it can be placed in front of — the
+same trick §29.2 uses, and it works across a day boundary for the same reason.
+A Trupoint night at 22:00–06:00 running into a DSI morning at 03:00 puts the
+banner at the top of Monday, which is still between the two. `clashPairs()`
+returns the pair in store order, which says nothing about which came first, so
+the comparison is made at the call site. A `Set` rather than a `Map`: a shift
+can run over two others, and what has to be said once is that this row is
+double-booked.
+
+**And it is filled now.** §25 gave the rest note grey specifically so it could
+not be mistaken for this red. §29.2 then filled the rest note — and a red
+*line* under a filled amber block is the worse warning drawn quieter, which is
+the inversion that rule existed to prevent. Both are filled, same shape, two
+colours, and the red still has only ever had this one job.
+
+The banner above the week list is untouched. It names both sides and the size
+of the overlap because up there nothing is next to anything, and because it
+exists for the case where nobody is looking at that week at all (§19).

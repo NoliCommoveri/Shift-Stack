@@ -242,10 +242,9 @@ curating. Leave the list empty and the job pays one rate, exactly as before.
 - **A near miss goes amber in review naming the rate it is about to apply.**
   The site's amber line says what will be remembered; the role's has to say
   what will be paid, because that is the part you cannot see on the row.
-- **The pay tab shows its work.** A week paid at more than one rate lists the
-  hours per role under the date — `30.00 h Cook at $20.00` — because a single
-  gross figure with two rates hidden inside it is exactly the number you cannot
-  check against a paystub.
+- **The pay tab shows its work.** Every week carries a **Breakdown** button and
+  it opens the whole sum — see below. A single gross figure with two rates
+  hidden inside it is exactly the number you cannot check against a paystub.
 - **Hours with no rate anywhere are counted and not paid**, and the week says
   so rather than showing a confident `$0.00`.
 
@@ -264,6 +263,55 @@ model it.
 Removing a role leaves its shifts named — the text stays — and drops them back
 to the job's rate. Merging two roles keeps the surviving record's rate, and the
 confirmation says which rate that is.
+
+## What the pay tab shows
+
+**Next week, this week and the three before it**, per job, newest first.
+Anything older is behind **Show earlier weeks** at the bottom — still on file,
+still counted, just not in the way of the figure you opened the tab to check.
+
+**One week forward, and only one.** Next week's pay is worth knowing while a
+thin week is still something you can do something about. A fortnight out it is
+not money, it is the rota's opinion of a week, so those weeks are not on the
+tab at all and there is no button for them. Hours that far ahead are on the
+Schedule tab, where they are hours.
+
+A week holding shifts nothing has confirmed still says so under the date, and
+so does a week with hours at no rate — those two are about whether the figure
+beside them can be trusted, so they are read without opening anything.
+
+### The breakdown
+
+Every week has one. It opens two tables:
+
+**The hours** — what you worked it as, how many, and what an hour of it pays.
+No money column, on purpose.
+
+**The pay** — the week the way a stub says it: regular hours at the regular
+rate, overtime at time and a half, and a gross the two of them add up to.
+
+    The hours
+    Cook Plant ASO    42.00   $18.00
+
+    The pay
+    Regular           40.00   $18.00   $720.00
+    Overtime           2.00   $27.00    $54.00
+    Gross             42.00        –   $774.00
+
+They are two tables because once a week has overtime in it they foot to
+different figures — 42 hours of $18.00 work is $756 of hours and $774 of pay —
+and one column carrying both is a column you will add up wrong.
+
+On a week paid at more than one rate the regular rate is a weighted average,
+marked `avg` in the cell because it is carried at full precision and so does
+not multiply out to the cent at the two decimals it is shown to. Where such a
+week has overtime, a line underneath explains that the overtime is time and a
+half *of that average* — not of whichever rate the last shift happened to be
+paid at — which is what an employer paying two rates in one week has to do. A
+week with hours at no rate anywhere is shown differently again: the priced
+hours, the overtime premium on top of them, and the unpriced hours named and
+left out of the money, because pricing them at the average would be inventing
+a rate.
 
 ## Sites
 
@@ -383,6 +431,23 @@ flagged — *"A statutory holiday falls on this day."* It is never dropped for
 you: the rota may well run that day, and a shift quietly skipped is a shift
 missed. Past weeks are never filled, and a week already covered is left alone.
 
+## What the Schedule tab shows
+
+**This week first.** The list opens on the week you are in, because that is
+what you opened it to see; **Show earlier shifts** at the top brings back
+everything before it. Nothing is dropped — a shift last Tuesday is still on
+file, still exported and still in the pay figures — it is one tap down rather
+than a week of scrolling in front of the thing you wanted.
+
+**What happens between two shifts is drawn between them.** Both the short-rest
+note and the overlap warning sit in the gap they are about, filled and in white
+so they read at scrolling speed — amber for a short rest, red for an overlap:
+
+    Heads up — short turnaround (6 hours and 45 minutes off)
+    Warning — shifts overlap. Verify schedule in employer apps and adjust.
+
+Neither names a shift, because they are the two either side of it.
+
 ## What the Schedule tab warns about
 
 Three kinds of warning sit above the week list, ordered by what they cost.
@@ -412,14 +477,22 @@ itself, and a job on screenshots will not fill itself at all.
 
 Two shifts scheduled over each other is the one failure with no recovery, so it
 is flagged in three places: on the row as you add it, in a red banner over the
-schedule, and beside both shifts in the week list. Each message names both
-sides and how long they overlap by, and stops there — which of the two is wrong
-is not something the app can know.
+schedule, and in the week list.
+
+In the week list it is **one message between the two shifts** — *"Warning —
+shifts overlap. Verify schedule in employer apps and adjust."* — rather than a
+line under each of them. Where it sits says which two it means, so it does not
+name them. It sends you to the employer's app rather than to the shift editor
+on purpose: editing the shift here fixes the screen and leaves you rostered for
+both. The banner above the list still names both sides and the size of the
+overlap, because up there nothing is next to anything.
+
+Which of the two is wrong is not something the app can know, so it is never
+guessed at. Nothing is blocked and nothing is removed automatically.
 
 Overlap is measured across midnight, not within a day: an overnight shift
 running into the next morning's is the likeliest real collision, and it is the
-one a day-by-day check would never see. Nothing is blocked and nothing is
-removed automatically.
+one a day-by-day check would never see.
 
 **Two shifts on the same day are not a warning.** Going straight from one job
 to the other is ordinary. Only hours actually scheduled twice count, so a shift
