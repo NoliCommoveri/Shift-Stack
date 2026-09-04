@@ -15,7 +15,7 @@ Everything stays on the device. Nothing is uploaded anywhere.
 4. Menu → **Add to Home screen**. Install it properly rather than bookmarking —
    that is what lets it work offline and keeps its storage.
 
-Pay rates and site names are entered in the app, not stored in the repo.
+Pay rates, roles and site names are entered in the app, not stored in the repo.
 
 ## First run
 
@@ -225,6 +225,46 @@ Anything it cannot read goes red and changes nothing. It never rounds to the
 nearest time you might have meant: `2:5` is not `02:05`. The edit dialog will
 not save while either time is unreadable.
 
+## Roles and pay rates
+
+One job can pay more than one rate. Cook and Dishwasher at the same restaurant
+are different money, and so are Mobile Guard and Site Supervisor at the same
+security firm.
+
+Under each job in **Setup** there is a **Roles** list, the same shape as the
+Sites list below it: a name, the spellings that role answers to, and an
+**hourly rate**. A role with no rate of its own is paid the job's rate, so you
+only need to declare one where it differs — or where the name is worth
+curating. Leave the list empty and the job pays one rate, exactly as before.
+
+- **A screenshot naming a role the app knows is filed against it however badly
+  it was read**, and priced from the record rather than from the text.
+- **A near miss goes amber in review naming the rate it is about to apply.**
+  The site's amber line says what will be remembered; the role's has to say
+  what will be paid, because that is the part you cannot see on the row.
+- **The pay tab shows its work.** A week paid at more than one rate lists the
+  hours per role under the date — `30.00 h Cook at $20.00` — because a single
+  gross figure with two rates hidden inside it is exactly the number you cannot
+  check against a paystub.
+- **Hours with no rate anywhere are counted and not paid**, and the week says
+  so rather than showing a confident `$0.00`.
+
+**Overtime with two rates** is paid on the weighted-average regular rate: every
+hour at its own rate, and the overtime premium on the average of them. This is
+what an employer paying two rates in one week is required to do, and it means
+the answer does not depend on which shifts happened to fall last in the week —
+paid chronologically, moving one shift from Tuesday to Saturday would change
+what you are owed for hours already worked. A week paid at a single rate comes
+out to the cent where it always did.
+
+Rates are per role, not per site. If the same job title ever pays differently
+at two different places, that is a different arrangement and this does not
+model it.
+
+Removing a role leaves its shifts named — the text stays — and drops them back
+to the job's rate. Merging two roles keeps the surviving record's rate, and the
+confirmation says which rate that is.
+
 ## Sites
 
 TrackTik prints a role and a place in one line — `Mobile Guard | De la
@@ -264,6 +304,20 @@ Archiving a site keeps it on the shifts that name it and stops new reads
 matching it. Removing one drops its shifts back to the text that was read, so
 nothing loses its name.
 
+## Folding Setup away
+
+Setup got long once every job carried a rota, a role table and a site table.
+Each job folds, and each section inside it folds. What is folded stays folded —
+across edits, and across restarts.
+
+A shut fold says what is in it: the pay section shows the rate, the pay week
+and the overtime threshold; the rota shows how many shifts are declared and how
+many can fill a week; Roles and Sites name their records. A job shut shows a
+rate range and its counts. Nothing is hidden that you cannot see the shape of.
+
+Jobs start shut, because a job set up months ago is one you are not editing. A
+job you have just added starts open, because it is a form and not a record yet.
+
 ## Declared shifts
 
 am/pm rides on a single character, and a misread puts a shift twelve hours out
@@ -288,6 +342,17 @@ already filed as a list to pick from; you choosing them is the point.
 Ticking days also says the pattern can fill a week; leave every day unticked
 and it is only ever used for checking. Whether or not any are declared, a shift
 under an hour or over fourteen is flagged as an unlikely length.
+
+Each declared shift can also name **the role and the site it normally runs
+as**. Both are optional, and both are what a week filled from the rota gets
+filed under — so a generated week arrives already priced at the right rate
+instead of being guessed at from whichever shift on file happened to share its
+times. The row says what it will do: *"Runs Mon Tue Wed Fri, 15:00–23:00 as
+Mobile Guard · De la Montagne, at $22.00 an hour."*
+
+The declared role is never applied to a shift read off a screenshot, even one
+that matched this pattern exactly. Inferring what you were paid from what time
+you started is the same kind of guess the check above exists to catch.
 
 Calendar rows and shifts typed by hand are never corrected this way. Those
 times are the employer's own numbers, or yours.
@@ -362,7 +427,7 @@ ending at 15:00 and one starting at 15:00 say nothing.
 
 ## Development
 
-Five modules, all pure functions — no DOM, no storage. `parser.js` turns OCR
+Six modules, all pure functions — no DOM, no storage. `parser.js` turns OCR
 text into shift rows and `ics.js` does the same for a calendar file; they share
 nothing but the row shape, so both land in the same review screen with the same
 flags and the same commit path. `patterns.js` reads nothing at all — it takes a
@@ -370,7 +435,11 @@ finished row and the shifts declared for its job and decides what to do about
 the difference, and it also turns a declared rota into a week of rows.
 `holidays.js` is a calendar: which dates are statutory holidays, worked out by
 rule so nothing expires. `sites.js` decides when two spellings are the same
-place, and owns the aliases and the merge. Each loads as a plain script in the
+place — or the same job title, since the matching never knew the difference —
+and owns the aliases and the merge. `pay.js` turns hours with a price on them
+into money, including the weighted-average overtime that two rates in one week
+require; it lives apart from the app because it is the one calculation here
+that gets checked against a bank deposit. Each loads as a plain script in the
 browser and is required directly by the tests. There is still no build step and
 the app has no runtime dependencies.
 
@@ -386,16 +455,17 @@ do not depend on where the tests are run.
 Fixtures marked PROVISIONAL are typed from the vendors' user guides; ones
 marked TRANSCRIBED are real schedules read off screenshots by eye rather than
 by OCR. Neither kind proves the reading of the text, only the understanding of
-the layout. An unmarked fixture is pasted OCR output. `patterns.js`, `holidays.js` and
-`sites.js` have no fixtures — they read nothing, so their tests are stated
-cases, dates checked against a calendar, and misspellings of the two real site
-names rather than samples.
+the layout. An unmarked fixture is pasted OCR output. `patterns.js`, `holidays.js`,
+`sites.js` and `pay.js` have no fixtures — they read nothing, so their tests are
+stated cases, dates checked against a calendar, misspellings of the two real
+site names, and weeks of hours worked out by hand rather than samples.
 
 The app is not carrying live data yet, so there are no schema migrations. When
 the stored shape changes, use **Setup → Danger zone → Delete everything and
-start over**. See PROJECT.md §7. The site table did not need one: `siteId` is
-nullable and `label` is kept, so a record written before it reads back meaning
-exactly what it always meant.
+start over**. See PROJECT.md §7. Neither the site table nor the role
+table needed one: `siteId` and `roleId` are nullable and `label` and `role` are
+kept as text, so a record written before either reads back meaning exactly what
+it always meant, and prices at the job's rate.
 
 ## Known limits
 
@@ -417,6 +487,9 @@ exactly what it always meant.
   not a prediction of the deposit. Overtime is counted separately per employer,
   and premiums, stat holidays and retro pay are not modelled. A week holding
   shifts filled from the rota says how many of its hours are assumed.
+- Rates vary by role, not by site. If the same job title pays differently at
+  two of an employer's locations, this does not model it — the rate follows the
+  role wherever it is worked.
 - The holiday lists are Québec's and the US federal one, and they say when a
   holiday falls, not whether your employer observes it or whether you are
   working it. That is why a holiday only ever flags a generated shift and never

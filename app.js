@@ -11,12 +11,21 @@ const DEFAULTS = {
   // the common read is a shift resolving its `siteId` — one lookup, no job to
   // find first — and the by-job list is only ever wanted on the Setup screen.
   sites: [],
+  // Job titles, with the spellings each one answers to and what an hour of it
+  // pays (§27). Flat and carrying its own `companyId` for the same reason the
+  // sites are: the common read is a shift resolving its `roleId`.
+  roles: [],
   shifts: [],
   // Shifts that were deleted after a calendar had already been told about
   // them. Not history — a to-do list with one item on it: say the event is
   // off. Emptied the moment that has been said (§22).
   tombstones: [],
-  settings: { leads: [12, 2], feedMode: 'subscribe', icsUrl: '' }
+  // Which sections of the Setup screen are folded open (§28). Stored rather
+  // than held in memory because the screen is rebuilt on almost every edit —
+  // a fold that sprang back open each time he renamed a role would be worse
+  // than no fold at all — and because collapsing a job he has finished setting
+  // up is a decision that should still hold next week.
+  settings: { leads: [12, 2], feedMode: 'subscribe', icsUrl: '', open: {} }
 };
 let S = structuredClone(DEFAULTS);
 
@@ -191,6 +200,7 @@ const FLAG_MOVED = 'moved';
 const FLAG_CHANGED = 'changed';
 const FLAG_HOLIDAY = 'holiday';
 const FLAG_SITE = 'site';
+const FLAG_ROLE = 'role';
 /* A value here may be a function of the row. Most of these sentences are the
    same every time they are said; the site one has to name two spellings, and
    naming them is the whole content of it. */
@@ -210,6 +220,16 @@ const FLAG_TEXT = {
   [FLAG_HOLIDAY]: 'A statutory holiday falls on this day \u2014 remove this row if he is not working it.',
   [FLAG_SITE]: p => `Read as \u201c${p.siteRaw}\u201d and taken as `
     + `${(siteById(p.siteId) || {}).name} \u2014 adding this row remembers that spelling.`,
+  // The site's sentence, plus the money. A near match on a role decides what
+  // an hour of it is worth, and §27 is emphatic that a figure checked against
+  // a deposit weeks later must never rest on a guess nobody was shown.
+  [FLAG_ROLE]: p => {
+    const role = roleById(p.roleId) || {};
+    const rate = rateFor(p, role, coById(p.companyId));
+    return `Read as \u201c${p.roleRaw}\u201d and taken as ${role.name}`
+      + (rate == null ? '' : `, paid $${rate.toFixed(2)} an hour`)
+      + ' \u2014 adding this row remembers that spelling.';
+  },
   [ICS_FLAG.NOEND]: 'The calendar gave no end time \u2014 set one below.',
   [ICS_FLAG.RECUR]: 'A repeating event \u2014 only the first was read.',
   [ICS_FLAG.ZONE]:  'The time zone was not recognised \u2014 times taken as written.',
@@ -228,59 +248,95 @@ const FLAG_TEXT = {
    -------------------------------------------------------------------- */
 const siteById = id => (S.sites || []).find(s => s.id === id);
 const sitesFor = companyId => (S.sites || []).filter(s => s.companyId === companyId);
+const roleById = id => (S.roles || []).find(r => r.id === id);
+const rolesFor = companyId => (S.roles || []).filter(r => r.companyId === companyId);
+
+/* What this shift pays an hour, or null if nothing has said. */
+const shiftRate = s => rateFor(s, roleById(s.roleId), coById(s.companyId));
 
 /* What names this shift on screen, and the address the calendar should carry.
    Both go through the same two functions everywhere, so a shift with no site
    reads as its label in every single place rather than in most of them. */
-const shiftWhere = s => whereText(s, siteById(s.siteId), ' \u00b7 ');
+const shiftWhere = s => whereText(s, siteById(s.siteId), ' \u00b7 ', roleById(s.roleId));
 const shiftAddress = s => addressFor(s, siteById(s.siteId));
 
-/* The part of a label that could name a place, and the role beside it. The
-   right of the separator the employer printed (§17.4) is a place and the left
-   is a role; with no pipe there is no printed boundary, so the whole label is
-   the only candidate there is — and it becomes a site only by matching a
-   record somebody made, never by being read. One function, because the review
-   path, the edit dialog and the build-from-file list all have to agree on it. */
-function siteParts(label){
+/* Splitting a label into the two things it might be naming.
+
+   Two of them, because matching and suggesting want different answers to the
+   same ambiguity. `labelCandidates` is for the menus: the whole string is
+   offered to both lists, because a label with no separator in it could be
+   naming either and a menu is a question, not an answer. `labelParts` has to
+   choose one, so it asks the tables — `readLabel` in sites.js is the rule, and
+   this is the half that knows which job's records to ask about. */
+function labelCandidates(label){
   const { role, site } = splitLabel(label);
-  return { role: site ? role : '', raw: (site || role || '').trim() };
+  return site ? { role: role.trim(), site: site.trim() }
+              : { role: role.trim(), site: role.trim() };
 }
-const siteCandidate = label => siteParts(label).raw;
 
-/* Resolve a review row against the table. Runs before the row is compared with
-   anything on file, because "same place" is an identity question once sites
-   exist and a spelling question only when they do not.
+const labelParts = (label, companyId) =>
+  readLabel(label, sitesFor(companyId), rolesFor(companyId), splitLabel);
 
-   `siteRaw` is kept on the row: it is what was actually read, and it is what
-   gets recorded as a spelling if he confirms the match. */
-function applySite(p){
-  const { role, raw } = siteParts(p.label);
-  p.siteRaw = raw;
-  p.role = role;
-  // A site belongs to one job, so changing the job on a review row unsets it
-  // and the row is matched again against the sites the new job has. Undated
-  // TrackTik screens make that a routine correction (§16.1), not a rare one.
-  const held = siteById(p.siteId);
-  if(held && held.companyId !== p.companyId){ p.siteId = null; p.siteHow = ''; }
+/* Resolve a review row against both tables. Runs before the row is compared
+   with anything on file, because "same shift" is an identity question once the
+   records exist and a spelling question only when they do not.
+
+   `siteRaw` and `roleRaw` are kept on the row: they are what was actually
+   read, and they are what get recorded as spellings if he confirms the match.
+
+   The two halves are deliberately independent. A screenshot naming a place the
+   app knows and a job title it does not must still resolve the half it can —
+   the alternative is a row that files under nothing because one word of it was
+   unfamiliar. */
+function applyNames(p){
+  const parts = labelParts(p.label, p.companyId);
+  p.siteRaw = parts.siteRaw;
+  p.roleRaw = parts.roleRaw;
+  // `role` is the text that was read, kept for the same reason `label` is: it
+  // is what the shift reads as when its role record is later deleted.
+  p.role = parts.roleRaw;
+
+  // A site and a role both belong to one job, so changing the job on a review
+  // row unsets them and the row is matched again against the new job's tables.
+  // Undated TrackTik screens make that a routine correction (§16.1).
+  const heldSite = siteById(p.siteId);
+  if(heldSite && heldSite.companyId !== p.companyId){ p.siteId = null; p.siteHow = ''; }
+  const heldRole = roleById(p.roleId);
+  if(heldRole && heldRole.companyId !== p.companyId){ p.roleId = null; p.roleHow = ''; }
+
   if(!p.siteId){
-    const m = matchSite(p.siteRaw, sitesFor(p.companyId));
-    p.siteId = m.site ? m.site.id : null;
+    const m = matchName(p.siteRaw, sitesFor(p.companyId));
+    p.siteId = m.rec ? m.rec.id : null;
     p.siteHow = m.how;
   }else if(!p.siteHow){
     p.siteHow = 'kept';               // arrived resolved; nothing was read
   }
-  siteFlag(p);
+  if(!p.roleId){
+    const m = matchName(p.roleRaw, rolesFor(p.companyId));
+    p.roleId = m.rec ? m.rec.id : null;
+    p.roleHow = m.how;
+  }else if(!p.roleHow){
+    p.roleHow = 'kept';
+  }
+  // A matched role names the shift better than the text that was read, and it
+  // is the name every screen and every event title will use from here.
+  const rec = roleById(p.roleId);
+  if(rec) p.role = rec.name;
+  nameFlags(p);
 }
 
-/* Amber only for the near miss. An exact hit says nothing worth reading, and a
-   row that matched nothing is not an error — §8.1 chose a nullable `siteId`
-   precisely so that a name nobody recognises still files, under the text that
-   was read. What has to be looked at is the case where the app has decided two
-   different spellings are the same place, because that is the one it can be
-   wrong about, and the one that is about to be remembered. */
-function siteFlag(p){
-  p.flags = (p.flags || []).filter(f => f !== FLAG_SITE);
+/* Amber only for the near miss, on either table. An exact hit says nothing
+   worth reading, and a row that matched nothing is not an error — §8.1 chose a
+   nullable `siteId` precisely so that a name nobody recognises still files,
+   under the text that was read, and §27 chose a nullable `roleId` the same way
+   so that an unknown job title falls back to the job's own rate rather than
+   blocking the import. What has to be looked at is the case where the app has
+   decided two different spellings are the same thing, because that is the one
+   it can be wrong about, and the one that is about to be remembered. */
+function nameFlags(p){
+  p.flags = (p.flags || []).filter(f => f !== FLAG_SITE && f !== FLAG_ROLE);
   if(p.siteHow === 'near') p.flags = [...p.flags, FLAG_SITE];
+  if(p.roleHow === 'near') p.flags = [...p.flags, FLAG_ROLE];
 }
 
 /* The site column of a review row. Archived sites are off the list unless the
@@ -296,7 +352,26 @@ function siteOptions(p){
   const opts = [`<option value=""${p.siteId ? '' : ' selected'}>\u2014 no site \u2014</option>`];
   live.forEach(s => opts.push(
     `<option value="${esc(s.id)}"${s.id === p.siteId ? ' selected' : ''}>${esc(s.name)}</option>`));
-  if(p.siteRaw) opts.push(`<option value="+">+ Add \u201c${esc(p.siteRaw)}\u201d\u2026</option>`);
+  opts.push(`<option value="+">+ Add ${
+    p.siteRaw ? `\u201c${esc(p.siteRaw)}\u201d` : 'a site'}\u2026</option>`);
+  return opts.join('');
+}
+
+/* The same, for roles, with the rate on the option. It is there because this
+   is the moment the choice is made and the rate is the entire reason the role
+   table exists — picking between "Cook" and "Cook Plant ASO" with the money
+   printed beside each is a different act from picking between two words. */
+function roleOptions(p){
+  const co = coById(p.companyId);
+  const live = rolesFor(p.companyId).filter(r => !r.archived || r.id === p.roleId);
+  const base = co && co.rate != null && co.rate !== '' ? +co.rate : null;
+  const opts = [`<option value=""${p.roleId ? '' : ' selected'}>\u2014 no role${
+    base == null ? '' : `, $${base.toFixed(2)}`} \u2014</option>`];
+  live.forEach(r => opts.push(
+    `<option value="${esc(r.id)}"${r.id === p.roleId ? ' selected' : ''}>${esc(r.name)}${
+      r.rate == null ? '' : ` \u2014 $${(+r.rate).toFixed(2)}`}</option>`));
+  opts.push(`<option value="+">+ Add ${
+    p.roleRaw ? `\u201c${esc(p.roleRaw)}\u201d` : 'a role'}\u2026</option>`);
   return opts.join('');
 }
 
@@ -313,38 +388,70 @@ function pickSite(p, v){
     p.siteId = v || null;
     p.siteHow = v ? 'set' : 'none';
   }
-  siteFlag(p);
+  nameFlags(p);
 }
 
-/* The confirmation half of §8.1's "aliases are the real prize". A row reaching
-   the commit path has been through the review screen with its match named on
-   it, so whichever site it is pointing at then is the one he is confirming,
-   and the spelling that was read becomes a spelling that site answers to. Next
-   month the same misreading is an exact hit and says nothing.
+/* Adding a role asks for the rate as well as the name, in the same breath. It
+   could be left to the Setup screen, and then the first week of a new job
+   title would quietly price itself at the job's default and look right. Asking
+   here costs one more tap at the only moment somebody is thinking about this
+   role at all. Empty is a real answer and means the job's own rate stands. */
+function pickRole(p, v){
+  if(v === '+'){
+    const name = prompt('Name this role the way it should read everywhere', p.roleRaw || '');
+    if(!name || !name.trim()) return;         // cancelled: the row is unchanged
+    const co = coById(p.companyId);
+    const ask = prompt(`What does an hour of ${name.trim()} pay?`
+      + (co && co.rate ? ` Leave it empty to use ${co.name}\u2019s $${(+co.rate).toFixed(2)}.`
+                       : ' Leave it empty if it is the same as the rest of the job.'), '');
+    if(ask === null) return;                  // cancelled at the rate, not at the name
+    const rate = ask.trim() === '' ? null : +ask.trim();
+    const role = newRole(uid(), p.companyId, name.trim(),
+                         Number.isFinite(rate) && rate >= 0 ? rate : null);
+    S.roles.push(role);
+    p.roleId = role.id;
+    p.roleHow = 'set';
+    p.role = role.name;
+    save();
+  }else{
+    p.roleId = v || null;
+    p.roleHow = v ? 'set' : 'none';
+    const rec = roleById(p.roleId);
+    p.role = rec ? rec.name : (p.roleRaw || '');
+  }
+  nameFlags(p);
+}
+
+/* The confirmation half of §8.1's "aliases are the real prize", now for both
+   tables. A row reaching the commit path has been through the review screen
+   with its matches named on it, so whichever records it is pointing at then
+   are the ones he is confirming, and the spellings that were read become
+   spellings those records answer to. Next month the same misreading is an
+   exact hit and says nothing.
 
    Only the two cases where something was actually decided record anything:
    `near`, where the app guessed and he let it stand, and `set`, where he
-   pointed the row at a site himself — which is the more valuable of the two,
+   pointed the row at a record himself — which is the more valuable of the two,
    because it is the spelling the matcher could not get to on its own. An
-   `exact` hit has nothing to teach, and a site carried in with a generated row
-   was never read off anything.
+   `exact` hit has nothing to teach, and a record carried in with a generated
+   row was never read off anything.
 
-   A spelling learned in error is removable on the site's card in Setup, which
-   is what makes this an act of committing rather than one more tick-box on
-   every amber row. */
-function learnSpelling(p){
-  if(!p.siteId) return;
-  if(p.siteHow !== 'near' && p.siteHow !== 'set') return;
-  const site = siteById(p.siteId);
-  if(site) addAlias(site, p.siteRaw);
+   A spelling learned in error is removable on the record's card in Setup,
+   which is what makes this an act of committing rather than one more tick-box
+   on every amber row. */
+function learnSpellings(p){
+  const teach = (rec, how, raw) => {
+    if(!rec || (how !== 'near' && how !== 'set')) return;
+    addAlias(rec, raw);
+  };
+  teach(siteById(p.siteId), p.siteHow, p.siteRaw);
+  teach(roleById(p.roleId), p.roleHow, p.roleRaw);
 }
 
 /* ---------- pay maths ---------------------------------------------------- */
-function paidMins(sh, co){
-  let m = durMins(sh);
-  if(co && co.breakMins && co.breakAfterHrs && m >= co.breakAfterHrs*60) m -= co.breakMins;
-  return Math.max(0, m);
-}
+/* The clock, less the job's unpaid break. `pay.js` owns the rule; what is here
+   is the shift record it has to be read off. */
+const shiftPaidMins = (sh, co) => paidMins({ mins: durMins(sh) }, co);
 function weeksFor(co){
   const map = new Map();
   S.shifts.filter(s => s.companyId === co.id).forEach(s => {
@@ -354,14 +461,24 @@ function weeksFor(co){
   });
   return [...map.entries()].sort((a,b) => b[0].localeCompare(a[0]));
 }
+/* One week's figures. The arithmetic is `pay.js`, and deliberately so — §27
+   put it in a file of its own the moment a week could hold two rates, because
+   a mixed-rate gross is checked against a real deposit and is the last thing
+   in the app that should live where nothing can test it.
+
+   What is left here is the lookup: which role each shift is, and therefore
+   what its hours cost. A shift with no role, or a role with no rate of its
+   own, prices at the job's rate exactly as every shift did before §27. */
 function weekTotals(shifts, co){
-  const m = shifts.reduce((a,s) => a + paidMins(s, co), 0);
-  const hrs = m/60;
-  const rate = +co.rate || 0;
-  let base = hrs, ot = 0;
-  if(co.otAfterHrs && hrs > co.otAfterHrs){ base = co.otAfterHrs; ot = hrs - co.otAfterHrs; }
-  const gross = base*rate + ot*rate*(+co.otMult || 1.5);
-  return { mins: m, hrs, base, ot, gross };
+  return weekPay(shifts.map(s => {
+    const role = roleById(s.roleId);
+    return {
+      mins: shiftPaidMins(s, co),
+      rate: rateFor(s, role, co),
+      key: role ? role.id : 'co',
+      name: role ? role.name : (co.name || 'the job\u2019s rate')
+    };
+  }), co);
 }
 
 /* ---------- rendering ---------------------------------------------------- */
@@ -374,6 +491,116 @@ const el = (tag, cls, html) => {
 };
 const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const coById = id => S.companies.find(c => c.id === id);
+
+/* -- folding sections away (§28) ------------------------------------------
+   The Setup screen grew past five thousand pixels once every job carried a
+   rota, a role table and a site table, and it is a screen used on a phone. So
+   each job is a fold, and each section inside it is a fold.
+
+   The rule the whole thing rests on: a collapsed fold has to say enough that
+   opening it is a choice rather than a search. A summary that reads "Roles"
+   and nothing else is not a fold, it is a thing hidden. So every one of them
+   carries its own state — the rates, the counts, the names — and the screen
+   stays readable folded shut.
+
+   State lives in `S.settings.open`, keyed `<jobId>` for a job and
+   `<jobId>/<section>` for a section inside it. Absent means shut: a job set up
+   months ago is a job he is not editing. The one exception is a job just
+   added, which `#addco` opens by hand, because a job with nothing in it is a
+   form and not a record. */
+const foldOpen = (key, fallback) => {
+  const v = (S.settings.open || {})[key];
+  return v === undefined ? !!fallback : !!v;
+};
+
+/* Returns the `<details>` and the empty body to fill. `head` is the fold's
+   name and `note` is what it says while shut — both are HTML, and callers
+   escape their own. */
+function fold(key, head, note, open){
+  const d = el('details', 'fold');
+  d.open = foldOpen(key, open);
+  d.appendChild(el('summary', null,
+    `<span class="foldname">${head}</span><span class="foldnote">${note || ''}</span>`));
+  const body = el('div', 'foldbody');
+  d.appendChild(body);
+  // Assigned after `open` is set, and still guarded: the toggle event is
+  // queued rather than immediate, so a render can deliver one saying exactly
+  // what was already stored, and writing that back would put the store on
+  // every redraw for nothing.
+  d.ontoggle = () => {
+    S.settings.open = S.settings.open || {};
+    if(S.settings.open[key] === d.open) return;
+    S.settings.open[key] = d.open;
+    save();
+  };
+  return { d, body };
+}
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
+
+/* What each fold says while it is shut. Kept together because they have to
+   read as one voice down the card, and because the temptation in each of them
+   separately is to say more than a shut fold can hold. */
+const money = n => '$' + (+n).toFixed(2);
+
+function payNote(co){
+  const bits = [];
+  bits.push(co.rate == null || co.rate === '' ? 'no rate set' : money(co.rate) + '/h');
+  bits.push('week from ' + DAYNAMES[co.weekStart ?? 0]);
+  if(co.otAfterHrs) bits.push(`OT after ${co.otAfterHrs} h`);
+  if(co.breakMins && co.breakAfterHrs)
+    bits.push(`${co.breakMins} min off shifts over ${co.breakAfterHrs} h`);
+  return esc(bits.join(' \u00b7 '));
+}
+
+function appNote(co){
+  const bits = [];
+  if(co.pkg) bits.push(co.pkg);
+  if(co.icsMatch) bits.push(`only \u201c${co.icsMatch}\u201d`);
+  if(co.holidays){
+    const h = holidayPlaces().find(x => x.id === co.holidays);
+    if(h) bits.push(h.name);
+  }
+  return esc(bits.length ? bits.join(' \u00b7 ') : 'nothing set');
+}
+
+function rotaNote(co){
+  const pats = validPatterns(co.patterns);
+  if(!pats.length) return 'none declared';
+  const fills = pats.filter(p => p.days).length;
+  return esc(plural(pats.length, 'declared shift')
+    + (fills ? `, ${fills} can fill a week` : ', none fills a week'));
+}
+
+/* The two tables name themselves. A count alone would not answer the question
+   he opens this section to ask, which is nearly always "is the one I am
+   thinking of in here". Archived records are counted apart rather than left
+   out: they still match nothing and still hold shifts. */
+function tableNote(list, none, extra){
+  const live = list.filter(x => !x.archived), gone = list.length - live.length;
+  if(!list.length) return esc(none);
+  const names = live.map(x => x.name).join(', ');
+  const tail = gone ? ` \u00b7 ${gone} archived` : '';
+  return esc(names + (extra ? extra(live) : '') + tail);
+}
+
+/* The job's own line. The rate range is first because it is the thing two jobs
+   differ by at a glance, and it spans the roles: a job whose roles pay $22 and
+   $28 does not have one rate to print. */
+function jobNote(co){
+  const roles = rolesFor(co.id).filter(r => !r.archived);
+  const rates = [...new Set(roles.map(r => r.rate).filter(r => r != null).map(Number)
+    .concat(co.rate == null || co.rate === '' ? [] : [+co.rate]))].sort((a, b) => a - b);
+  const bits = [rates.length === 0 ? 'no rate set'
+    : rates.length === 1 ? money(rates[0]) + '/h'
+    : `${money(rates[0])}\u2013${money(rates[rates.length - 1])}/h`];
+  const pats = validPatterns(co.patterns).length;
+  if(pats) bits.push(plural(pats, 'declared shift'));
+  if(roles.length) bits.push(plural(roles.length, 'role'));
+  const sites = sitesFor(co.id).filter(x => !x.archived).length;
+  if(sites) bits.push(plural(sites, 'site'));
+  return esc(bits.join(' \u00b7 '));
+}
 
 /* -- typing a time (§24) --------------------------------------------------
    fmtTime() above refuses to print am/pm anywhere, for the reason stated
@@ -924,12 +1151,24 @@ function renderPay(){
       // deposit weeks later when the screenshot is long gone, must not quietly
       // rest on a rota.
       const assumed = weekTotals(shifts.filter(isProposed), co);
+      // A week paid at more than one rate has to be able to show its work
+      // (§27). The gross is a weighted average behind the scenes, and a single
+      // figure with two rates hidden inside it is exactly the sort of number
+      // that cannot be checked against a pay stub — so the hours are named per
+      // role, under the date, in the same place the rota note goes.
+      const notes = [];
+      if(assumed.hrs) notes.push(`${assumed.hrs.toFixed(2)} h from the rota, unconfirmed`);
+      if(w.mixed)
+        w.byRate.filter(r => r.rate != null).forEach(r =>
+          notes.push(`${r.hrs.toFixed(2)} h ${esc(r.name)} at $${r.rate.toFixed(2)}`));
+      if(w.unratedHrs)
+        notes.push(`${w.unratedHrs.toFixed(2)} h at no rate set, and not in the gross`);
       const tr = el('tr', assumed.hrs ? 'assumed' : null);
       tr.innerHTML = `<td>${MONTHNAMES[d.getMonth()].slice(0,3)} ${d.getDate()}${
-          assumed.hrs ? `<span class="tiny soft"><br>${assumed.hrs.toFixed(2)} h from the rota, unconfirmed</span>` : ''}</td>
+          notes.length ? `<span class="tiny soft"><br>${notes.join('<br>')}</span>` : ''}</td>
         <td class="n">${w.hrs.toFixed(2)}</td>
         <td class="n">${w.ot ? w.ot.toFixed(2) : '–'}</td>
-        <td class="n">${co.rate ? '$' + w.gross.toFixed(2) : '–'}</td>`;
+        <td class="n">${w.rated ? '$' + w.gross.toFixed(2) : '–'}</td>`;
       t.appendChild(tr);
 
       const cur = allWeeks.get(ws) || { hrs:0, gross:0 };
@@ -986,17 +1225,33 @@ function renderPatterns(co, host, sugHost){
         ${clockInput(pat.start, 'aria-label="Starts"')}
         <span class="soft mono">to</span>
         ${clockInput(pat.end, 'aria-label="Ends"')}
+        <select class="patrole" aria-label="Role">${roleOptions(
+          { companyId: co.id, roleId: pat.roleId || null })}</select>
+        <select class="patsite" aria-label="Site">${siteOptions(
+          { companyId: co.id, siteId: pat.siteId || null })}</select>
         <button class="kill" type="button" aria-label="Remove this shift">&times;</button>
       </div>
       <p class="patwhat"></p>`;
 
     const what = row.querySelector('.patwhat');
     const say = () => {
+      // What the declared role and site are actually for: they are what a
+      // generated week is filed under. Said here rather than left to be
+      // discovered, because the field that silently prices a shift is exactly
+      // the field that has to say it is doing that (§27).
+      const role = roleById(pat.roleId), site = siteById(pat.siteId);
+      const rate = rateFor({}, role, co);
+      const named = [role && role.name, site && site.name].filter(Boolean).join(' \u00b7 ');
+      const money = role && role.rate != null ? `, at $${(+role.rate).toFixed(2)} an hour`
+                  : rate != null ? `, at the job\u2019s $${rate.toFixed(2)}` : '';
       what.textContent =
         (!pat.start || !pat.end) ? 'Set both times \u2014 an unfinished shift is ignored.'
         : (pat.days && pat.days.length)
-          ? `Runs ${patternDays(pat)}, ${pat.start}\u2013${pat.end}. A week can be filled from this.`
-          : `${pat.start}\u2013${pat.end}, any day. Checked against, never used to fill a week.`;
+          ? `Runs ${patternDays(pat)}, ${pat.start}\u2013${pat.end}`
+            + (named ? ` as ${named}${money}` : '')
+            + '. A week filled from this is filed under exactly that.'
+          : `${pat.start}\u2013${pat.end}, any day. Checked against, never used to fill a week`
+            + (named ? `, so ${named} is only a note here.` : '.');
     };
     say();
 
@@ -1014,6 +1269,30 @@ function renderPatterns(co, host, sugHost){
     const [st, en] = row.querySelectorAll('input');
     bindClock(st, v => { pat.start = v; say(); save(); }, { allowEmpty: true });
     bindClock(en, v => { pat.end = v; say(); save(); }, { allowEmpty: true });
+
+    // The standard role and place for this declared shift (§27). Both are
+    // optional and both go through the same pickers the review screen uses, so
+    // "+ Add …" here creates a real record with a rate rather than a string
+    // that looks like one. Adding one has to redraw the whole section: a role
+    // made on one declared shift belongs to the job, and every other row's
+    // list is now out of date.
+    const rolesel = row.querySelector('.patrole');
+    rolesel.onchange = () => {
+      const hold = { companyId: co.id, roleId: pat.roleId || null, roleRaw: '' };
+      pickRole(hold, rolesel.value);
+      if(hold.roleId) pat.roleId = hold.roleId; else delete pat.roleId;
+      // Redrawn whole rather than in place: cancelling the prompt has to put
+      // the select back, and a role made here belongs to the job, so every
+      // other declared shift's list is out of date the moment it exists.
+      save(); renderPatterns(co, host, sugHost);
+    };
+    const sitesel = row.querySelector('.patsite');
+    sitesel.onchange = () => {
+      const hold = { companyId: co.id, siteId: pat.siteId || null, siteRaw: '' };
+      pickSite(hold, sitesel.value);
+      if(hold.siteId) pat.siteId = hold.siteId; else delete pat.siteId;
+      save(); renderPatterns(co, host, sugHost);
+    };
     row.querySelector('.kill').onclick = () => {
       co.patterns.splice(i, 1);
       save(); renderPatterns(co, host, sugHost);
@@ -1093,7 +1372,7 @@ function renderSites(co, host, sugHost){
 
   mine.forEach(site => {
     const used = S.shifts.filter(x => x.siteId === site.id).length;
-    const card = el('div','site' + (site.archived ? ' archived' : ''));
+    const card = el('div','rec' + (site.archived ? ' archived' : ''));
     card.innerHTML = `
       <div class="grid2">
         <label class="f"><span>Name</span><input data-s="name" type="text" value="${esc(site.name)}"></label>
@@ -1215,7 +1494,8 @@ function renderSites(co, host, sugHost){
 function renderSiteSuggestions(co, siteHost, host){
   host.innerHTML = '';
   const filed = S.shifts.filter(s => s.companyId === co.id);
-  const sug = suggestSites(filed, sitesFor(co.id), siteCandidate);
+  const sug = suggestNames(filed, sitesFor(co.id),
+                           x => labelCandidates(x.label).site, x => x.siteId);
 
   host.appendChild(el('p','tiny soft', !filed.length
     ? 'Nothing on file for this job yet.'
@@ -1242,8 +1522,8 @@ function renderSiteSuggestions(co, siteHost, host){
       // this site, not only the ones spelled exactly like the row: the near
       // misses are the ones that made a site table worth having.
       S.shifts.filter(s => s.companyId === co.id && !s.siteId).forEach(s => {
-        const { role, raw } = siteParts(s.label);
-        if(matchSite(raw, [site]).site){ s.siteId = site.id; s.role = role; }
+        const c = labelCandidates(s.label);
+        if(matchName(c.site, [site]).rec) s.siteId = site.id;
       });
       save();
       // Not renderAll(): that rebuilds this card and leaves these two panes
@@ -1252,6 +1532,208 @@ function renderSiteSuggestions(co, siteHost, host){
       renderSchedule(); renderNext();
       renderSites(co, siteHost, host);
       renderSiteSuggestions(co, siteHost, host);
+    };
+    r.appendChild(use);
+    host.appendChild(r);
+  });
+}
+
+/* -- the role table, in the job card (§27) --
+   One card per job title. The name is what the calendar and every screen say;
+   the rate is why this section exists; the spellings are what stop the same
+   misreading needing the same decision every month.
+
+   Deliberately the same card as a site, down to the merge control, because it
+   is the same problem — OCR inventing spellings of a name — and a second
+   answer to it, worded differently, would be one more thing to learn. What is
+   not the same is the consequence of getting it wrong: merging two sites
+   misfiles a place, merging two roles changes what an hour is worth, so the
+   confirmations here say the money out loud. */
+function renderRoles(co, host, sugHost){
+  host.innerHTML = '';
+  const mine = rolesFor(co.id);
+  if(!mine.length)
+    host.appendChild(el('p','tiny soft','None yet. Every shift is paid the job\u2019s own rate. '
+      + 'Add one here, or pick \u201cAdd \u2026\u201d on a row in the review list when a screenshot names it.'));
+
+  mine.forEach(role => {
+    const used = S.shifts.filter(x => x.roleId === role.id).length;
+    const card = el('div','rec' + (role.archived ? ' archived' : ''));
+    card.innerHTML = `
+      <div class="grid2">
+        <label class="f"><span>Name</span><input data-r="name" type="text" value="${esc(role.name)}"></label>
+        <label class="f"><span>Hourly rate</span><input data-r="rate" type="number" step="0.01"
+          placeholder="${co.rate ?? 'the job\u2019s rate'}" value="${role.rate ?? ''}"></label>
+      </div>
+      <div class="aliases"></div>
+      <div class="rowbtns rolebtns"></div>
+      <p class="tiny soft rolecount"></p>`;
+
+    card.querySelectorAll('[data-r]').forEach(inp => {
+      const was = inp.value;
+      inp.oninput = () => {
+        const k = inp.dataset.r;
+        // Empty is a real answer and is not zero: it means nothing has been
+        // said about this role and the job's own rate stands.
+        role[k] = k === 'rate' ? (inp.value === '' ? null : +inp.value) : inp.value;
+        save();
+        // The name is on the schedule, the banner and every event title; the
+        // rate is on the pay tab and nowhere else.
+        if(k === 'name'){ renderSchedule(); renderNext(); }
+        renderPay();
+      };
+      inp.onchange = () => {
+        if(inp.value === was) return;
+        // Only the name reaches the calendar. A rate change rewrites no event,
+        // so restamping every shift over it would send a week of identical
+        // events for nothing.
+        if(inp.dataset.r === 'name'){ restamp(x => x.roleId === role.id); save(); }
+        renderSetup();
+      };
+    });
+
+    const al = card.querySelector('.aliases');
+    const spell = role.aliases || [];
+    al.appendChild(el('span','tiny soft', spell.length
+      ? 'Also read as:&nbsp;' : 'No other spellings recorded yet.'));
+    spell.forEach(a => {
+      const chip = el('span','alias', esc(a) + ' ');
+      const x = el('button','kill','&times;');
+      x.type = 'button';
+      x.setAttribute('aria-label', `Forget the spelling ${a}`);
+      x.onclick = () => { dropAlias(role, a); save(); renderRoles(co, host, sugHost); };
+      chip.appendChild(x);
+      al.appendChild(chip);
+    });
+
+    const btns = card.querySelector('.rolebtns');
+    const arch = el('button','ghost', role.archived ? 'Bring back' : 'Archive');
+    arch.type = 'button';
+    arch.onclick = () => { role.archived = !role.archived; save(); renderRoles(co, host, sugHost); };
+    btns.appendChild(arch);
+
+    const others = mine.filter(x => x.id !== role.id);
+    if(others.length){
+      const sel = el('select','mergesel');
+      sel.innerHTML = `<option value="">Merge into\u2026</option>` + others.map(x =>
+        `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+      sel.onchange = () => {
+        const into = roleById(sel.value);
+        sel.value = '';
+        if(!into) return;
+        // The rate is named in the question. Merging is permanent, and the one
+        // thing he cannot see from the two names alone is that these shifts
+        // are about to be paid at a different number.
+        const rate = rateFor({}, into, co);
+        if(!confirm(`Merge ${role.name} into ${into.name}? `
+          + `${used} shift${used === 1 ? '' : 's'} move across and are paid `
+          + `${rate == null ? 'at whatever ' + co.name + ' pays' : '$' + rate.toFixed(2) + ' an hour'} `
+          + `from now on, and everything ${role.name} is read as becomes a spelling of `
+          + `${into.name}. This cannot be undone.`)) return;
+        const res = mergeRoles(S.roles, role.id, into.id);
+        S.roles = res.roles;
+        restamp(x => x.roleId === role.id);
+        S.shifts.forEach(x => { if(x.roleId === role.id){ x.roleId = into.id; x.role = into.name; } });
+        pending.forEach(x => { if(x.roleId === role.id){ x.roleId = into.id; x.role = into.name; } });
+        (co.patterns || []).forEach(pt => { if(pt.roleId === role.id) pt.roleId = into.id; });
+        save(); renderAll(); renderReview();
+      };
+      btns.appendChild(sel);
+    }
+
+    const kill = el('button','ghost danger','Remove');
+    kill.type = 'button';
+    kill.onclick = () => {
+      if(!confirm(used
+        ? `Remove ${role.name}? ${used} shift${used === 1 ? '' : 's'} keep the name as text `
+          + `and go back to ${co.name}\u2019s own rate.`
+        : `Remove ${role.name}?`)) return;
+      S.roles = S.roles.filter(x => x.id !== role.id);
+      restamp(x => x.roleId === role.id);
+      // The name survives as text, which is the whole point of keeping `role`
+      // beside `roleId` — a shift does not become nameless because the record
+      // pricing it was deleted.
+      S.shifts.forEach(x => { if(x.roleId === role.id){ x.roleId = null; x.role = x.role || role.name; } });
+      pending.forEach(x => { if(x.roleId === role.id){ x.roleId = null; x.roleHow = 'none'; } });
+      (co.patterns || []).forEach(pt => { if(pt.roleId === role.id) delete pt.roleId; });
+      save(); renderAll(); renderReview();
+    };
+    btns.appendChild(kill);
+
+    const rate = rateFor({}, role, co);
+    card.querySelector('.rolecount').textContent =
+      (used ? `${used} shift${used === 1 ? '' : 's'}` : 'No shifts yet')
+      + (role.rate != null ? `, at $${(+role.rate).toFixed(2)} an hour.`
+         : rate != null ? `, at ${co.name}\u2019s $${rate.toFixed(2)}.`
+         : ', and no rate set anywhere.')
+      + (role.archived ? ' Archived \u2014 new reads will not match it.' : '');
+    host.appendChild(card);
+  });
+
+  const btns = el('div','rowbtns');
+  const add = el('button','ghost','Add a role');
+  add.onclick = () => {
+    S.roles.push(newRole(uid(), co.id, 'New role', null));
+    save(); renderRoles(co, host, sugHost);
+  };
+  const build = el('button','ghost','Build from what\u2019s on file');
+  build.onclick = () => renderRoleSuggestions(co, host, sugHost);
+  btns.appendChild(add); btns.appendChild(build);
+  host.appendChild(btns);
+  sugHost.innerHTML = '';
+}
+
+/* The same menu the sites get, drawn from the same labels. A label with the
+   employer's separator in it offers its left half here and its right half
+   there; one without offers the whole string to both, because "Cook" with no
+   pipe could be either and the app has no way to know. He picks. */
+function renderRoleSuggestions(co, roleHost, host){
+  host.innerHTML = '';
+  const filed = S.shifts.filter(s => s.companyId === co.id);
+  const sug = suggestNames(filed, rolesFor(co.id),
+                           x => labelCandidates(x.label).role, x => x.roleId);
+
+  host.appendChild(el('p','tiny soft', !filed.length
+    ? 'Nothing on file for this job yet.'
+    : !sug.length
+      ? 'Every label on file already matches a role.'
+      : 'Labels already on file, most common first. These came off screenshots, '
+        + 'so correct the spelling as you add one \u2014 and the rate you give it is '
+        + 'what every shift that matches will be paid from now on.'));
+
+  sug.forEach(x => {
+    const r = el('div','sug');
+    r.innerHTML = `<span class="tiny">${esc(x.name)}</span>
+      <span class="tiny soft">${x.count} shift${x.count === 1 ? '' : 's'}</span>`;
+    const use = el('button','ghost','Add this');
+    use.onclick = () => {
+      const name = prompt('Name this role the way it should read everywhere', x.name);
+      if(!name || !name.trim()) return;
+      const ask = prompt(`What does an hour of ${name.trim()} pay?`
+        + (co.rate ? ` Leave it empty to use ${co.name}\u2019s $${(+co.rate).toFixed(2)}.`
+                   : ' Leave it empty if it is the same as the rest of the job.'), '');
+      if(ask === null) return;
+      const rate = ask.trim() === '' ? null : +ask.trim();
+      const role = newRole(uid(), co.id, name.trim(),
+                           Number.isFinite(rate) && rate >= 0 ? rate : null);
+      addAlias(role, x.name);
+      S.roles.push(role);
+      // Repoint what it was built from, near misses included — those are the
+      // ones that made a table worth having. This one moves money, so it is
+      // worth being plain about what it just did.
+      let moved = 0;
+      S.shifts.filter(s => s.companyId === co.id && !s.roleId).forEach(s => {
+        if(matchName(labelCandidates(s.label).role, [role]).rec){
+          s.roleId = role.id; s.role = role.name; moved++;
+        }
+      });
+      save();
+      renderSchedule(); renderNext(); renderPay();
+      renderRoles(co, roleHost, host);
+      renderRoleSuggestions(co, roleHost, host);
+      if(moved) host.prepend(el('p','tiny soft',
+        `${moved} shift${moved === 1 ? '' : 's'} now read as ${esc(role.name)}`
+        + (role.rate == null ? '.' : ` and are paid $${(+role.rate).toFixed(2)} an hour.`)));
     };
     r.appendChild(use);
     host.appendChild(r);
@@ -1267,57 +1749,99 @@ function renderSetup(){
 
   S.companies.forEach(co => {
     const card = el('div','card');
-    card.innerHTML = `
-      <label class="f"><span>Name</span><input data-k="name" type="text" value="${esc(co.name)}"></label>
+    // The job is a fold, and everything in it but its name and colour is a
+    // fold inside that (§28). Name and colour stay put: they are how he tells
+    // one job from the other, and burying the field that says which job this
+    // is inside a section called something else would be perverse.
+    const job = fold(co.id,
+      `<span class="dot" style="background:${esc(co.color)}"></span>${esc(co.name)}`,
+      jobNote(co), false);
+    job.d.classList.add('job');
+    card.appendChild(job.d);
+    const inner = job.body;
+
+    const head = el('div', null, `
       <div class="grid2">
+        <label class="f"><span>Name</span><input data-k="name" type="text" value="${esc(co.name)}"></label>
         <label class="f"><span>Colour</span><input data-k="color" type="color" value="${esc(co.color)}" style="height:2.4rem;padding:.15rem"></label>
-        <label class="f"><span>Hourly rate</span><input data-k="rate" type="number" step="0.01" value="${co.rate ?? ''}"></label>
-      </div>
+      </div>`);
+    inner.appendChild(head);
+
+    const pay = fold(co.id + '/pay', 'Pay and hours', payNote(co), false);
+    pay.body.innerHTML = `
       <div class="grid2">
+        <label class="f"><span>Hourly rate</span><input data-k="rate" type="number" step="0.01" value="${co.rate ?? ''}"></label>
         <label class="f"><span>Pay week starts</span>
           <select data-k="weekStart">${DAYNAMES.map((d,i) =>
             `<option value="${i}"${(co.weekStart??0)===i?' selected':''}>${d}</option>`).join('')}</select></label>
-        <label class="f"><span>Overtime after (hrs/wk)</span><input data-k="otAfterHrs" type="number" step="0.5" value="${co.otAfterHrs ?? ''}"></label>
       </div>
       <div class="grid2">
+        <label class="f"><span>Overtime after (hrs/wk)</span><input data-k="otAfterHrs" type="number" step="0.5" value="${co.otAfterHrs ?? ''}"></label>
         <label class="f"><span>Unpaid break (mins)</span><input data-k="breakMins" type="number" value="${co.breakMins ?? ''}"></label>
-        <label class="f"><span>…on shifts over (hrs)</span><input data-k="breakAfterHrs" type="number" step="0.5" value="${co.breakAfterHrs ?? ''}"></label>
       </div>
+      <label class="f"><span>\u2026on shifts over (hrs)</span><input data-k="breakAfterHrs" type="number" step="0.5" value="${co.breakAfterHrs ?? ''}"></label>
+      <p class="tiny soft" style="margin:-.35rem 0 0">A role can be paid its own rate,
+        below. This one is what a shift is worth when nothing more specific says otherwise.</p>`;
+    inner.appendChild(pay.d);
+
+    const app = fold(co.id + '/app', 'App and calendar', appNote(co), false);
+    app.body.innerHTML = `
       <label class="f"><span>Android app package, for the open button</span>
         <input data-k="pkg" type="text" placeholder="com.tracktik.shift" value="${esc(co.pkg||'')}"></label>
-      <label class="f"><span>Calendar import: only events mentioning…</span>
+      <label class="f"><span>Calendar import: only events mentioning\u2026</span>
         <input data-k="icsMatch" type="text" placeholder="Station" value="${esc(co.icsMatch||'')}"></label>
       <p class="tiny soft" style="margin:-.35rem 0 0">An employer's calendar sync writes into a
         whole Google account, so his own appointments arrive with the shifts. A word that appears
-        on every shift and nothing else — a site name, the role — keeps them out. Leave it
+        on every shift and nothing else \u2014 a site name, the role \u2014 keeps them out. Leave it
         empty to take everything.</p>
 
       <label class="f"><span>Statutory holidays</span>
         <select data-k="holidays">
-          <option value=""${!co.holidays ? ' selected' : ''}>Don’t check</option>
+          <option value=""${!co.holidays ? ' selected' : ''}>Don\u2019t check</option>
           ${holidayPlaces().map(h =>
             `<option value="${h.id}"${co.holidays===h.id?' selected':''}>${esc(h.name)}</option>`).join('')}
         </select></label>
       <p class="tiny soft" style="margin:-.35rem 0 0">Only used when a week is filled from
         the rota: a generated shift landing on a holiday is flagged so it can be removed
-        before it is added. It never removes one by itself — the rota may well run that
-        day, and a shift quietly dropped is a shift missed.</p>
+        before it is added. It never removes one by itself \u2014 the rota may well run that
+        day, and a shift quietly dropped is a shift missed.</p>`;
+    inner.appendChild(app.d);
 
-      <h3 class="subhead">Shifts this job normally runs</h3>
+    const rota = fold(co.id + '/rota', 'Shifts this job normally runs', rotaNote(co), false);
+    rota.body.innerHTML = `
       <p class="tiny soft" style="margin:0 0 .4rem">Times read off a screenshot are checked
         against these. One exactly twelve hours out is an am/pm misread and is corrected;
         one a few minutes out is tidied up; one an hour or two out is left alone and
         flagged, because the employer may have moved it.</p>
       <div class="patbox"></div>
-      <div class="sugbox"></div>
+      <div class="sugbox"></div>`;
+    inner.appendChild(rota.d);
 
-      <h3 class="subhead">Sites</h3>
+    const roleFold = fold(co.id + '/roles', 'Roles',
+      tableNote(rolesFor(co.id), 'none \u2014 every shift at the job\u2019s rate',
+                live => { const paid = live.filter(r => r.rate != null);
+                          return paid.length ? ' \u00b7 ' + paid.map(r => money(r.rate)).join(', ') : ''; }),
+      false);
+    roleFold.body.innerHTML = `
+      <p class="tiny soft" style="margin:0 0 .4rem">The job titles this employer pays him
+        under, the spellings each one answers to, and what an hour of each is worth. A role
+        with no rate of its own is paid the job\u2019s rate above \u2014 declare one only where it
+        differs, or where the name is worth curating.</p>
+      <div class="rolebox"></div>
+      <div class="rolesugbox"></div>`;
+    inner.appendChild(roleFold.d);
+
+    const siteFold = fold(co.id + '/sites', 'Sites',
+      tableNote(sitesFor(co.id), 'none yet'), false);
+    siteFold.body.innerHTML = `
       <p class="tiny soft" style="margin:0 0 .4rem">The places this job sends him, and
         the spellings each one answers to. A screenshot naming a site the app already
         knows is filed against it however badly it was read, and its address is what the
         calendar turns into a tappable line.</p>
       <div class="sitebox"></div>
       <div class="sitesugbox"></div>`;
+    inner.appendChild(siteFold.d);
+
     card.querySelectorAll('[data-k]').forEach(inp => {
       inp.oninput = () => {
         const k = inp.dataset.k;
@@ -1327,9 +1851,25 @@ function renderSetup(){
         co[k] = v;
         save();
         if(k === 'name' || k === 'color'){ renderLaunchers(); }
+        // Every figure on the pay tab hangs off these, and a rate typed with
+        // the tab already drawn used to sit there stale until something else
+        // redrew it.
+        if(['rate','otAfterHrs','breakMins','breakAfterHrs','weekStart'].includes(k)) renderPay();
+        // The shut folds above this one describe the field being typed in, so
+        // they are rewritten as it is typed rather than on the next full
+        // redraw — a summary that lags the box under it is worse than none.
+        job.d.querySelector('.foldnote').innerHTML = jobNote(co);
+        job.d.querySelector('.foldname').innerHTML =
+          `<span class="dot" style="background:${esc(co.color)}"></span>${esc(co.name)}`;
+        pay.d.querySelector('.foldnote').innerHTML = payNote(co);
+        app.d.querySelector('.foldnote').innerHTML = appNote(co);
       };
     });
+    // Roles before sites, and patterns before both: the declared shifts are
+    // where a role and a site get put to work, so the section that uses them
+    // reads first and the tables it draws from follow.
     renderPatterns(co, card.querySelector('.patbox'), card.querySelector('.sugbox'));
+    renderRoles(co, card.querySelector('.rolebox'), card.querySelector('.rolesugbox'));
     renderSites(co, card.querySelector('.sitebox'), card.querySelector('.sitesugbox'));
 
     const btns = el('div','rowbtns');
@@ -1339,14 +1879,22 @@ function renderSetup(){
       if(!confirm(`Remove ${co.name}? ${n} shift${n===1?'':'s'} will be deleted too.`)) return;
       dropShifts(s => s.companyId === co.id);
       S.companies = S.companies.filter(c => c.id !== co.id);
-      // The job's sites go with it. They are its places, they can never be
-      // matched against again, and leaving them would put another job's site
-      // list in front of him the next time he opened this screen.
+      // The job's sites and roles go with it. They are its places and its job
+      // titles, they can never be matched against again, and leaving them
+      // would put another job's lists in front of him the next time he opened
+      // this screen — and another job's rates in the pay tab.
       S.sites = (S.sites || []).filter(x => x.companyId !== co.id);
+      S.roles = (S.roles || []).filter(x => x.companyId !== co.id);
+      // And its folds. Nothing reads a stale key, but a store that only ever
+      // grows is a store that eventually holds more dead jobs than live ones.
+      const open = S.settings.open || {};
+      Object.keys(open).forEach(k => { if(k === co.id || k.startsWith(co.id + '/')) delete open[k]; });
       save(); renderAll();
     };
     btns.appendChild(del);
-    card.appendChild(btns);
+    // Inside the job's fold, not under it: a row of buttons for a job that is
+    // folded shut would be a delete control floating next to nothing.
+    inner.appendChild(btns);
     box.appendChild(card);
   });
 
@@ -1396,6 +1944,9 @@ function editShift(id){
   const s = S.shifts.find(x => x.id === id);
   if(!s) return;
   const dlg = $('#dlg');
+  // What the label offers each picker. Read fresh each time because the label
+  // box below is editable and the pickers are redrawn from it.
+  const cand = () => labelCandidates($('#e-label') ? $('#e-label').value : s.label);
   $('#dlgbody').innerHTML = `
     <h2>Edit shift</h2>
     <label class="f"><span>Job</span><select id="e-co">${S.companies.map(c =>
@@ -1407,11 +1958,12 @@ function editShift(id){
     </div>
     <p class="flag" id="e-bad" hidden></p>
     <div class="grid2">
-      <label class="f"><span>Role</span><input id="e-role" type="text"
-        placeholder="Mobile Guard" value="${esc(s.role||'')}"></label>
+      <label class="f"><span>Role</span><select id="e-role">${roleOptions(
+        { companyId: s.companyId, roleId: s.roleId || null, roleRaw: cand().role })}</select></label>
       <label class="f"><span>Site</span><select id="e-site">${siteOptions(
-        { companyId: s.companyId, siteId: s.siteId || null, siteRaw: siteCandidate(s.label) })}</select></label>
+        { companyId: s.companyId, siteId: s.siteId || null, siteRaw: cand().site })}</select></label>
     </div>
+    <p class="tiny soft" id="e-rate" style="margin:-.35rem 0 .55rem"></p>
     <label class="f" id="e-labelwrap"${s.siteId ? ' hidden' : ''}><span>Site or role, as text</span>
       <input id="e-label" type="text" value="${esc(s.label)}"></label>
     <label class="f"><span>Address, for the calendar</span>
@@ -1430,41 +1982,58 @@ function editShift(id){
   const hush = () => { $('#e-bad').hidden = true; };
   const start = bindClock($('#e-start'), hush), end = bindClock($('#e-end'), hush);
 
-  // The site picker, and the two things that hang off it: the text label is
-  // only shown when there is no site to name the shift, and the address box is
-  // an override rather than the address — left empty, the site's own is what
-  // reaches the calendar.
-  let siteId = s.siteId || null;
-  const sitesel = $('#e-site');
+  // The two pickers, and the three things that hang off them: the text label is
+  // only shown when neither names the shift, the address box is an override
+  // rather than the address — left empty, the site's own is what reaches the
+  // calendar — and the rate line says what this shift is about to be worth.
+  let siteId = s.siteId || null, roleId = s.roleId || null;
+  const sitesel = $('#e-site'), rolesel = $('#e-role');
   const coNow = () => $('#e-co').value;
-  const sayAddr = () => {
-    const site = siteById(siteId);
-    $('#e-labelwrap').hidden = !!site;
+  const say = () => {
+    const site = siteById(siteId), role = roleById(roleId);
+    $('#e-labelwrap').hidden = !!(site || role);
     $('#e-addr').textContent = !site
       ? 'No site set, so this shift carries its own address or none at all.'
       : site.address
         ? `Left empty, ${site.name} uses ${site.address}.`
         : `${site.name} has no address on file. Add one on its card in Setup and every shift there gets it.`;
+    // Named out loud, because this dialog is the one place a shift's pay can be
+    // changed by hand and the field that does it does not look like it does.
+    const co = coById(coNow());
+    const rate = rateFor(s, role, co);
+    $('#e-rate').textContent = rate == null
+      ? 'No rate set for this, so it counts as hours and not as money.'
+      : role && role.rate != null
+        ? `Paid $${rate.toFixed(2)} an hour, from ${role.name}.`
+        : `Paid $${rate.toFixed(2)} an hour, from ${(co && co.name) || 'the job'}.`;
   };
-  const redrawSites = () => {
-    sitesel.innerHTML = siteOptions({ companyId: coNow(), siteId, siteRaw: siteCandidate(s.label) });
-    sayAddr();
+  const redraw = () => {
+    const c = cand();
+    sitesel.innerHTML = siteOptions({ companyId: coNow(), siteId, siteRaw: c.site });
+    rolesel.innerHTML = roleOptions({ companyId: coNow(), roleId, roleRaw: c.role });
+    say();
   };
   sitesel.onchange = () => {
-    const row = { companyId: coNow(), siteId, siteRaw: siteCandidate(s.label) };
+    const row = { companyId: coNow(), siteId, siteRaw: cand().site };
     pickSite(row, sitesel.value);
     siteId = row.siteId;
-    redrawSites();
+    redraw();
   };
-  // A site belongs to one job. Moving the shift to another one therefore drops
-  // it rather than carrying a pointer into a list it is not in — the label is
-  // still there, which is what it is for.
+  rolesel.onchange = () => {
+    const row = { companyId: coNow(), roleId, roleRaw: cand().role };
+    pickRole(row, rolesel.value);
+    roleId = row.roleId;
+    redraw();
+  };
+  // A site and a role both belong to one job. Moving the shift to another one
+  // therefore drops them rather than carrying a pointer into a list it is not
+  // in — the label is still there, which is what it is for.
   $('#e-co').onchange = () => {
-    const held = siteById(siteId);
-    if(held && held.companyId !== coNow()) siteId = null;
-    redrawSites();
+    const site = siteById(siteId); if(site && site.companyId !== coNow()) siteId = null;
+    const role = roleById(roleId); if(role && role.companyId !== coNow()) roleId = null;
+    redraw();
   };
-  sayAddr();
+  say();
 
   $('#e-cancel').onclick = () => dlg.close();
   $('#e-save').onclick = () => {
@@ -1482,13 +2051,20 @@ function editShift(id){
     s.start = st;
     s.end = en;
     s.label = $('#e-label').value.trim() || 'Shift';
-    s.role = $('#e-role').value.trim();
-    // Pointing a filed shift at a site by hand is the strongest confirmation
+    // Pointing a filed shift at a record by hand is the strongest confirmation
     // in the app — stronger than letting a fuzzy match stand in review — so
-    // the spelling it was read under becomes one that site answers to, and the
-    // next screenshot spelling it that way needs no decision at all (§8.1).
-    if(siteId && siteId !== s.siteId) learnSpelling({ siteId, siteHow: 'set', siteRaw: siteCandidate(s.label) });
+    // the spelling it was read under becomes one that record answers to, and
+    // the next screenshot spelling it that way needs no decision (§8.1, §27).
+    const c = labelCandidates(s.label);
+    if(siteId && siteId !== s.siteId)
+      learnSpellings({ siteId, siteHow: 'set', siteRaw: c.site });
+    if(roleId && roleId !== s.roleId)
+      learnSpellings({ roleId, roleHow: 'set', roleRaw: c.role });
     s.siteId = siteId;
+    s.roleId = roleId;
+    // The curated spelling when there is a record, and otherwise whatever the
+    // label offers as a role — the same fallback the review path uses.
+    s.role = roleId ? (roleById(roleId) || {}).name || '' : c.role;
     s.place = $('#e-place').value.trim();
     // He has just been through this shift by hand, which is the strongest
     // confirmation there is. Leaving it as a proposal would keep drawing his
@@ -1623,7 +2199,7 @@ async function readFiles(files){
   // duplicate of nothing until it has been put right, and a row whose site is
   // still three characters of OCR damage is a duplicate of nothing either.
   pending.forEach(applyPatterns);
-  pending.forEach(applySite);
+  pending.forEach(applyNames);
   pending = pending.filter(bySlot);
 
   txt.textContent = pending.length
@@ -1739,7 +2315,14 @@ function payWeekStart(co, dateStr){
    Since §8.1 that guess carries a `siteId` rather than a string, so a filled
    week inherits the site's address without inheriting a spelling — and the
    `LOCATION:` line on a generated shift is the curated one rather than
-   whatever OCR made of the site name on the day the guess came from. */
+   whatever OCR made of the site name on the day the guess came from.
+
+   §27 put a standard role and site on the declared shift itself, and that is
+   now the first answer: a rota row that says what it is beats anything
+   rummaged out of history, and it has to, because the role carries the rate
+   and a guessed rate is a wrong figure nobody was asked about. This function
+   is what happens when the rota says nothing, which is every pattern declared
+   before §27 and every one he does not bother to fill in. */
 function siteFor(co, start, end){
   // Confirmed records first, and only then the app's own earlier guesses. A
   // label copied from one generated week into the next would be an assumption
@@ -1750,6 +2333,7 @@ function siteFor(co, start, end){
     .sort((a, b) => rank(a) - rank(b) || (b.date + b.start).localeCompare(a.date + a.start));
   const same = mine.find(s => s.start === start && s.end === end) || mine[0];
   return { label: same ? same.label : 'Shift', role: (same && same.role) || '',
+           roleId: (same && same.roleId) || null,
            siteId: (same && same.siteId) || null,
            place: same && same.place ? same.place : '' };
 }
@@ -1789,18 +2373,27 @@ function fillWeek(co, ws){
 
   let filled = 0, covered = 0, holidays = 0;
   for(const r of rows){
-    const site = siteFor(co, r.start, r.end);
+    // What the rota declared, and only then what history suggests. `r` carries
+    // the declared role and site straight out of generateWeek(); `siteFor` is
+    // the older guess, kept for the pattern that declares neither.
+    const guess = siteFor(co, r.start, r.end);
+    const roleId = r.roleId || guess.roleId || null;
+    const siteId = r.siteId || guess.siteId || null;
+    const role = roleById(roleId);
     const row = { rid: uid(), companyId: co.id, date: r.date, start: r.start, end: r.end,
-                  label: site.label, role: site.role, siteId: site.siteId,
-                  flags: [], source: 'pattern' };
-    if(site.place) row.place = site.place;
+                  label: guess.label, role: role ? role.name : guess.role,
+                  roleId, siteId, flags: [], source: 'pattern' };
+    // The address rides with the site, so a declared site brings its own and a
+    // place copied off an unrelated shift would be worse than none.
+    if(!r.siteId && guess.place) row.place = guess.place;
 
     applyHoliday(row);
-    // Carried over rather than matched: the site on this row was copied from a
-    // shift that already had one, so there is no reading to confirm and
-    // nothing to learn. It only needs `siteRaw` and `siteHow` settled so the
-    // review row and the commit path can read them like any other.
-    applySite(row);
+    // Carried over rather than matched: the role and site on this row were
+    // declared on the rota or copied from a shift that already had them, so
+    // there is no reading to confirm and nothing to learn. It only needs the
+    // raws and the `how`s settled so the review row and the commit path can
+    // read them like any other.
+    applyNames(row);
 
     // Already on file, or already sitting in this batch: the slot is covered
     // and a second row for it would read as a second shift he is expected to
@@ -1881,7 +2474,7 @@ function calendarRows(text){
   const fresh = [];
   for(const r of rows){
     const row = { ...r, rid: uid(), companyId: co.id, extUid: r.uid };
-    applySite(row);
+    applyNames(row);
 
     // Matched on UID: this is a shift the feed has already given us once.
     const onFile = r.uid && S.shifts.find(s => s.extUid === r.uid && s.companyId === co.id);
@@ -1914,7 +2507,7 @@ function cancellationRows(report){
     return {
       rid: uid(), companyId: s.companyId, removeId: s.id,
       date: s.date, start: s.start, end: s.end, label: s.label,
-      siteId: s.siteId || null, role: s.role || '',
+      siteId: s.siteId || null, roleId: s.roleId || null, role: s.role || '',
       flags: [], source: 'ics'
     };
   }).filter(Boolean);
@@ -2020,6 +2613,12 @@ function renderReview(){
   // instead would reorder rows and drop focus mid-edit.
   const touches = [];
   const refreshAll = () => { applyClashes(pending); touches.forEach(t => t()); };
+  // A record made on one row answers for the whole batch. Rows that already
+  // resolved are left alone: a match he has confirmed is not re-litigated
+  // because a different row taught the table something.
+  const rematch = () => pending.forEach(x => {
+    if(!x.removeId && (!x.siteId || !x.roleId)) applyNames(x);
+  });
 
   pending.forEach(p => {
     // A removal is not an edit. It gets no fields — there is nothing to
@@ -2051,7 +2650,8 @@ function renderReview(){
         ${clockInput(p.start, 'aria-label="Starts"')}
         <span class="soft mono">to</span>
         ${clockInput(p.end, 'aria-label="Ends"')}
-        <span class="tiny soft read">${esc(p.siteRaw || p.label || '\u2014')}</span>
+        <span class="tiny soft read">${esc(p.label || '\u2014')}</span>
+        <select class="rolesel" aria-label="Role">${roleOptions(p)}</select>
         <select class="sitesel" aria-label="Site">${siteOptions(p)}</select>
         ${manyJobs ? `<select class="cosel">${S.companies.map(c =>
           `<option value="${c.id}"${c.id===p.companyId?' selected':''}>${esc(c.name)}</option>`
@@ -2113,14 +2713,20 @@ function renderReview(){
       // A site made here is a site every other unresolved row in the batch can
       // now match. One screenshot routinely carries the same place four times,
       // spelled four ways, and naming it once is meant to answer all four.
-      pending.forEach(x => { if(x !== p && !x.removeId && !x.siteId) applySite(x); });
+      rematch();
+      renderReview();
+    };
+    const rsel = row.querySelector('.rolesel');
+    rsel.onchange = () => {
+      pickRole(p, rsel.value);
+      rematch();
       renderReview();
     };
     const job = row.querySelector('.cosel');
     // The site list belongs to the job, so changing the job rebuilds the row
     // rather than refreshing its note line — the options on it are wrong the
     // moment the job is.
-    if(job) job.onchange = () => { p.companyId = job.value; recheck(); applySite(p); renderReview(); };
+    if(job) job.onchange = () => { p.companyId = job.value; recheck(); applyNames(p); renderReview(); };
     row.querySelector('.kill').onclick = () => {
       pending = pending.filter(x => x.rid !== p.rid);
       renderReview();
@@ -2153,7 +2759,7 @@ function buildICS(only){
     // is where §8.3's stated risk actually lands. The title carries the mark,
     // and the alarm body reuses the title, so a 05:00 buzz for a shift nothing
     // has confirmed says which kind it is (§20.5).
-    const title = eventTitle(co && co.name, s, siteById(s.siteId)) +
+    const title = eventTitle(co && co.name, s, siteById(s.siteId), roleById(s.roleId)) +
                   (isProposed(s) ? ' (from the rota)' : '');
     L.push('BEGIN:VEVENT',
       fold(`UID:${shiftUID(s.id)}`),
@@ -2260,16 +2866,19 @@ $('#commit').onclick = () => {
   });
 
   pending.filter(p => !p.removeId && p.date && p.start && p.end && p.companyId).forEach(p => {
-    // The spelling that was read becomes one this site answers to, before the
-    // record is built — so a row he pointed at a site by hand teaches the
-    // table on the way past (§8.1).
-    learnSpelling(p);
+    // The spellings that were read become ones these records answer to, before
+    // the shift is built — so a row he pointed at a site or a role by hand
+    // teaches the tables on the way past (§8.1, §27).
+    learnSpellings(p);
     const rec = {
       id: uid(), companyId: p.companyId, date: p.date, start: p.start, end: p.end,
       // `label` is kept whatever happens. It is what a shift renders as when
       // its site is later deleted, and it is the only record of what the
-      // screen actually said.
-      label: p.label, siteId: p.siteId || null, role: p.role || '',
+      // screen actually said. `role` is the same bargain one level down: the
+      // text stays so a shift still names its job title after the record
+      // carrying its rate is gone.
+      label: p.label, siteId: p.siteId || null,
+      roleId: p.roleId || null, role: p.role || '',
       source: p.source || 'ocr'
     };
     // A calendar row carries the event's UID. Keeping it is what makes the
@@ -2381,7 +2990,7 @@ $('#manual').onclick = () => {
   if(!co){ alert('Add a job in Setup first.'); return; }
   const row = { rid: uid(), companyId: co, date: todayISO(), start: '09:00',
                 end: '17:00', label: 'Shift', flags: [], source: 'manual' };
-  applySite(row);
+  applyNames(row);
   pending.push(row);
   renderReview();
   $('#prog').classList.add('on');
@@ -2389,11 +2998,19 @@ $('#manual').onclick = () => {
 
 $('#addco').onclick = () => {
   const palette = ['#2F4B7C','#B0631A','#2F6B4F','#7A3B69','#8A2E2E'];
-  S.companies.push({
+  const co = {
     id: uid(), name: 'New job', color: palette[S.companies.length % palette.length],
     rate: null, weekStart: 0, otAfterHrs: null, breakMins: null, breakAfterHrs: null,
     pkg: '', icsMatch: '', patterns: []
-  });
+  };
+  S.companies.push(co);
+  // Folded open, both levels (§28). Every other job defaults shut because a
+  // job set up months ago is one he is not editing; this one is a form he
+  // asked for a second ago, and handing him a shut fold called "New job"
+  // would be handing him a puzzle.
+  S.settings.open = S.settings.open || {};
+  S.settings.open[co.id] = true;
+  S.settings.open[co.id + '/pay'] = true;
   save(); renderAll();
 };
 

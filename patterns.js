@@ -15,13 +15,23 @@
    list the human declared — a rota he knows, typed once.
 
        co.patterns = [
-         { days:[1,2,3,5], start:'15:00', end:'23:00' },  // DSI: can generate
+         { days:[1,2,3,5], start:'15:00', end:'23:00',    // DSI: can generate
+           roleId:'r1', siteId:'s1' },
          { start:'09:00', end:'17:00' }                   // PRN: checking only
        ]
 
    One field distinguishes the two jobs with no mode switch. A pattern with
    `days` describes which days the job runs and can therefore generate a week
    (§8.3); one without is only ever used for checking.
+
+   `roleId` and `siteId` are §27's, and both are optional. A declared shift is
+   the one place in the app that knows what he normally does and where — the
+   generator used to guess both by rummaging through the most recent shift on
+   file with the same times, which was a guess about money as soon as the role
+   carried a rate. Declared, it is a fact he typed. Nothing here reads them:
+   they are carried through validation and out of the generator untouched,
+   because what a role means is app.js's business and this file only has to not
+   lose them.
 
    `days` are getDay() numbers, 0 = Sunday, and they name the day the shift
    *starts* — a 19:15-07:15 Saturday night is Saturday, the same day the shift
@@ -89,6 +99,11 @@ function validPatterns(list){
       .map(Number).filter(d => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
     const out = { start: p.start, end: p.end };
     if(days.length) out.days = days;
+    // Carried, never judged. An id pointing at a record that has since been
+    // deleted is the caller's problem to notice, and it resolves to nothing
+    // rather than to something wrong.
+    if(p.roleId) out.roleId = p.roleId;
+    if(p.siteId) out.siteId = p.siteId;
     return out;
   }).filter(Boolean);
 }
@@ -277,10 +292,17 @@ function generateWeek(patterns, dates){
     if(dow === null) continue;
     for(const p of pats){
       if(!p.days.includes(dow)) continue;
+      // Deliberately keyed on the slot alone, not on what the pattern says he
+      // is doing in it. Two declared shifts at the same hours on the same day
+      // are one shift declared twice, and generating both would put him on the
+      // calendar in two places at once.
       const k = `${date} ${p.start} ${p.end}`;
       if(seen.has(k)) continue;
       seen.add(k);
-      out.push({ date, start: p.start, end: p.end });
+      const row = { date, start: p.start, end: p.end };
+      if(p.roleId) row.roleId = p.roleId;
+      if(p.siteId) row.siteId = p.siteId;
+      out.push(row);
     }
   }
   return out.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
