@@ -20,7 +20,12 @@ const DEFAULTS = {
   // them. Not history — a to-do list with one item on it: say the event is
   // off. Emptied the moment that has been said (§22).
   tombstones: [],
-  settings: { leads: [12, 2], feedMode: 'subscribe', icsUrl: '' }
+  // Which sections of the Setup screen are folded open (§28). Stored rather
+  // than held in memory because the screen is rebuilt on almost every edit —
+  // a fold that sprang back open each time he renamed a role would be worse
+  // than no fold at all — and because collapsing a job he has finished setting
+  // up is a decision that should still hold next week.
+  settings: { leads: [12, 2], feedMode: 'subscribe', icsUrl: '', open: {} }
 };
 let S = structuredClone(DEFAULTS);
 
@@ -486,6 +491,116 @@ const el = (tag, cls, html) => {
 };
 const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const coById = id => S.companies.find(c => c.id === id);
+
+/* -- folding sections away (§28) ------------------------------------------
+   The Setup screen grew past five thousand pixels once every job carried a
+   rota, a role table and a site table, and it is a screen used on a phone. So
+   each job is a fold, and each section inside it is a fold.
+
+   The rule the whole thing rests on: a collapsed fold has to say enough that
+   opening it is a choice rather than a search. A summary that reads "Roles"
+   and nothing else is not a fold, it is a thing hidden. So every one of them
+   carries its own state — the rates, the counts, the names — and the screen
+   stays readable folded shut.
+
+   State lives in `S.settings.open`, keyed `<jobId>` for a job and
+   `<jobId>/<section>` for a section inside it. Absent means shut: a job set up
+   months ago is a job he is not editing. The one exception is a job just
+   added, which `#addco` opens by hand, because a job with nothing in it is a
+   form and not a record. */
+const foldOpen = (key, fallback) => {
+  const v = (S.settings.open || {})[key];
+  return v === undefined ? !!fallback : !!v;
+};
+
+/* Returns the `<details>` and the empty body to fill. `head` is the fold's
+   name and `note` is what it says while shut — both are HTML, and callers
+   escape their own. */
+function fold(key, head, note, open){
+  const d = el('details', 'fold');
+  d.open = foldOpen(key, open);
+  d.appendChild(el('summary', null,
+    `<span class="foldname">${head}</span><span class="foldnote">${note || ''}</span>`));
+  const body = el('div', 'foldbody');
+  d.appendChild(body);
+  // Assigned after `open` is set, and still guarded: the toggle event is
+  // queued rather than immediate, so a render can deliver one saying exactly
+  // what was already stored, and writing that back would put the store on
+  // every redraw for nothing.
+  d.ontoggle = () => {
+    S.settings.open = S.settings.open || {};
+    if(S.settings.open[key] === d.open) return;
+    S.settings.open[key] = d.open;
+    save();
+  };
+  return { d, body };
+}
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
+
+/* What each fold says while it is shut. Kept together because they have to
+   read as one voice down the card, and because the temptation in each of them
+   separately is to say more than a shut fold can hold. */
+const money = n => '$' + (+n).toFixed(2);
+
+function payNote(co){
+  const bits = [];
+  bits.push(co.rate == null || co.rate === '' ? 'no rate set' : money(co.rate) + '/h');
+  bits.push('week from ' + DAYNAMES[co.weekStart ?? 0]);
+  if(co.otAfterHrs) bits.push(`OT after ${co.otAfterHrs} h`);
+  if(co.breakMins && co.breakAfterHrs)
+    bits.push(`${co.breakMins} min off shifts over ${co.breakAfterHrs} h`);
+  return esc(bits.join(' \u00b7 '));
+}
+
+function appNote(co){
+  const bits = [];
+  if(co.pkg) bits.push(co.pkg);
+  if(co.icsMatch) bits.push(`only \u201c${co.icsMatch}\u201d`);
+  if(co.holidays){
+    const h = holidayPlaces().find(x => x.id === co.holidays);
+    if(h) bits.push(h.name);
+  }
+  return esc(bits.length ? bits.join(' \u00b7 ') : 'nothing set');
+}
+
+function rotaNote(co){
+  const pats = validPatterns(co.patterns);
+  if(!pats.length) return 'none declared';
+  const fills = pats.filter(p => p.days).length;
+  return esc(plural(pats.length, 'declared shift')
+    + (fills ? `, ${fills} can fill a week` : ', none fills a week'));
+}
+
+/* The two tables name themselves. A count alone would not answer the question
+   he opens this section to ask, which is nearly always "is the one I am
+   thinking of in here". Archived records are counted apart rather than left
+   out: they still match nothing and still hold shifts. */
+function tableNote(list, none, extra){
+  const live = list.filter(x => !x.archived), gone = list.length - live.length;
+  if(!list.length) return esc(none);
+  const names = live.map(x => x.name).join(', ');
+  const tail = gone ? ` \u00b7 ${gone} archived` : '';
+  return esc(names + (extra ? extra(live) : '') + tail);
+}
+
+/* The job's own line. The rate range is first because it is the thing two jobs
+   differ by at a glance, and it spans the roles: a job whose roles pay $22 and
+   $28 does not have one rate to print. */
+function jobNote(co){
+  const roles = rolesFor(co.id).filter(r => !r.archived);
+  const rates = [...new Set(roles.map(r => r.rate).filter(r => r != null).map(Number)
+    .concat(co.rate == null || co.rate === '' ? [] : [+co.rate]))].sort((a, b) => a - b);
+  const bits = [rates.length === 0 ? 'no rate set'
+    : rates.length === 1 ? money(rates[0]) + '/h'
+    : `${money(rates[0])}\u2013${money(rates[rates.length - 1])}/h`];
+  const pats = validPatterns(co.patterns).length;
+  if(pats) bits.push(plural(pats, 'declared shift'));
+  if(roles.length) bits.push(plural(roles.length, 'role'));
+  const sites = sitesFor(co.id).filter(x => !x.archived).length;
+  if(sites) bits.push(plural(sites, 'site'));
+  return esc(bits.join(' \u00b7 '));
+}
 
 /* -- typing a time (§24) --------------------------------------------------
    fmtTime() above refuses to print am/pm anywhere, for the reason stated
@@ -1634,65 +1749,99 @@ function renderSetup(){
 
   S.companies.forEach(co => {
     const card = el('div','card');
-    card.innerHTML = `
-      <label class="f"><span>Name</span><input data-k="name" type="text" value="${esc(co.name)}"></label>
+    // The job is a fold, and everything in it but its name and colour is a
+    // fold inside that (§28). Name and colour stay put: they are how he tells
+    // one job from the other, and burying the field that says which job this
+    // is inside a section called something else would be perverse.
+    const job = fold(co.id,
+      `<span class="dot" style="background:${esc(co.color)}"></span>${esc(co.name)}`,
+      jobNote(co), false);
+    job.d.classList.add('job');
+    card.appendChild(job.d);
+    const inner = job.body;
+
+    const head = el('div', null, `
       <div class="grid2">
+        <label class="f"><span>Name</span><input data-k="name" type="text" value="${esc(co.name)}"></label>
         <label class="f"><span>Colour</span><input data-k="color" type="color" value="${esc(co.color)}" style="height:2.4rem;padding:.15rem"></label>
-        <label class="f"><span>Hourly rate</span><input data-k="rate" type="number" step="0.01" value="${co.rate ?? ''}"></label>
-      </div>
+      </div>`);
+    inner.appendChild(head);
+
+    const pay = fold(co.id + '/pay', 'Pay and hours', payNote(co), false);
+    pay.body.innerHTML = `
       <div class="grid2">
+        <label class="f"><span>Hourly rate</span><input data-k="rate" type="number" step="0.01" value="${co.rate ?? ''}"></label>
         <label class="f"><span>Pay week starts</span>
           <select data-k="weekStart">${DAYNAMES.map((d,i) =>
             `<option value="${i}"${(co.weekStart??0)===i?' selected':''}>${d}</option>`).join('')}</select></label>
-        <label class="f"><span>Overtime after (hrs/wk)</span><input data-k="otAfterHrs" type="number" step="0.5" value="${co.otAfterHrs ?? ''}"></label>
       </div>
       <div class="grid2">
+        <label class="f"><span>Overtime after (hrs/wk)</span><input data-k="otAfterHrs" type="number" step="0.5" value="${co.otAfterHrs ?? ''}"></label>
         <label class="f"><span>Unpaid break (mins)</span><input data-k="breakMins" type="number" value="${co.breakMins ?? ''}"></label>
-        <label class="f"><span>…on shifts over (hrs)</span><input data-k="breakAfterHrs" type="number" step="0.5" value="${co.breakAfterHrs ?? ''}"></label>
       </div>
+      <label class="f"><span>\u2026on shifts over (hrs)</span><input data-k="breakAfterHrs" type="number" step="0.5" value="${co.breakAfterHrs ?? ''}"></label>
+      <p class="tiny soft" style="margin:-.35rem 0 0">A role can be paid its own rate,
+        below. This one is what a shift is worth when nothing more specific says otherwise.</p>`;
+    inner.appendChild(pay.d);
+
+    const app = fold(co.id + '/app', 'App and calendar', appNote(co), false);
+    app.body.innerHTML = `
       <label class="f"><span>Android app package, for the open button</span>
         <input data-k="pkg" type="text" placeholder="com.tracktik.shift" value="${esc(co.pkg||'')}"></label>
-      <label class="f"><span>Calendar import: only events mentioning…</span>
+      <label class="f"><span>Calendar import: only events mentioning\u2026</span>
         <input data-k="icsMatch" type="text" placeholder="Station" value="${esc(co.icsMatch||'')}"></label>
       <p class="tiny soft" style="margin:-.35rem 0 0">An employer's calendar sync writes into a
         whole Google account, so his own appointments arrive with the shifts. A word that appears
-        on every shift and nothing else — a site name, the role — keeps them out. Leave it
+        on every shift and nothing else \u2014 a site name, the role \u2014 keeps them out. Leave it
         empty to take everything.</p>
 
       <label class="f"><span>Statutory holidays</span>
         <select data-k="holidays">
-          <option value=""${!co.holidays ? ' selected' : ''}>Don’t check</option>
+          <option value=""${!co.holidays ? ' selected' : ''}>Don\u2019t check</option>
           ${holidayPlaces().map(h =>
             `<option value="${h.id}"${co.holidays===h.id?' selected':''}>${esc(h.name)}</option>`).join('')}
         </select></label>
       <p class="tiny soft" style="margin:-.35rem 0 0">Only used when a week is filled from
         the rota: a generated shift landing on a holiday is flagged so it can be removed
-        before it is added. It never removes one by itself — the rota may well run that
-        day, and a shift quietly dropped is a shift missed.</p>
+        before it is added. It never removes one by itself \u2014 the rota may well run that
+        day, and a shift quietly dropped is a shift missed.</p>`;
+    inner.appendChild(app.d);
 
-      <h3 class="subhead">Shifts this job normally runs</h3>
+    const rota = fold(co.id + '/rota', 'Shifts this job normally runs', rotaNote(co), false);
+    rota.body.innerHTML = `
       <p class="tiny soft" style="margin:0 0 .4rem">Times read off a screenshot are checked
         against these. One exactly twelve hours out is an am/pm misread and is corrected;
         one a few minutes out is tidied up; one an hour or two out is left alone and
         flagged, because the employer may have moved it.</p>
       <div class="patbox"></div>
-      <div class="sugbox"></div>
+      <div class="sugbox"></div>`;
+    inner.appendChild(rota.d);
 
-      <h3 class="subhead">Roles</h3>
+    const roleFold = fold(co.id + '/roles', 'Roles',
+      tableNote(rolesFor(co.id), 'none \u2014 every shift at the job\u2019s rate',
+                live => { const paid = live.filter(r => r.rate != null);
+                          return paid.length ? ' \u00b7 ' + paid.map(r => money(r.rate)).join(', ') : ''; }),
+      false);
+    roleFold.body.innerHTML = `
       <p class="tiny soft" style="margin:0 0 .4rem">The job titles this employer pays him
         under, the spellings each one answers to, and what an hour of each is worth. A role
         with no rate of its own is paid the job\u2019s rate above \u2014 declare one only where it
         differs, or where the name is worth curating.</p>
       <div class="rolebox"></div>
-      <div class="rolesugbox"></div>
+      <div class="rolesugbox"></div>`;
+    inner.appendChild(roleFold.d);
 
-      <h3 class="subhead">Sites</h3>
+    const siteFold = fold(co.id + '/sites', 'Sites',
+      tableNote(sitesFor(co.id), 'none yet'), false);
+    siteFold.body.innerHTML = `
       <p class="tiny soft" style="margin:0 0 .4rem">The places this job sends him, and
         the spellings each one answers to. A screenshot naming a site the app already
         knows is filed against it however badly it was read, and its address is what the
         calendar turns into a tappable line.</p>
       <div class="sitebox"></div>
       <div class="sitesugbox"></div>`;
+    inner.appendChild(siteFold.d);
+
     card.querySelectorAll('[data-k]').forEach(inp => {
       inp.oninput = () => {
         const k = inp.dataset.k;
@@ -1706,6 +1855,14 @@ function renderSetup(){
         // the tab already drawn used to sit there stale until something else
         // redrew it.
         if(['rate','otAfterHrs','breakMins','breakAfterHrs','weekStart'].includes(k)) renderPay();
+        // The shut folds above this one describe the field being typed in, so
+        // they are rewritten as it is typed rather than on the next full
+        // redraw — a summary that lags the box under it is worse than none.
+        job.d.querySelector('.foldnote').innerHTML = jobNote(co);
+        job.d.querySelector('.foldname').innerHTML =
+          `<span class="dot" style="background:${esc(co.color)}"></span>${esc(co.name)}`;
+        pay.d.querySelector('.foldnote').innerHTML = payNote(co);
+        app.d.querySelector('.foldnote').innerHTML = appNote(co);
       };
     });
     // Roles before sites, and patterns before both: the declared shifts are
@@ -1728,10 +1885,16 @@ function renderSetup(){
       // this screen — and another job's rates in the pay tab.
       S.sites = (S.sites || []).filter(x => x.companyId !== co.id);
       S.roles = (S.roles || []).filter(x => x.companyId !== co.id);
+      // And its folds. Nothing reads a stale key, but a store that only ever
+      // grows is a store that eventually holds more dead jobs than live ones.
+      const open = S.settings.open || {};
+      Object.keys(open).forEach(k => { if(k === co.id || k.startsWith(co.id + '/')) delete open[k]; });
       save(); renderAll();
     };
     btns.appendChild(del);
-    card.appendChild(btns);
+    // Inside the job's fold, not under it: a row of buttons for a job that is
+    // folded shut would be a delete control floating next to nothing.
+    inner.appendChild(btns);
     box.appendChild(card);
   });
 
@@ -2835,11 +2998,19 @@ $('#manual').onclick = () => {
 
 $('#addco').onclick = () => {
   const palette = ['#2F4B7C','#B0631A','#2F6B4F','#7A3B69','#8A2E2E'];
-  S.companies.push({
+  const co = {
     id: uid(), name: 'New job', color: palette[S.companies.length % palette.length],
     rate: null, weekStart: 0, otAfterHrs: null, breakMins: null, breakAfterHrs: null,
     pkg: '', icsMatch: '', patterns: []
-  });
+  };
+  S.companies.push(co);
+  // Folded open, both levels (§28). Every other job defaults shut because a
+  // job set up months ago is one he is not editing; this one is a form he
+  // asked for a second ago, and handing him a shut fold called "New job"
+  // would be handing him a puzzle.
+  S.settings.open = S.settings.open || {};
+  S.settings.open[co.id] = true;
+  S.settings.open[co.id + '/pay'] = true;
   save(); renderAll();
 };
 

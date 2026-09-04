@@ -304,6 +304,20 @@ Archiving a site keeps it on the shifts that name it and stops new reads
 matching it. Removing one drops its shifts back to the text that was read, so
 nothing loses its name.
 
+## Folding Setup away
+
+Setup got long once every job carried a rota, a role table and a site table.
+Each job folds, and each section inside it folds. What is folded stays folded —
+across edits, and across restarts.
+
+A shut fold says what is in it: the pay section shows the rate, the pay week
+and the overtime threshold; the rota shows how many shifts are declared and how
+many can fill a week; Roles and Sites name their records. A job shut shows a
+rate range and its counts. Nothing is hidden that you cannot see the shape of.
+
+Jobs start shut, because a job set up months ago is one you are not editing. A
+job you have just added starts open, because it is a form and not a record yet.
+
 ## Declared shifts
 
 am/pm rides on a single character, and a misread puts a shift twelve hours out

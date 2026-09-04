@@ -158,6 +158,37 @@ input[type=file]{display:none}
 /* Declared shifts (§8.2). Seven toggles rather than a day picker: the whole
    rota has to be readable and changeable with a thumb, on a phone. */
 .subhead{font-size:.85rem;font-weight:600;margin:1rem 0 .15rem}
+/* Folds (§28). The Setup screen is a phone screen, and a job carrying a rota,
+   a role table and a site table does not fit on one. Native <details>: it
+   folds, it takes a keyboard, and it needs no script to do either. */
+.fold{border-top:1px solid var(--hair)}
+.fold>summary{
+  display:flex;align-items:baseline;gap:.5rem;cursor:pointer;
+  padding:.55rem .1rem;list-style:none;font-size:.85rem;font-weight:600;
+}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary::before{
+  content:"";flex:0 0 auto;width:.42rem;height:.42rem;margin-right:.1rem;
+  border-right:1.5px solid var(--soft);border-bottom:1.5px solid var(--soft);
+  transform:rotate(-45deg) translate(-.1rem,-.1rem);transition:transform .12s;
+}
+.fold[open]>summary::before{transform:rotate(45deg) translate(-.05rem,-.05rem)}
+.fold>summary:focus-visible{outline:2px solid var(--signal);outline-offset:-2px}
+/* What the fold says while it is shut. It has to fit on one line on a phone,
+   so it is the part that gives way — the name never truncates. */
+.foldname{flex:0 0 auto;display:flex;align-items:center;gap:.4rem}
+.foldnote{
+  flex:1 1 auto;min-width:0;text-align:right;font-weight:400;font-size:.78rem;
+  color:var(--soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.foldbody{padding:0 0 .7rem}
+/* The job itself: a heavier line and a bigger name, so two jobs folded shut
+   read as two jobs and not as six sections. */
+.fold.job{border-top:none}
+.fold.job>summary{font-size:1rem;padding:.2rem .1rem .6rem}
+.fold.job>summary::before{width:.5rem;height:.5rem;border-width:2px}
+.fold.job>.foldbody{padding-bottom:0}
+.fold.job .dot{margin-right:0}
 .pat{border-top:1px solid var(--hair);padding:.55rem 0}
 .pat:first-child{border-top:none}
 .days{display:flex;gap:.25rem;margin-bottom:.4rem}

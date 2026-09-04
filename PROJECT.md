@@ -3510,3 +3510,42 @@ does not belong on the role record — it belongs on a small ordered override
 list keyed on role and/or site, falling back to `co.rate`. That is a different
 schema and a bigger one. He was asked, and the answer was per role only, so
 per role only is what exists.
+
+## 28. Built: folding the Setup screen away, 4 September 2026
+
+§27 left the Setup screen 5,295 pixels tall with two jobs on it. Each job now
+carries a rota, a role table and a site table, and it is a screen used on a
+phone. So each job is a fold, and each section inside it is a fold.
+
+Native `<details>`/`<summary>`: it folds, it takes a keyboard, and it needs no
+script to do either — which matters in a repo with no build step and no
+runtime dependencies.
+
+**The rule the whole thing rests on.** A collapsed fold has to say enough that
+opening it is a choice rather than a search. A summary reading "Roles" and
+nothing else is not a fold, it is a thing hidden. So every one carries its own
+state on the right: `$15.00/h · week from Sun · OT after 40 h` for pay,
+`4 declared shifts, 2 can fill a week` for the rota, the record names for the
+two tables, and for the job itself a rate *range* — a job whose roles pay $22
+and $28 does not have one rate to print.
+
+**State is stored, not held in memory.** `S.settings.open`, keyed `<jobId>`
+and `<jobId>/<section>`. `renderSetup()` runs on almost every edit — renaming
+a role calls it — and a fold that sprang back open each time would be worse
+than no fold. Storing it also means collapsing a job he has finished setting
+up is a decision that still holds next week.
+
+**Absent means shut.** A job set up months ago is a job he is not editing. The
+one exception is a job just added, which `#addco` opens by hand along with its
+Pay and hours section: a job with nothing in it is a form, not a record, and a
+shut fold labelled "New job" would be a puzzle.
+
+Name and colour stay outside the folds, at the top of the open job. They are
+how he tells one job from the other, and burying the field that says which job
+this is inside a section called something else would be perverse. The summary
+lines for the job, the pay fold and the app fold are rewritten on every
+keystroke rather than on the next full redraw — a summary that lags the box
+under it is worse than none.
+
+Removing a job prunes its keys. Nothing reads a stale one, but a store that
+only ever grows eventually holds more dead jobs than live ones.
