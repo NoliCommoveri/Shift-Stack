@@ -176,3 +176,34 @@ test('comparison does not stop at the first wrong byte', () => {
   assert.equal(G.timingSafeEqual('café', 'café'), true);
   assert.equal(G.timingSafeEqual('café', 'cafe'), false);
 });
+
+/* ---------- the schema splitter ------------------------------------------ */
+
+test('every statement in schema.sql survives the split', () => {
+  // The first version filtered out any chunk beginning with `--`, and every
+  // CREATE TABLE in the file has a comment block above it. Seven statements
+  // became two — both CREATE INDEX, on tables no longer being created — and
+  // the migration failed with "no such table" behind a bare 500.
+  const sql = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'worker', 'schema.sql'), 'utf8');
+  const stmts = G.splitSQL(sql);
+
+  assert.equal(stmts.length, 7);
+  for(const t of ['cfg', 'shifts', 'raw', 'polls'])
+    assert.ok(stmts.some(s => new RegExp(`CREATE TABLE IF NOT EXISTS ${t}\\b`).test(s)),
+              `${t} is created`);
+  assert.ok(stmts.every(s => !s.includes('--')), 'comments are stripped, not carried through');
+
+  // A table must be created before anything indexes it.
+  const at = re => stmts.findIndex(s => re.test(s));
+  assert.ok(at(/CREATE TABLE IF NOT EXISTS shifts/) < at(/shifts_ext_uid/));
+  assert.ok(at(/CREATE TABLE IF NOT EXISTS shifts/) < at(/shifts_by_date/));
+  assert.ok(at(/CREATE TABLE IF NOT EXISTS polls/) < at(/polls_at/));
+});
+
+test('the splitter keeps nothing empty and survives an empty file', () => {
+  assert.deepEqual(G.splitSQL('-- only a comment\n\n'), []);
+  assert.deepEqual(G.splitSQL(''), []);
+  assert.deepEqual(G.splitSQL(null), []);
+  assert.deepEqual(G.splitSQL('SELECT 1;;;  ;\n-- x\nSELECT 2'), ['SELECT 1', 'SELECT 2']);
+});

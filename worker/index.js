@@ -25,7 +25,7 @@ const { feedICS } = feedMod;
 const { mergeCalendar } = mergeMod;
 const { matchName } = sitesMod;
 const { guard, alarmFor, feedJob, normalizeTimezone, todayIn, shiftISO,
-        newestStamp, tokenOK } = guardsMod;
+        newestStamp, tokenOK, splitSQL } = guardsMod;
 
 const JSON_HEAD = { 'content-type': 'application/json; charset=utf-8' };
 const nowISO = () => new Date().toISOString();
@@ -254,6 +254,13 @@ async function feed(env, token){
    §14.6's two alarms are computed here rather than in the page, so that the
    rule about what counts as "quietly stopped changing" has one home. */
 async function status(env){
+  // Being asked for status before the schema is applied is an ordinary state
+  // — it is the state every new deploy starts in — so it answers rather than
+  // throwing a 500 nobody can read.
+  if(!(await tablesExist(env)))
+    return json({ needsSetup: true, alarm: null, shifts: {}, polls: [],
+                  message: 'The database has no tables yet. Press "Set up the database".' });
+
   const { results: polls } = await env.DB.prepare(
     `SELECT * FROM polls ORDER BY id DESC LIMIT 50`).all();
   const rows = polls || [];
@@ -277,9 +284,27 @@ async function status(env){
 /* Applied from the app's Settings screen. Nobody is asked to paste SQL into
    the D1 console (§14.9), and running it twice is harmless by construction. */
 async function migrate(env){
-  const stmts = schemaSQL.split(/;\s*$/m).map(s => s.trim()).filter(s => s && !/^--/.test(s));
-  await env.DB.batch(stmts.map(s => env.DB.prepare(s)));
+  const stmts = splitSQL(schemaSQL);
+  // A schema that parsed to nothing is a bug in the splitter, not an empty
+  // database. Saying so beats reporting "0 statements applied" as a success.
+  if(stmts.length < 4) throw new Error(`the schema parsed to ${stmts.length} statements, which cannot be right`);
+  // One at a time rather than in a batch, so a failure names the statement
+  // that caused it instead of the whole file. Every one is IF NOT EXISTS, so
+  // a run that stops halfway can simply be run again.
+  for(const sql of stmts){
+    try { await env.DB.prepare(sql).run(); }
+    catch (e) { throw new Error(`${e.message} — while running: ${sql.split('\n')[0].slice(0, 80)}`); }
+  }
   return json({ ok: true, statements: stmts.length });
+}
+
+/* Has the schema been applied? Asked of sqlite_master rather than by catching
+   a failure, so that a real database error is not read as "not set up yet". */
+async function tablesExist(env){
+  const r = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name IN ('cfg','shifts','raw','polls')`
+  ).first();
+  return !!r && r.n === 4;
 }
 
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: JSON_HEAD });
@@ -287,30 +312,13 @@ const bad = msg => json({ ok: false, error: msg }, 400);
 
 export default {
   async fetch(req, env){
-    const url = new URL(req.url);
-    const path = url.pathname;
-
-    if(path === '/push' && req.method === 'POST') return push(req, env);
-
-    const f = /^\/feed\/(.+)\.ics$/.exec(path);
-    if(f && req.method === 'GET') return feed(env, decodeURIComponent(f[1]));
-
-    // The push token, not the feed token. The phone holds exactly one secret;
-    // FEED_TOKEN exists only to sit in the URL ICSx⁵ subscribes to, and
-    // giving the app a second token to paste would be a second thing to get
-    // wrong for no gain.
-    if(path === '/status' && req.method === 'GET'){
-      if(!tokenOK(env.PUSH_TOKEN, bearer(req))) return new Response('no', { status: 401 });
-      return status(env);
+    try { return await route(req, env); }
+    catch (e) {
+      // Without this a thrown error is a bare 500 with no body, which is what
+      // the Setup screen showed while the migration was silently applying two
+      // statements out of seven. The message is ours and names no secret.
+      return json({ ok: false, error: e.message || String(e) }, 500);
     }
-
-    if(path === '/migrate' && req.method === 'POST'){
-      if(!tokenOK(env.PUSH_TOKEN, bearer(req))) return new Response('no', { status: 401 });
-      return migrate(env);
-    }
-
-    // Everything else is the app, served from the same origin it calls.
-    return env.ASSETS.fetch(req);
   },
 
   async scheduled(event, env, ctx){
@@ -322,3 +330,30 @@ export default {
     }));
   }
 };
+
+async function route(req, env){
+  const url = new URL(req.url);
+  const path = url.pathname;
+
+  if(path === '/push' && req.method === 'POST') return push(req, env);
+
+  const f = /^\/feed\/(.+)\.ics$/.exec(path);
+  if(f && req.method === 'GET') return feed(env, decodeURIComponent(f[1]));
+
+  // The push token, not the feed token. The phone holds exactly one secret;
+  // FEED_TOKEN exists only to sit in the URL ICSx⁵ subscribes to, and
+  // giving the app a second token to paste would be a second thing to get
+  // wrong for no gain.
+  if(path === '/status' && req.method === 'GET'){
+    if(!tokenOK(env.PUSH_TOKEN, bearer(req))) return new Response('no', { status: 401 });
+    return status(env);
+  }
+
+  if(path === '/migrate' && req.method === 'POST'){
+    if(!tokenOK(env.PUSH_TOKEN, bearer(req))) return new Response('no', { status: 401 });
+    return migrate(env);
+  }
+
+  // Everything else is the app, served from the same origin it calls.
+  return env.ASSETS.fetch(req);
+}
