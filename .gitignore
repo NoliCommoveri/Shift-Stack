@@ -1,0 +1,5 @@
+# The app itself has no dependencies and no build step — what is in the repo
+# root is what gets served. These only appear when the test tooling is
+# installed locally, and nothing that ships needs them.
+node_modules/
+package-lock.json
