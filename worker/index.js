@@ -257,6 +257,30 @@ async function feed(env, token){
   });
 }
 
+/* Pass two of §14.7, and the half that makes the app the thing he looks at.
+
+   The cron's shifts exist only here. Until the phone can read them back its
+   Schedule shows one job out of two and its Pay screen is short by a whole
+   employer's hours — confidently wrong rather than visibly empty, which is the
+   failure §23 is the record of. The calendar was right the whole time, and the
+   calendar is the backup; the app is what he opens.
+
+   Only `source='feed'` rows go down. Everything else on this server arrived
+   from the phone in the first place, and handing it back would invite the two
+   copies to disagree about which is newer. §14.3 gives each side a column it
+   owns, and this is that same line read in the other direction: the push
+   replaces everything that is not `feed`, this replaces everything that is.
+   Neither can half-apply, and neither needs to know what the other did. */
+async function feedShifts(env){
+  // Same answer as /status gives before the schema is applied: an ordinary
+  // state, not a 500. The phone must be able to tell "no tables yet" from "no
+  // shifts", because one of those is a reason to wipe its local copy and the
+  // other is very much not.
+  if(!(await tablesExist(env)))
+    return json({ needsSetup: true, shifts: [], at: nowISO() });
+  return json({ shifts: await readShifts(env, `WHERE source = 'feed'`), at: nowISO() });
+}
+
 /* The poll ring buffer and the current counts, for the app's Setup screen.
    §14.6's two alarms are computed here rather than in the page, so that the
    rule about what counts as "quietly stopped changing" has one home. */
@@ -354,6 +378,15 @@ async function route(req, env){
   if(path === '/status' && req.method === 'GET'){
     if(!tokenOK(env.PUSH_TOKEN, bearer(req))) return new Response('no', { status: 401 });
     return status(env);
+  }
+
+  // The phone reading the cron's half back down (§14.7 pass two). Behind the
+  // push token like /status is, and for the same reason: it is his schedule,
+  // and a schedule is exactly as private as the calendar the feed token
+  // protects.
+  if(path === '/shifts' && req.method === 'GET'){
+    if(!tokenOK(env.PUSH_TOKEN, bearer(req))) return new Response('no', { status: 401 });
+    return feedShifts(env);
   }
 
   if(path === '/migrate' && req.method === 'POST'){

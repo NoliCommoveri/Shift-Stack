@@ -76,6 +76,13 @@ let saveTimer = null;
 function save(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => idb.put(S).catch(()=>{}), 120);
+  // And out to the server, if there is one. Hung on `save` rather than on a
+  // list of the places that change a shift, because every one of those already
+  // calls `save` and a hand-written list would be missing the one that
+  // mattered. What actually goes over the wire is decided in `autoPush`, which
+  // compares the payload with the last one the server took — so the fold he
+  // just opened costs nothing.
+  schedulePush();
 }
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID()
@@ -122,6 +129,12 @@ function weekStart(dateStr, startDow){
    — the schedule, the pay tab, the horizon note and the calendar file — and
    §20 is the record of what each of them did before it could. */
 const isProposed = s => !!s && s.source === 'pattern';
+/* A shift the employer's own calendar published, brought in by the Worker's
+   cron rather than typed here (§14.7). Marked wherever it is drawn and read
+   only wherever it is opened: the next poll rewrites it from the employer's
+   feed, so an edit made on this phone would be undone within fifteen minutes
+   with nothing said. */
+const isFromFeed = s => !!s && s.source === 'feed';
 
 /* ---------- deleting a shift the calendar already has (§10.6, §22) --------
    Subscription mode is immune: the file is the whole calendar, so a shift
@@ -562,8 +575,19 @@ function payNote(co){
   return esc(bits.join(' \u00b7 '));
 }
 
+/* The job the Worker polls, if one has been ticked. Read the same way
+   `feedJob` in worker/guards.js reads it, single job included, so the two
+   cannot disagree about whose calendar is being fetched. */
+function feedJobName(){
+  const co = S.companies.find(c => c.icsFeed)
+          || (S.companies.length === 1 ? S.companies[0] : null);
+  return co ? co.name : '';
+}
+
 function appNote(co){
   const bits = [];
+  // First, because it is the one that decides whether the cron runs at all.
+  if(co.icsFeed) bits.push('polled by the server');
   if(co.pkg) bits.push(co.pkg);
   if(co.icsMatch) bits.push(`only \u201c${co.icsMatch}\u201d`);
   if(co.holidays){
@@ -886,7 +910,13 @@ function staleNotes(){
       // Only when it is late. Said always, this is the clause he stops seeing.
       if(first <= late)
         t += ' The alarms on the phone come from the last export, not from this screen.';
-      t += ` Save ${sub ? 'the feed file' : 'new shifts'} in Setup.`;
+      // With a server there is no instruction to give: it sends itself, and
+      // this warning being on screen at all means an attempt has not landed
+      // yet. Saying "save it in Setup" would be telling him to press a button
+      // that is not what is holding this up.
+      t += pushToken()
+        ? ' They send themselves \u2014 if this stays, check the server in Setup.'
+        : ` Save ${sub ? 'the feed file' : 'new shifts'} in Setup.`;
 
       const days = daysSinceExport();
       if(days !== null && days >= 3) t += ` Last saved ${days} days ago.`;
@@ -1132,7 +1162,8 @@ function renderSchedule(){
           <div>
             <div class="when">${esc(fmtTime(s.start))} – ${esc(fmtTime(s.end))}</div>
             <div class="where">${esc(co ? co.name : 'Unassigned')} &middot; ${esc(shiftWhere(s))}${
-              isProposed(s) ? ' &middot; <span class="rota">from the rota</span>' : ''}</div>
+              isProposed(s) ? ' &middot; <span class="rota">from the rota</span>' : ''}${
+              isFromFeed(s) ? ' &middot; <span class="fromfeed">from the calendar</span>' : ''}</div>
           </div>
           <div class="len">${fmtDur(durMins(s))}</div>`;
         item.onclick = () => editShift(s.id);
@@ -1433,11 +1464,18 @@ function patternDays(p){
 }
 function renderPatterns(co, host, sugHost){
   host.innerHTML = '';
-  if(!co.patterns) co.patterns = [];
-  if(!co.patterns.length)
+  // Read, not written. This used to fill in a missing `patterns` on the way
+  // past, which made drawing the Setup screen a change to the store — and
+  // since the automatic push compares payloads, a job saved before §18 would
+  // have sent itself once more on the first render after every launch, for
+  // ever. A render that mutates what it draws is a bug waiting for something
+  // to be watching; now something is. The array is created where one is
+  // actually added, below.
+  const pats = co.patterns || [];
+  if(!pats.length)
     host.appendChild(el('p','tiny soft','None declared. Times are then only checked for a plausible length.'));
 
-  co.patterns.forEach((pat, i) => {
+  pats.forEach((pat, i) => {
     const row = el('div','pat');
     row.innerHTML = `
       <div class="days">${DAYNAMES.map((d, dow) =>
@@ -1529,7 +1567,10 @@ function renderPatterns(co, host, sugHost){
     // Deliberately blank. A made-up default left in by accident would flag
     // every real shift as off-pattern, and a pattern with no times is dropped
     // by validPatterns() rather than half-believed.
-    co.patterns.push({ start:'', end:'' });
+    // Created here, which is the moment a job actually acquires one. A job
+    // that has never declared a shift keeps no `patterns` key at all, and so
+    // keeps sending the same bytes it sent last time.
+    co.patterns = (co.patterns || []).concat({ start:'', end:'' });
     save(); renderPatterns(co, host, sugHost);
   };
   const build = el('button','ghost','Build from what\u2019s on file');
@@ -2011,6 +2052,15 @@ function renderSetup(){
     app.body.innerHTML = `
       <label class="f"><span>Android app package, for the open button</span>
         <input data-k="pkg" type="text" placeholder="com.tracktik.shift" value="${esc(co.pkg||'')}"></label>
+      <label class="tick" style="margin:.2rem 0 .5rem">
+        <input data-k="icsFeed" type="checkbox"${co.icsFeed ? ' checked' : ''}>
+        The server polls this job's calendar</label>
+      <p class="tiny soft" style="margin:-.25rem 0 .55rem">Which job the Worker's own
+        ICS_URL belongs to \u2014 the one Homebase syncs into Google. One job at a time:
+        ticking this unticks the other. Until something is ticked the cron has nothing to
+        file its shifts against and refuses every fifteen minutes, which is a calendar that
+        has quietly stopped changing (\u00a714.6).</p>
+
       <label class="f"><span>Calendar import: only events mentioning\u2026</span>
         <input data-k="icsMatch" type="text" placeholder="Station" value="${esc(co.icsMatch||'')}"></label>
       <p class="tiny soft" style="margin:-.35rem 0 0">An employer's calendar sync writes into a
@@ -2068,11 +2118,21 @@ function renderSetup(){
     card.querySelectorAll('[data-k]').forEach(inp => {
       inp.oninput = () => {
         const k = inp.dataset.k;
-        let v = inp.value;
+        let v = inp.type === 'checkbox' ? inp.checked : inp.value;
         if(['rate','otAfterHrs','breakMins','breakAfterHrs','weekStart'].includes(k))
           v = v === '' ? null : +v;
         co[k] = v;
+        // Exactly one job is the one the Worker polls. `feedJob` in
+        // worker/guards.js takes the first it finds, so two ticked would make
+        // the choice by store order and say nothing about having made it.
+        // Decided here instead, where he can see which one it landed on.
+        if(k === 'icsFeed' && v) S.companies.forEach(c => { if(c !== co) c.icsFeed = false; });
         save();
+        // The other job's tick has just changed too, and the Server section
+        // below reports on which one is polled. Both are somewhere else on the
+        // screen, so this is a full redraw rather than the in-place patching
+        // the text fields below make do with.
+        if(k === 'icsFeed'){ renderSetup(); return; }
         if(k === 'name' || k === 'color'){ renderLaunchers(); }
         // Every figure on the pay tab hangs off these, and a rate typed with
         // the tab already drawn used to sit there stale until something else
@@ -2132,20 +2192,28 @@ function renderSetup(){
   // In subscription mode the button either sends or saves, and it has to say
   // which: the two leave the shifts in different places, and a label that
   // lied about it would be found out at the calendar rather than here.
-  if(btn) btn.textContent = sub ? (pushToken() ? 'Send to the server' : 'Save the feed file')
+  if(btn) btn.textContent = sub ? (pushToken() ? 'Send now' : 'Save the feed file')
                                 : 'Save new shifts';
   const all = document.getElementById('exportall');
   if(all) all.hidden = sub;
   const help = document.getElementById('feedhelp');
   if(help) help.textContent = sub
     ? (pushToken()
-        ? 'The server holds every shift and ICSx\u2075 reads it from there, so the calendar mirrors it exactly and never duplicates.'
+        ? 'Shifts go to the server on their own, a few seconds after any change. '
+          + 'The server holds every shift and ICSx\u2075 reads it from there, so the calendar '
+          + 'mirrors it exactly and never duplicates. The button is only for sending one now.'
         : 'Always save over the same shifts.ics that ICSx\u2075 points at. It holds every shift, so the calendar mirrors it exactly and never duplicates.')
     : 'Only shifts not sent before are included, so importing again will not duplicate anything.';
   const un = S.shifts.filter(s => !s.sent).length;
+  // Split named rather than totalled. The two halves reach the server by
+  // completely different routes — one by the button above, one by a cron this
+  // phone never sees — so "31 shifts" would hide the only question worth
+  // asking here, which is whether the half he does not carry is arriving.
+  const fed = S.shifts.filter(isFromFeed).length;
   const note = document.getElementById('unsent');
   if(note) note.textContent = sub
-    ? `${S.shifts.length} shift${S.shifts.length===1?'':'s'} in the feed.`
+    ? `${S.shifts.length} shift${S.shifts.length===1?'':'s'} in the feed`
+      + (fed ? `, ${fed} of them fetched from ${feedJobName() || 'the server'}.` : '.')
     : (un ? `${un} shift${un===1?'':'s'} not yet in the calendar.` : 'The calendar is up to date.');
 
   // Deleted shifts the calendar has not been told about. Only in manual-import
@@ -2172,9 +2240,42 @@ function renderAll(){
 }
 
 /* ---------- shift editing dialog ---------------------------------------- */
+/* A feed shift, opened. Everything the edit dialog would have shown him and
+   none of the controls, because there is nothing here he can usefully change.
+   It is still worth opening: the address is the reason §8.1 exists — he taps
+   it and he is navigating — and the tap that gets him there is the same one on
+   both kinds of shift. */
+function showFeedShift(s){
+  const co = coById(s.companyId), where = shiftAddress(s);
+  const dlg = $('#dlg');
+  $('#dlgbody').innerHTML = `
+    <h2>${esc(co ? co.name : 'Unassigned')}</h2>
+    <p class="tiny soft" style="margin:-.5rem 0 .7rem">From this job\u2019s own calendar,
+      fetched every fifteen minutes.</p>
+    <div class="facts">
+      <div><span>Date</span><b>${esc(fmtDay(s.date))}</b></div>
+      <div><span>Time</span><b class="mono">${esc(fmtTime(s.start))}\u2013${esc(fmtTime(s.end))}
+        \u00b7 ${esc(fmtDur(durMins(s)))}</b></div>
+      <div><span>Where</span><b>${esc(shiftWhere(s))}</b></div>
+      ${where ? `<div><span>Address</span><b>${esc(where)}</b></div>` : ''}
+    </div>
+    <p class="tiny soft">Changing it here would be undone at the next fetch, so it is read
+      only. Move the shift in ${esc(co ? co.name : 'the employer\u2019s app')} and it arrives
+      here within fifteen minutes.</p>
+    <div class="rowbtns"><button class="act" id="e-close">Close</button></div>`;
+  dlg.showModal();
+  $('#e-close').onclick = () => dlg.close();
+}
+
 function editShift(id){
   const s = S.shifts.find(x => x.id === id);
   if(!s) return;
+  // Not his to change. It belongs to the employer's calendar, and the cron
+  // replaces it from there every fifteen minutes — an edit saved here would be
+  // gone by the next poll with nothing on any screen to say why, which is the
+  // silent staleness this app exists to refuse (§4). Shown properly instead,
+  // and told where the change actually has to be made.
+  if(isFromFeed(s)) return showFeedShift(s);
   const dlg = $('#dlg');
   // What the label offers each picker. Read fresh each time because the label
   // box below is editable and the pickers are redrawn from it.
@@ -3011,6 +3112,24 @@ function renderServer(st, err){
   alarm.hidden = true;
   polls.innerHTML = '';
 
+  // Drawn before anything the server said, and reached whether or not it was
+  // asked. With no job ticked `feedJob` returns nothing, every tick refuses,
+  // and what eventually arrives here is the Worker's own "six hours without a
+  // successful poll" — the symptom, six hours late, on the one screen where
+  // the cause is two sections up. The refusals in the list below say it too,
+  // but only to somebody who scrolls down and reads them.
+  //
+  // Only once there is a token: without one there is no Worker, and nothing
+  // to poll with.
+  if(pushToken() && !feedJobName()){
+    alarm.hidden = false;
+    alarm.textContent = S.companies.length
+      ? 'No job is set for the server to poll, so the cron fetches nothing and the '
+        + 'Schedule is missing that job. Tick \u201cThe server polls this job\u2019s '
+        + 'calendar\u201d on whichever one syncs into Google.'
+      : 'No jobs are set up yet, so there is nothing for the server to poll.';
+  }
+
   if(err){ note.textContent = err; return; }
   if(!st){
     note.textContent = pushToken()
@@ -3029,7 +3148,11 @@ function renderServer(st, err){
   if(n.manual) bits.push(`${n.manual} entered here`);
   if(n.pattern) bits.push(`${n.pattern} from the rota`);
   note.textContent = (bits.length ? bits.join(', ') : 'No shifts on the server yet')
-    + (st.lastGood ? `. Last good poll ${whenWords(st.lastGood)}.` : '. No successful poll yet.');
+    + (st.lastGood ? `. Last good poll ${whenWords(st.lastGood)}.` : '. No successful poll yet.')
+    // What this phone holds, as against what the server says it has. The two
+    // being far apart is the read-through cache having gone stale, and there
+    // is nothing else on any screen that would show it.
+    + (S.settings.lastPull ? ` Read down here ${whenWords(S.settings.lastPull)}.` : '');
 
   if(st.alarm){ alarm.hidden = false; alarm.textContent = st.alarm; }
 
@@ -3088,18 +3211,208 @@ const settingsToSend = () => {
 
 /* What the phone owns: the config, and every shift that did not come from the
    feed. The Worker replaces its half with this and leaves the cron's rows
-   alone (§14.3). */
-async function pushToServer(){
-  const mine = S.shifts.filter(s => s.source !== 'feed');
-  return server('/push', {
+   alone (§14.3).
+
+   Built as the string it will be sent as, because that string is also how the
+   automatic push decides whether there is anything to say. Comparing the
+   payload against the last one the server accepted is exact: it cannot push
+   for a change that does not reach the server, and it cannot miss one that
+   does. A cheaper signal — a dirty flag, a hash — would be one or the other.
+
+   `sent` is stripped. It records what *this phone* has put into a calendar,
+   which is not the server's business and never was; the same argument the pull
+   makes in the other direction. It also has to go, or the flag this sets on a
+   successful push would change the payload and ask for another push to say so,
+   for ever. */
+function pushBody(){
+  const mine = S.shifts.filter(s => !isFromFeed(s)).map(s => {
+    const { sent, ...rest } = s;
+    return rest;
+  });
+  return JSON.stringify({
+    cfg: { companies: S.companies, sites: S.sites, roles: S.roles,
+           settings: settingsToSend() },
+    shifts: mine
+  });
+}
+
+/* The one sender. Both the automatic path and the button come through here, so
+   there is no way for the two to mark things sent differently.
+
+   The marking happens only on a confirmed write, which is the rule §14.7 set
+   for the button and matters far more now that nobody is watching: a failed
+   push that marked them anyway would leave §23's warnings silent about a
+   calendar that never received them. Left unmarked, the Schedule says so by
+   itself and the next attempt picks them up. */
+let sentBody = null;
+async function sendUp(body){
+  const r = await server('/push', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      cfg: { companies: S.companies, sites: S.sites, roles: S.roles,
-             settings: settingsToSend() },
-      shifts: mine
-    })
+    body
   });
+  sentBody = body;
+  S.shifts.forEach(s => { s.sent = true; });
+  S.settings.lastExport = new Date().toISOString();
+  // The rebuild *is* the cancellation here: a deleted shift is simply not in
+  // what was sent, so the feed drops the event on the next sync (§22).
+  S.tombstones = [];
+  save();
+  return r;
+}
+
+async function pushToServer(){
+  return sendUp(pushBody());
+}
+
+/* Sending without being asked.
+
+   The button was the whole mechanism, and it was the wrong shape for what it
+   does. A shift added at the end of a shift, on a phone, is added by somebody
+   who has just finished twelve hours; the step between "it is in the app" and
+   "it is in the calendar" is a step that gets missed, and missing it is
+   silent — the alarms simply do not fire. §4 refused that failure everywhere
+   else in this app and left it standing here.
+
+   So every change to the phone's half sends itself. `save()` schedules this,
+   which is what makes it complete rather than nearly complete: every mutation
+   in the app already calls `save()`, including the ones a list of triggers
+   written by hand would have missed.
+
+   The payload comparison is what makes that affordable. `save()` runs on every
+   keystroke in Setup and on every fold he opens; almost none of those change
+   what the server holds, and the ones that do not never reach the network.
+
+   Failure is quiet and is not lost. `sentBody` is only updated on success, so
+   the next save, the next resume, or the next minute tries again with whatever
+   is current by then — and until one of them lands, the shifts stay unmarked
+   and the Schedule keeps saying they are not in the calendar. Being offline is
+   the ordinary case here, not an error to report. */
+let pushTimer = null;
+const PUSH_WAIT_MS = 4000;
+
+async function autoPush(){
+  if(!pushToken()) return null;
+  const body = pushBody();
+  if(body === sentBody) return null;              // the server already has this
+  try {
+    const r = await sendUp(body);
+    renderAll();
+    return r;
+  } catch (e) {
+    return null;                                   // try again on the next nudge
+  }
+}
+
+/* Debounced, because a rate typed into Setup is eight keystrokes and one
+   change. Long enough to swallow a burst of typing, short enough that it has
+   gone before he closes the app — and `flushPush` covers the case where it has
+   not. */
+function schedulePush(){
+  if(!pushToken()) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(autoPush, PUSH_WAIT_MS);
+}
+
+/* Now, not in four seconds. Backgrounding the app is the last moment there is:
+   Android can stop the page at any point after it, and a pending timer stops
+   with it. */
+function flushPush(){
+  clearTimeout(pushTimer);
+  return autoPush();
+}
+
+/* The other direction, and §14.7's pass two: the cron's shifts read back down
+   so this device holds both jobs rather than only the one it types in.
+
+   Without it the split is invisible and wrong in the worst way — the calendar
+   is complete and the app is not, so the Schedule shows one employer, the Pay
+   screen is short by the other's hours, and every clash and short-rest warning
+   is worked out over half the picture. The app is what he looks at. The
+   calendar is the backup. This is the line that makes that true.
+
+   The local half can be replaced whole because `source` says who wrote what:
+   the phone never files a `feed` shift — a calendar imported by hand here is
+   `ics`, and the Worker rejects anything else claiming to be `feed` — so that
+   column is an unambiguous mark for "this came from the cron". Replacing it
+   mirrors the `DELETE FROM shifts WHERE source != 'feed'` the push does at the
+   other end. Each side owns a column and replaces its own in one go, so
+   neither can half-apply and neither has to know what the other did.
+
+   Names are resolved again on arrival rather than taken as given. The Worker
+   matched them against the cfg it was last pushed, and a site added on this
+   phone this morning is not in it; putting every row past the local tables is
+   what stops a shift landing as bare text beside one the app already files
+   properly. */
+async function pullFromServer(){
+  const r = await server('/shifts');
+  // Not the same as an empty list, and the difference matters: a database with
+  // no tables yet has nothing to say about his shifts, and wiping the local
+  // copy on the strength of that would delete a schedule to match a server
+  // that has never held one.
+  if(r && r.needsSetup) return null;
+  if(!r || !Array.isArray(r.shifts))
+    throw new Error('The server did not send a list of shifts.');
+
+  // `sent` means "the calendar has this", and for a fetched shift the answer
+  // depends on which calendar.
+  //
+  // In subscription mode it is true by construction and has to be set that
+  // way: the feed ICSx\u2075 reads is built from the server's own rows, so a
+  // shift that came *from* there is in it already. Carried down as false, the
+  // Schedule would warn that a shift is not in the calendar while the calendar
+  // was showing it — a permanent amber about nothing, which §19.1 is the
+  // record of.
+  //
+  // In manual-import mode the calendar is fed by files this phone writes, so
+  // the local flag is the only record of whether it was in one, and it is
+  // carried forward. Dropping it would put the same events into the next file
+  // and duplicate them (§13).
+  //
+  // `seq` comes down either way: the Worker is the one that bumps it when the
+  // employer moves a shift (§22).
+  const subMode = S.settings.feedMode !== 'import';
+  const wasSent = new Map(S.shifts.filter(isFromFeed).map(s => [s.id, !!s.sent]));
+
+  const rows = r.shifts
+    .filter(s => s && s.id && s.companyId && s.date && s.start && s.end)
+    .map(s => {
+      // Forced rather than trusted. Everything this function does downstream
+      // rests on the mark being right, and a row that arrived without one
+      // would quietly become the phone's to push back up.
+      const row = { ...s, source: 'feed',
+                    sent: subMode ? true : (wasSent.get(s.id) || false) };
+      applyNames(row);
+      return row;
+    });
+
+  S.shifts = S.shifts.filter(s => s.source !== 'feed').concat(rows);
+  S.settings.lastPull = new Date().toISOString();
+  save(); renderAll();
+  return rows.length;
+}
+
+/* When the pull happens, and why it is quiet.
+
+   On boot and on coming back to the app, because that is when he is looking —
+   a PWA resumes rather than reloads, so returning to the home screen icon is
+   the only "opened it" signal there is. The floor stops a tab switch costing a
+   request; the cron only moves every fifteen minutes and nothing here is
+   racing it.
+
+   Failure says nothing on these paths on purpose. It is ordinary — the phone
+   is offline in half the car parks he works in — and the shifts are already on
+   the screen from IndexedDB, which is the whole point of keeping them there.
+   The Setup screen is where the server is reported on, and `renderServer` says
+   it properly there, with the button that asked. */
+let lastPull = 0;
+const PULL_FLOOR_MS = 5 * 60 * 1000;
+async function syncDown(force){
+  if(!pushToken()) return null;
+  if(!force && Date.now() - lastPull < PULL_FLOOR_MS) return null;
+  lastPull = Date.now();
+  try { return await pullFromServer(); }
+  catch (e) { lastPull = 0; return null; }   // let the next chance try again
 }
 
 function buildICS(only){
@@ -3114,17 +3427,27 @@ async function pushExport(){
   const was = btn ? btn.textContent : '';
   if(btn){ btn.disabled = true; btn.textContent = 'Sending\u2026'; }
   try {
+    // Unconditional, unlike the automatic path: he pressed it, and a button
+    // that decides for itself that the server already has this would look
+    // broken on the one occasion he is pressing it because he doubts that.
+    clearTimeout(pushTimer);
     const r = await pushToServer();
-    S.shifts.forEach(s => s.sent = true);
-    S.settings.lastExport = new Date().toISOString();
-    // The rebuild *is* the cancellation here: a deleted shift is simply not in
-    // what was sent, so the feed drops the event on the next sync (§22).
-    S.tombstones = [];
-    save(); renderAll();
-    $('#srvnote').textContent = `Sent ${r.shifts} shift${r.shifts === 1 ? '' : 's'} to the server.`;
+    renderAll();
+    // The cron's half read straight back, so the one button is a whole sync
+    // rather than half of one. It cannot fail the send that just succeeded —
+    // the shifts are on the server either way — so it is allowed to be quiet
+    // about a network that has since gone away.
+    //
+    // Awaited, and the note written afterwards: the pull redraws Setup on its
+    // way out, and `renderServer(null)` would have replaced this line with
+    // "Not checked yet." a moment after he read it.
+    const got = await syncDown(true);
+    $('#srvnote').textContent = `Sent ${r.shifts} shift${r.shifts === 1 ? '' : 's'} to the server.`
+      + (got ? ` Read back ${got} from ${feedJobName() || 'the calendar'}.` : '');
   } catch (e) {
     renderServer(null, `Not sent — ${e.message}`);
-    alert(`The shifts were not sent: ${e.message}\n\nThey are still here, and "Save the feed file" will write the .ics instead.`);
+    alert(`The shifts were not sent: ${e.message}\n\nThey are still here, and the app will keep trying. `
+        + 'To feed the calendar without the server, clear the push token and save the .ics instead.');
   } finally {
     if(btn){ btn.disabled = false; btn.textContent = was; }
   }
@@ -3324,7 +3647,7 @@ $('#addco').onclick = () => {
   const co = {
     id: uid(), name: 'New job', color: palette[S.companies.length % palette.length],
     rate: null, weekStart: 0, otAfterHrs: null, breakMins: null, breakAfterHrs: null,
-    pkg: '', icsMatch: '', patterns: []
+    pkg: '', icsFeed: false, icsMatch: '', patterns: []
   };
   S.companies.push(co);
   // Folded open, both levels (§28). Every other job defaults shut because a
@@ -3342,7 +3665,14 @@ $('#pushtoken').oninput = e => { S.settings.pushToken = e.target.value.trim(); s
 
 $('#srvcheck').onclick = async () => {
   $('#srvnote').textContent = 'Checking\u2026';
-  try { renderServer(await server('/status')); }
+  try {
+    // The pull first, so that what the counts below are read against is what
+    // the Schedule tab is about to show. Forced past the floor: he pressed a
+    // button, and a button that decides for itself that it was pressed too
+    // recently is a button that looks broken.
+    await pullFromServer();
+    renderServer(await server('/status'));
+  }
   catch (e) { renderServer(null, e.message); }
 };
 
@@ -3494,6 +3824,17 @@ $('#flushcache').onclick = async () => {
   await loadState();
   renderAll();
 
+  // After the first paint, never before it. What is on this device is already
+  // the schedule and is already on the screen; a phone with no signal must not
+  // sit on a blank Schedule waiting for a fetch that is not coming.
+  syncDown(true);
+  // And up. `sentBody` starts empty every launch, so this reconciles a session
+  // that ended with a push still owed — the phone was closed in a car park, or
+  // the last attempt failed and there was no later save to retry it. The
+  // Worker replaces its half wholesale, so a push that says nothing new is a
+  // no-op rather than a duplicate.
+  autoPush();
+
   if(navigator.storage?.persist){
     const ok = await navigator.storage.persist().catch(()=>false);
     $('#storenote').textContent = ok
@@ -3503,6 +3844,23 @@ $('#flushcache').onclick = async () => {
   if('serviceWorker' in navigator)
     navigator.serviceWorker.register('sw.js').catch(()=>{});
 
-  setInterval(renderNext, 60000);
-  document.addEventListener('visibilitychange', () => { if(!document.hidden) renderNext(); });
+  // The clock this already ran for the countdown, doing a second job: a phone
+  // sitting on the Schedule when the signal comes back sends what it owes
+  // within the minute, with nothing tapped. `autoPush` is a no-op when the
+  // server already has everything, which is almost every tick.
+  setInterval(() => { renderNext(); autoPush(); }, 60000);
+  // Coming back to the app is the only "he opened it" there is once it is
+  // installed — the shell is cached and the page is not reloaded — so it is
+  // also the only moment the Homebase half can be brought up to date before he
+  // reads it. `syncDown` has its own floor, so a tab switch costs nothing.
+  document.addEventListener('visibilitychange', () => {
+    // Going away is the last moment there is: Android can stop the page at any
+    // point after this, and a debounced push would stop with it.
+    if(document.hidden){ flushPush(); return; }
+    renderNext();
+    syncDown();
+    // Coming back is also the first chance a phone that was out of signal gets
+    // to catch up on whatever it could not send.
+    autoPush();
+  });
 })();

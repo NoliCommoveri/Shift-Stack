@@ -115,6 +115,17 @@ label.f input,label.f select{width:100%}
 /* A shift proposed from the rota, which nothing has confirmed yet: the stripe
    is outlined rather than filled, and the word says what the outline means. */
 .rota{font-style:italic}
+/* A shift the employer's calendar published and the Worker brought in. The
+   same italic the rota mark uses, because both say the same kind of thing —
+   this row is not one he typed — and the words after it say which. */
+.fromfeed{font-style:italic}
+/* The read-only shift panel. A label and a value per row, which is what the
+   edit dialog's fields look like with the inputs taken out. */
+.facts{margin:0 0 .7rem}
+.facts div{display:flex;gap:.6rem;justify-content:space-between;align-items:baseline;
+  padding:.3rem 0;border-bottom:1px solid var(--hair)}
+.facts span{font-size:.8rem;color:var(--soft);flex:none}
+.facts b{font-weight:600;text-align:right}
 tr.assumed td:first-child{color:var(--ink)}
 .shift .when{font-weight:500;font-family:"IBM Plex Mono",monospace;font-size:.9rem}
 .shift .where{font-size:.86rem;color:var(--soft)}
@@ -404,7 +415,7 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
   <p class="flag" id="cancelnote" style="margin-top:.35rem" hidden></p>
 
   <h2 style="margin-top:1.8rem">Server</h2>
-  <p class="tiny soft" style="margin-top:0">The Worker that fetches Homebase’s calendar every fifteen minutes and serves the feed ICSx&#8309; subscribes to. Without it the app still works; the shifts just have to be carried by hand.</p>
+  <p class="tiny soft" style="margin-top:0">The Worker that fetches Homebase’s calendar every fifteen minutes and serves the feed ICSx&#8309; subscribes to. It sends what this phone holds and reads back what the fetch found, so both jobs are on the Schedule and in the pay figures. Without it the app still works on the shifts entered here; the rest have to be carried by hand.</p>
   <label class="f"><span>Push token</span>
     <input type="password" id="pushtoken" autocomplete="off" spellcheck="false" placeholder="the PUSH_TOKEN secret">
   </label>

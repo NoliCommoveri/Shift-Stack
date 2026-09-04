@@ -3874,3 +3874,224 @@ After that: **Export everything**, not the incremental export. The incremental
 one sends only shifts with `sent` false, and the whole broken batch was marked
 `sent` on the way out. In subscription mode this is already true — the file is
 the calendar and every rebuild holds everything (§13).
+
+## 32. Built: the app shows both jobs, 4 September 2026
+
+Two things were missing between §14's Worker and a phone that could be trusted
+to be looked at. They are unrelated in the code and the same bug in use: the
+app was not showing him his schedule.
+
+### 32.1 The cron had no job to poll
+
+`feedJob` in `worker/guards.js` picks the job whose calendar the Worker
+fetches:
+
+```js
+return cos.find(c => c.icsFeed) || (cos.length === 1 ? cos[0] : null);
+```
+
+Nothing ever set `icsFeed`. The two mentions in the repo were that line and its
+own unit test. Setup writes `icsMatch` — the word an event has to contain to be
+taken seriously — and `icsMatch` is a filter, not a choice of job; §11.1 even
+says "a feed-backed job is one with an `icsMatch` set", which is true of the
+import screen and was never true of the cron.
+
+The whole premise of this app is two jobs. With two jobs `find` returns
+undefined, `cos.length === 1` is false, `feedJob` returns null, and every tick
+records `ok: 0, "no job is configured for the feed"` and fetches nothing. Six
+hours of that and §14.6's alarm fires — correctly, and about the symptom. The
+cause was on the Setup screen the whole time, two sections above the alarm.
+
+So Setup grows the tick, on each job's **App and calendar** fold, and it is
+exclusive: ticking one unticks the other. `feedJob` takes the first it finds,
+so two ticked would have made the choice by store order and said nothing about
+having made it. The decision is now visible and is made where he can see it.
+
+`renderServer` says so too, before anything the server reported and whether or
+not the server was asked: with a push token set and no job ticked, the Server
+section says which tick is missing. The Worker's own alarm arrives six hours
+later and names the symptom; this arrives immediately and names the cause.
+
+### 32.2 The phone could not see what the cron fetched
+
+This is §14.7's "pass two", which that section already called not really
+optional. `GET /shifts` on the Worker, behind the same push token `/status` is
+behind, returning the `source='feed'` rows; `pullFromServer` in the page
+replacing its own copy of that half.
+
+Until it landed the split was invisible and wrong in the worst available way.
+The calendar was complete — the Worker builds it from D1, where both halves
+live — and the app was not. So the Schedule showed one employer, the Pay screen
+was short by the other's hours, and every overlap and short-rest warning was
+worked out over half the picture. The calendar was right, and the calendar is
+the backup. The app is what he opens.
+
+**The local half can be replaced whole**, because `source` says who wrote what.
+The phone never files a `feed` shift — a calendar imported by hand here is
+`ics`, and the Worker rejects a pushed row claiming otherwise — so the column
+is an unambiguous mark for "the cron wrote this". Replacing it mirrors the
+`DELETE FROM shifts WHERE source != 'feed'` the push already does at the other
+end. Each side replaces the column it owns in one statement. Neither can
+half-apply, and neither has to know what the other did. §14.3's column
+ownership, read in the second direction.
+
+**Names are resolved again on arrival.** The Worker matched them against the
+cfg it was last pushed, and a site added on the phone this morning is not in
+it. Every row goes past `applyNames` before it is filed, so a shift cannot land
+as bare text beside one the app already files properly.
+
+**An unmigrated server deletes nothing.** `/shifts` answers `needsSetup` before
+the schema is applied, the same way `/status` does, and the pull treats that as
+"nothing to say" rather than "no shifts". Wiping a schedule to match a server
+that has never held one is not a state there is a way back from.
+
+**When it runs**: on boot after the first paint, on `visibilitychange`, on the
+Setup screen's Check button, and after a push — which makes that one button a
+whole sync rather than half of one. The floor is five minutes, and failure is
+silent on every path except the button. Being offline is ordinary here; the
+shifts are already on screen out of IndexedDB, which is what keeping them there
+was for. The Setup screen is where the server is reported on properly.
+
+### 32.3 A fetched shift is read only
+
+It belongs to the employer's calendar and the cron replaces it from there every
+fifteen minutes. An edit saved on the phone would be gone by the next poll with
+nothing on any screen to say why — §4's silent staleness, arriving by a new
+route.
+
+So a feed shift is marked on the Schedule — "from the calendar", the same
+italic the rota mark uses, because both say "this row is not one he typed" —
+and opening one gives a panel rather than the edit dialog: job, date, times,
+where, and the address, which is still one tap from navigation and is the whole
+reason §8.1 exists. No Save, no Delete, and a line saying to move the shift in
+the employer's app, where the change will actually hold.
+
+### 32.4 What the tests hold
+
+Both halves are page-only. `icsFeed` is written by a checkbox and read by a
+Worker; `pullFromServer` merges two lists using `applyNames`, `S` and
+`renderAll`. No unit test can reach either, and the gap between them was a
+Worker refusing every fifteen minutes while 243 tests passed — which is the
+same shape as §31, and the reason `browser.test.js` exists.
+
+Two new browser tests, driving the real handlers: the tick is exclusive and
+survives the redraw it triggers; the pull replaces the feed half, leaves the
+typed shifts alone, resolves names against this phone's tables, refuses to
+delete anything on a `needsSetup` answer, and opens a fetched shift with no way
+to change it.
+
+And one in `config.test.js`: every route in `worker/index.js` checks the push
+token, at the route or in the handler it dispatches to. It reads the file as
+text, because `worker/index.js` imports `schema.sql` and cannot be required
+outside wrangler's bundle. That is weaker than calling it and still worth
+having — a route added without its guard is the whole schedule readable by
+anyone who knows the hostname, and nothing else in the suite would notice.
+
+### 32.5 Found on the way: the app was dead offline
+
+`sw.js` lists the shell files it caches on install. `feed.js` and `merge.js`
+were never added to that list — they have been missing since §14.7 extracted
+them — while `index.html` has loaded all nine scripts the whole time.
+
+The shell handler is cache-first with a network refresh behind it, so a miss is
+not slow offline, it is nothing: the fallback is a `fetch` that cannot succeed,
+and it resolves to `undefined`. The page then loaded eight of its nine scripts.
+`feed.js` throws on a missing collaborator by design — §31 bought that check —
+so what he got was a blank app, with no signal, in the one condition an
+installed PWA exists to survive. Which is also the condition this section's
+whole argument rests on: the app is what he looks at, and half the car parks he
+works in have no signal.
+
+Both files added, and `SHELL` bumped to v10 — `install` only re-runs `addAll`
+under a cache name it has not seen, so without the bump the fix ships and no
+phone fetches it.
+
+`config.test.js` now reads the `<script src>` list out of index.html and the
+`FILES` list out of sw.js and fails if they disagree, the same way
+`globals.test.js` reads that list rather than holding one: a file added to the
+page and not to the shell is exactly the file the test exists for.
+
+## 33. Built: shifts send themselves, 4 September 2026
+
+The button was the whole mechanism for getting the phone's half to the server,
+and it was the wrong shape for what it does.
+
+A shift is added at the end of a shift, on a phone, by somebody who has just
+finished twelve hours. The step between "it is in the app" and "it is in the
+calendar" is a step that gets missed, and missing it is silent in the way this
+project exists to refuse: the shift is on the Schedule, the app looks right, and
+the alarm at five the next morning does not fire. §4 designed that failure out
+of every other path in the app and left it standing at the one place a human had
+to remember something.
+
+### 33.1 Hung on `save`, not on a list of triggers
+
+Every mutation in the app already calls `save()`. So `save()` schedules the
+push, and the coverage is complete rather than nearly complete — a list of
+trigger points written by hand would have been missing the one that mattered,
+and there would have been no way to know which.
+
+Debounced four seconds: a rate typed into Setup is eight keystrokes and one
+change. Flushed immediately when the app is backgrounded, because Android can
+stop the page at any point after that and a pending timer stops with it.
+
+### 33.2 What makes that affordable: comparing the payload
+
+`save()` runs on every keystroke and every fold opened. Almost none of those
+change what the server holds.
+
+So `pushBody()` builds the request as the string it will be sent as, and
+`autoPush` compares it with the last string the server accepted. That test is
+exact in both directions: it cannot push for a change that does not reach the
+server, and it cannot miss one that does. A dirty flag would have been the
+first; a hash would have risked the second.
+
+`sent` is stripped from what goes up. It records what *this phone* has put into
+a calendar, which is not the server's business — the same argument the pull
+already makes in the other direction — and it also has to go, or the flag set on
+a successful push would change the payload and ask for another push to say so,
+for ever.
+
+### 33.3 Failure is quiet, and is not lost
+
+Being offline is the ordinary case here, not an error to report: half the car
+parks he works in have no signal.
+
+So a failed push says nothing and throws nothing. `sentBody` is only advanced on
+success, so the next save, the next resume, the next minute tick, or the next
+launch tries again with whatever is current by then. Four chances, and the last
+one covers a phone that was closed with a push still owed.
+
+The important half is that the shifts stay **unmarked**. `sent` is set only on a
+confirmed write, so §23's warning — "2 shifts are not in the calendar, the
+soonest tomorrow" — stays on the Schedule for exactly as long as it is true, and
+goes when the push lands. The existing machinery is the failure report; nothing
+new had to be built to say it, and nothing nags about a button.
+
+What did change is what that warning tells him to do. It used to end "Save the
+feed file in Setup", which with a server is telling him to press a button that
+is not what is holding this up. With a token set it now says they send
+themselves, and to check the server if the warning stays.
+
+### 33.4 The button is still there, and now means "now"
+
+Renamed to **Send now**, unconditional where the automatic path is not: he
+pressed it, and a button that decides for itself that the server already has
+this would look broken on the one occasion he is pressing it because he doubts
+that. It still does the full round trip — push, then read the cron's half back.
+
+Without a token none of this exists and the `.ics` download is unchanged. The
+token is the consent, and §4's rule is untouched: nothing leaves the device
+without one, automatic or not.
+
+### 33.5 Found by it: rendering was writing to the store
+
+`renderPatterns` filled in a missing `patterns` array on the way past. Harmless
+for as long as nothing compared the store with itself — and the moment something
+did, a job saved before §18 sent itself once more on the first render after
+every launch, for ever, over a difference nobody asked for.
+
+Fixed where it was: the render reads, and the array is created by the button
+that adds the first pattern. The browser test asserts the general rule rather
+than that one line — draw the whole app twice, and the payload must not move.
+Any render that writes to the store fails it.
