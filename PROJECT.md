@@ -3874,3 +3874,139 @@ After that: **Export everything**, not the incremental export. The incremental
 one sends only shifts with `sent` false, and the whole broken batch was marked
 `sent` on the way out. In subscription mode this is already true — the file is
 the calendar and every rebuild holds everything (§13).
+
+## 32. Built: the app shows both jobs, 4 September 2026
+
+Two things were missing between §14's Worker and a phone that could be trusted
+to be looked at. They are unrelated in the code and the same bug in use: the
+app was not showing him his schedule.
+
+### 32.1 The cron had no job to poll
+
+`feedJob` in `worker/guards.js` picks the job whose calendar the Worker
+fetches:
+
+```js
+return cos.find(c => c.icsFeed) || (cos.length === 1 ? cos[0] : null);
+```
+
+Nothing ever set `icsFeed`. The two mentions in the repo were that line and its
+own unit test. Setup writes `icsMatch` — the word an event has to contain to be
+taken seriously — and `icsMatch` is a filter, not a choice of job; §11.1 even
+says "a feed-backed job is one with an `icsMatch` set", which is true of the
+import screen and was never true of the cron.
+
+The whole premise of this app is two jobs. With two jobs `find` returns
+undefined, `cos.length === 1` is false, `feedJob` returns null, and every tick
+records `ok: 0, "no job is configured for the feed"` and fetches nothing. Six
+hours of that and §14.6's alarm fires — correctly, and about the symptom. The
+cause was on the Setup screen the whole time, two sections above the alarm.
+
+So Setup grows the tick, on each job's **App and calendar** fold, and it is
+exclusive: ticking one unticks the other. `feedJob` takes the first it finds,
+so two ticked would have made the choice by store order and said nothing about
+having made it. The decision is now visible and is made where he can see it.
+
+`renderServer` says so too, before anything the server reported and whether or
+not the server was asked: with a push token set and no job ticked, the Server
+section says which tick is missing. The Worker's own alarm arrives six hours
+later and names the symptom; this arrives immediately and names the cause.
+
+### 32.2 The phone could not see what the cron fetched
+
+This is §14.7's "pass two", which that section already called not really
+optional. `GET /shifts` on the Worker, behind the same push token `/status` is
+behind, returning the `source='feed'` rows; `pullFromServer` in the page
+replacing its own copy of that half.
+
+Until it landed the split was invisible and wrong in the worst available way.
+The calendar was complete — the Worker builds it from D1, where both halves
+live — and the app was not. So the Schedule showed one employer, the Pay screen
+was short by the other's hours, and every overlap and short-rest warning was
+worked out over half the picture. The calendar was right, and the calendar is
+the backup. The app is what he opens.
+
+**The local half can be replaced whole**, because `source` says who wrote what.
+The phone never files a `feed` shift — a calendar imported by hand here is
+`ics`, and the Worker rejects a pushed row claiming otherwise — so the column
+is an unambiguous mark for "the cron wrote this". Replacing it mirrors the
+`DELETE FROM shifts WHERE source != 'feed'` the push already does at the other
+end. Each side replaces the column it owns in one statement. Neither can
+half-apply, and neither has to know what the other did. §14.3's column
+ownership, read in the second direction.
+
+**Names are resolved again on arrival.** The Worker matched them against the
+cfg it was last pushed, and a site added on the phone this morning is not in
+it. Every row goes past `applyNames` before it is filed, so a shift cannot land
+as bare text beside one the app already files properly.
+
+**An unmigrated server deletes nothing.** `/shifts` answers `needsSetup` before
+the schema is applied, the same way `/status` does, and the pull treats that as
+"nothing to say" rather than "no shifts". Wiping a schedule to match a server
+that has never held one is not a state there is a way back from.
+
+**When it runs**: on boot after the first paint, on `visibilitychange`, on the
+Setup screen's Check button, and after a push — which makes that one button a
+whole sync rather than half of one. The floor is five minutes, and failure is
+silent on every path except the button. Being offline is ordinary here; the
+shifts are already on screen out of IndexedDB, which is what keeping them there
+was for. The Setup screen is where the server is reported on properly.
+
+### 32.3 A fetched shift is read only
+
+It belongs to the employer's calendar and the cron replaces it from there every
+fifteen minutes. An edit saved on the phone would be gone by the next poll with
+nothing on any screen to say why — §4's silent staleness, arriving by a new
+route.
+
+So a feed shift is marked on the Schedule — "from the calendar", the same
+italic the rota mark uses, because both say "this row is not one he typed" —
+and opening one gives a panel rather than the edit dialog: job, date, times,
+where, and the address, which is still one tap from navigation and is the whole
+reason §8.1 exists. No Save, no Delete, and a line saying to move the shift in
+the employer's app, where the change will actually hold.
+
+### 32.4 What the tests hold
+
+Both halves are page-only. `icsFeed` is written by a checkbox and read by a
+Worker; `pullFromServer` merges two lists using `applyNames`, `S` and
+`renderAll`. No unit test can reach either, and the gap between them was a
+Worker refusing every fifteen minutes while 243 tests passed — which is the
+same shape as §31, and the reason `browser.test.js` exists.
+
+Two new browser tests, driving the real handlers: the tick is exclusive and
+survives the redraw it triggers; the pull replaces the feed half, leaves the
+typed shifts alone, resolves names against this phone's tables, refuses to
+delete anything on a `needsSetup` answer, and opens a fetched shift with no way
+to change it.
+
+And one in `config.test.js`: every route in `worker/index.js` checks the push
+token, at the route or in the handler it dispatches to. It reads the file as
+text, because `worker/index.js` imports `schema.sql` and cannot be required
+outside wrangler's bundle. That is weaker than calling it and still worth
+having — a route added without its guard is the whole schedule readable by
+anyone who knows the hostname, and nothing else in the suite would notice.
+
+### 32.5 Found on the way: the app was dead offline
+
+`sw.js` lists the shell files it caches on install. `feed.js` and `merge.js`
+were never added to that list — they have been missing since §14.7 extracted
+them — while `index.html` has loaded all nine scripts the whole time.
+
+The shell handler is cache-first with a network refresh behind it, so a miss is
+not slow offline, it is nothing: the fallback is a `fetch` that cannot succeed,
+and it resolves to `undefined`. The page then loaded eight of its nine scripts.
+`feed.js` throws on a missing collaborator by design — §31 bought that check —
+so what he got was a blank app, with no signal, in the one condition an
+installed PWA exists to survive. Which is also the condition this section's
+whole argument rests on: the app is what he looks at, and half the car parks he
+works in have no signal.
+
+Both files added, and `SHELL` bumped to v10 — `install` only re-runs `addAll`
+under a cache name it has not seen, so without the bump the fix ships and no
+phone fetches it.
+
+`config.test.js` now reads the `<script src>` list out of index.html and the
+`FILES` list out of sw.js and fails if they disagree, the same way
+`globals.test.js` reads that list rather than holding one: a file added to the
+page and not to the shell is exactly the file the test exists for.

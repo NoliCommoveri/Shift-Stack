@@ -95,6 +95,22 @@ TrackTik  ──screenshots────▶  S H I F T   D E C K   one job named 
                               (native Android)      looks at, and the widget
 ```
 
+With the server (below) the top half stops being a manual step: the Worker
+fetches the staging calendar every fifteen minutes, and the app reads those
+shifts back down so both jobs are on the Schedule and in the pay figures.
+
+```
+Homebase  ──Calendar Sync──▶  "Homebase Raw"  ──┐
+                              (Google)          │  every 15 min
+                                                ▼
+TrackTik  ──screenshots────▶  S H I F T   D E C K  ⇄  the Worker
+                              on the phone            holds both halves
+                                                          │
+                                                          │  ICSx⁵ subscribes
+                                                          ▼
+                                                    "Work Schedule"
+```
+
 Two things follow from it.
 
 **Every event says which job it is.** Homebase writes `Security Officer` and
@@ -123,6 +139,64 @@ Addresses ride along. Homebase puts a real street address on its events, and
 Shift Deck now passes it through to the export, so the two-hour alarm fires, he
 taps the event, taps the address, and he is navigating. For TrackTik shifts
 there is a field for it on the edit dialog.
+
+## The server
+
+Optional, and it is what turns the Homebase half from a chore into something
+that happens by itself. Without it the app still works; the shifts just have to
+be carried by hand.
+
+A single Cloudflare Worker serves this app and does three things behind it:
+fetches the employer's calendar every fifteen minutes, holds every shift in
+D1, and serves the `.ics` ICSx⁵ subscribes to. Because it serves the app too,
+there is no second URL to configure anywhere.
+
+What it needs, once:
+
+1. **The secrets, in the Cloudflare dashboard** — `PUSH_TOKEN` (what the phone
+   authenticates with), `FEED_TOKEN` (what sits in the URL ICSx⁵ subscribes
+   to), and `ICS_URL` (the secret address of the staging calendar). They are
+   not in the repo, and `keep_vars = true` in `wrangler.toml` is what stops
+   each build deleting them.
+2. **The database** — Setup → Server → **Set up the database**. Every statement
+   is `IF NOT EXISTS`, so pressing it twice is harmless.
+3. **The push token, in Setup** → Server → Push token. It is the only secret
+   the phone holds.
+4. **Which job the server polls** — Setup → the job → App and calendar →
+   **The server polls this job's calendar**. Tick it on whichever job syncs into
+   Google; that is Homebase. One job at a time.
+
+Miss the last one and the Worker fetches nothing at all — it has no job to file
+the shifts against, and it refuses every fifteen minutes rather than guessing.
+Setup says so under Server as soon as a token is set.
+
+### What moves in which direction
+
+**Down, by itself.** The Worker fetches the staging calendar every fifteen
+minutes and files what it finds. The app reads those shifts back down on
+launch, whenever you come back to it, when you press **Check the server**, and
+after a push. They appear on the Schedule marked *from the calendar*, they
+count in the pay figures, and the overlap and short-rest warnings finally see
+both employers. They are read only here: change the shift in the employer's app
+and it arrives within fifteen minutes.
+
+**Up, when you say so.** Screenshots, typed shifts and rota fills stay on the
+phone until you press **Send to the server** in Setup. Deleting one of them is
+the same: the server keeps it until the next push. There is no cancellation
+file to save in this mode — the feed is rebuilt whole on every request, so a
+shift that is gone is simply not in it.
+
+**Out, by itself.** ICSx⁵ reads the feed from the Worker on its own schedule
+and mirrors it. Nothing appends, so nothing duplicates.
+
+### Watching it
+
+Setup → Server → **Check the server** shows what the server holds, when the
+last good poll was, when this phone last read down, and the last eight polls
+with their refusals. Two alarms fire there: six hours with no successful poll,
+and a feed that has quietly stopped changing. That second one is the failure
+this whole thing exists to catch — not a wrong shift, a calendar nothing has
+updated and nothing has mentioned.
 
 ## Bringing in an employer's calendar sync
 
@@ -571,6 +645,13 @@ it always meant, and prices at the job's rate.
   tick. That keeps the review row to one control, and the cost is that ignoring
   an amber row teaches the table the spelling it was warning you about. The
   spelling shows on the site's card in Setup and is one tap to forget.
+- Shifts entered on the phone reach the server only when you press **Send to
+  the server**. Nothing pushes on its own. The employer's own calendar is the
+  half that flows without being asked; screenshots, typed shifts and rota fills
+  are carried by that button, and so are deletions of them.
+- A shift the server fetched is read only on the phone. The next poll would
+  undo the change fifteen minutes later, so the app shows it and points you at
+  the employer's app instead.
 - Android can clear the storage of a web app under pressure. Save a backup
   from Setup now and then.
 - Both layouts have been checked against real screenshots, but not yet against

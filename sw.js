@@ -1,9 +1,17 @@
 /* Shift Deck service worker.
    App shell is cached so it opens offline. The OCR engine is cached on first
    use, which is why the second import is much faster than the first. */
-const SHELL = 'shiftdeck-shell-v9';
+const SHELL = 'shiftdeck-shell-v10';
 const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs a 10MB re-download
-const FILES = ['./', './index.html', './parser.js', './ics.js', './patterns.js', './holidays.js', './sites.js', './pay.js', './app.js', './manifest.webmanifest'];
+/* Every script index.html loads, and nothing it does not. feed.js and merge.js
+   were missing from this list from the day §14.7 extracted them: the shell
+   fetch below is cache-first with a network refresh behind it, so a miss
+   offline falls through to a fetch that cannot succeed and returns nothing.
+   The page then loaded eight of its nine scripts, and feed.js throws on a
+   missing collaborator by design — so the app was dead offline, which is the
+   one condition it exists to survive. `tests/config.test.js` now reads both
+   lists and fails if they disagree. */
+const FILES = ['./', './index.html', './parser.js', './ics.js', './patterns.js', './holidays.js', './sites.js', './pay.js', './feed.js', './merge.js', './app.js', './manifest.webmanifest'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(SHELL).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
