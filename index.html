@@ -403,6 +403,19 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
   <p class="tiny soft" id="unsent" style="margin-top:.5rem"></p>
   <p class="flag" id="cancelnote" style="margin-top:.35rem" hidden></p>
 
+  <h2 style="margin-top:1.8rem">Server</h2>
+  <p class="tiny soft" style="margin-top:0">The Worker that fetches Homebase’s calendar every fifteen minutes and serves the feed ICSx&#8309; subscribes to. Without it the app still works; the shifts just have to be carried by hand.</p>
+  <label class="f"><span>Push token</span>
+    <input type="password" id="pushtoken" autocomplete="off" spellcheck="false" placeholder="the PUSH_TOKEN secret">
+  </label>
+  <div class="rowbtns">
+    <button class="ghost" id="srvcheck">Check the server</button>
+    <button class="ghost" id="srvmigrate">Set up the database</button>
+  </div>
+  <p class="tiny soft" id="srvnote" style="margin-top:.5rem"></p>
+  <p class="flag" id="srvalarm" style="margin-top:.35rem" hidden></p>
+  <div id="srvpolls" class="tiny soft" style="margin-top:.5rem"></div>
+
   <h2 style="margin-top:1.8rem">Backup</h2>
   <div class="rowbtns">
     <button class="ghost" id="exportjson">Save a backup</button>

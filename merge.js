@@ -22,8 +22,13 @@
 const keyOf = (() => {
   let mod = null;
   try { mod = require('./sites.js'); } catch (e) { mod = null; }
-  const fn = (mod && typeof mod.whereKey === 'function') ? mod.whereKey
-           : ((typeof globalThis !== 'undefined') ? globalThis.whereKey : undefined);
+  // Bare, not `globalThis.whereKey`: `whereKey` is a top-level `const` in
+  // sites.js, so it lives in the global lexical environment and is not a
+  // property of the global object. Reading it off `globalThis` returned
+  // undefined in the browser and threw this very error on every page load,
+  // while every unit test passed — they go through `require`.
+  if(!mod){ try { mod = { whereKey }; } catch (e) { mod = null; } }
+  const fn = mod && mod.whereKey;
   if(typeof fn !== 'function')
     throw new Error('merge.js needs whereKey, and neither require nor the page provided it');
   return fn;

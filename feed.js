@@ -29,26 +29,37 @@
    does not control, whoever declares it next. */
 const _dep = _need(
   ['icsFold', 'icsEscape', 'icsStamp', 'shiftUID', 'restGaps', 'isShortRest', 'eventTitle', 'addressFor'],
-  () => Object.assign({}, require('./ics.js'), require('./patterns.js'), require('./sites.js')));
+  () => Object.assign({}, require('./ics.js'), require('./patterns.js'), require('./sites.js')),
+  () => ({ icsFold, icsEscape, icsStamp, shiftUID, restGaps, isShortRest, eventTitle, addressFor }));
 
 /* Three environments load this file and each hands over its collaborators a
    different way: Node's test runner by `require`, the browser by globals set
    from the earlier <script> tags, and the Worker by esbuild, which rewrites
    the `require` calls below into direct references while bundling.
 
-   The `try` is what makes the browser work — `require` is not defined there,
-   so the call throws and the globals are used instead. The check afterwards
-   is the part that matters: whatever route a name arrived by, it has to be a
-   function before this file will run. Getting that wrong once already cost a
-   calendar full of "[object Object]", and it cost it silently, so a missing
-   collaborator now fails loudly at load rather than quietly at write. */
-function _need(names, load){
+   The first `try` is what makes the browser work — `require` is not defined
+   there, so the call throws and `page` is used instead.
+
+   `page` names the identifiers bare rather than reading `globalThis`, and
+   that is not a preference. A `function` declaration in a classic script
+   becomes a property of the global object; a top-level `const` does not — it
+   lives in the global *lexical* environment, which `globalThis` cannot see.
+   Eight of the nine collaborators here are functions and resolved either way;
+   `whereKey` in sites.js is a `const` arrow, and reading it off `globalThis`
+   got `undefined` in the browser and nowhere else. A bare reference goes
+   through the whole scope chain and finds both.
+
+   The check afterwards is the part that matters: whatever route a name
+   arrived by, it has to be a function before this file will run. Getting that
+   wrong once already cost a calendar full of "[object Object]", silently, so
+   a missing collaborator now fails at load rather than at write. */
+function _need(names, load, page){
   let mod = null;
   try { mod = load(); } catch (e) { mod = null; }
+  if(!mod){ try { mod = page(); } catch (e) { mod = null; } }
   const out = {};
   for(const n of names){
-    const g = (typeof globalThis !== 'undefined') ? globalThis[n] : undefined;
-    out[n] = (mod && typeof mod[n] === 'function') ? mod[n] : g;
+    out[n] = mod && mod[n];
     if(typeof out[n] !== 'function')
       throw new Error(`feed.js needs ${n}, and neither require nor the page provided it`);
   }
