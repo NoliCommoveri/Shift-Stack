@@ -1160,78 +1160,161 @@ function renderSchedule(){
 }
 
 /* -- pay tab -- */
-/* How much of the past the tab opens on (§29). Four weeks: this one and the
-   three before it. Three is what a fortnightly deposit needs to be checked
-   against with a week of slack, and beyond that he is not checking a figure,
-   he is looking something up — which is what the button below the list is for.
+/* The window the tab opens on (§29). Five weeks: next week, this one, and the
+   three before it.
 
-   Nothing ahead of this week is shown at all, and that is a deletion rather
-   than a fold. A week that has not happened has no pay in it: what the tab
-   would print is the rota's opinion of a week, which is the forecast §20.4
-   already refused to let stand as money. Hours still ahead are on the Schedule
-   tab, where they are hours. */
-const PAY_BACK_WEEKS = 3;
+   Three back is what a fortnightly deposit needs to be checked against with a
+   week of slack; beyond that he is not checking a figure, he is looking one
+   up, and that is what the button under the list is for.
+
+   One week forward, and exactly one. A week's pay is worth knowing the week
+   before it — that is when a thin week is still something he can do something
+   about — and worth nothing before that, because what the tab would print for
+   a fortnight out is the rota's opinion of a week rather than money, which is
+   the forecast §20.4 refused to let stand.
+
+   So the far side has no button. Weeks past next week are dropped rather than
+   folded: a *Show later* was built and taken out again, because a fold implies
+   there is a figure behind it worth opening, and there is not. Hours that far
+   ahead are on the Schedule tab, where they are hours. */
+const PAY_BACK_WEEKS = 3, PAY_FWD_WEEKS = 1;
 
 /* Which side of the window a pay week falls on, worked out in days rather than
    by comparing week-start strings: two jobs can start their weeks on different
    days (§27's `co.weekStart`), and the combined table below holds keys from
-   both. Days from the week's start to today, so a week ahead is negative. */
+   both. Days from the week's start to today, so a week ahead is negative — a
+   week starting tomorrow is -1, and one starting a fortnight out is -14. */
 function payWhen(ws){
   const days = Math.round((asDate(todayISO()) - asDate(ws)) / 86400000);
-  if(days < 0) return 'ahead';
+  if(days < -7 * PAY_FWD_WEEKS) return 'ahead';
   return days < 7 * (PAY_BACK_WEEKS + 1) ? 'now' : 'earlier';
 }
 
-/* One week's work, shown (§29). A week paid at more than one rate used to
-   print its rates under the date, and with three roles in a week that is four
-   lines of small text in the column beside three numbers that have to stay
-   readable as numbers — the row stopped looking like a row. The breakdown is
-   the same information, on its own, asked for.
+/* One week's work, shown (§29).
 
-   It is also the only place the arithmetic can actually be followed: the
-   per-role lines never added up to the gross once there was overtime in the
-   week, because the premium is charged on the average of the rates and lived
-   nowhere on screen. Here it is a row. */
+   Offered on every week, not only a mixed-rate one. The rates used to print
+   under the date and with three roles in a week that was four lines of small
+   text beside three numbers that have to stay readable as numbers — the row
+   stopped looking like a row. But the answer was not to show it only where it
+   was crowded: what an hour is worth, and how much of the week is overtime,
+   are the two things a gross gets checked against, and a single-rate week has
+   both of them just as much as a mixed one does.
+
+   Two tables rather than one, and the split is the point. The first prices the
+   hours; the second pays the week. They are kept apart because once there is
+   overtime in a week they foot to different figures — the hours are worth
+   $810 and the week pays $855 — and a single column carrying both is a column
+   that gets added up wrong. So the first table has no money in it at all.
+
+   The second is the week the way a pay stub says it: regular hours at the
+   regular rate, overtime hours at time and a half, and a gross underneath that
+   the two of them actually add to. */
 function payDetail(co, ws, shifts){
   const w = weekTotals(shifts, co);
   const d = asDate(ws);
   const mult = Number.isFinite(+co.otMult) && +co.otMult > 0 ? +co.otMult : OT_MULT;
-  const straight = w.byRate.reduce((a, r) => a + r.pay, 0);
-  const premium = w.gross - straight;
-  const num = (v, on) => `<td class="n">${on ? money(v) : '\u2013'}</td>`;
+  const hrs = n => n.toFixed(2);
+  const assumed = weekTotals(shifts.filter(isProposed), co);
 
-  const rows = w.byRate.map(r => `<tr>
+  /* -- what the hours were. No pay column, deliberately: see above. */
+  const hourRows = w.byRate.map(r => `<tr>
       <td>${esc(r.name)}${r.rate == null
-        ? '<span class="tiny soft"><br>no rate set, so not in the gross</span>' : ''}</td>
-      <td class="n">${r.hrs.toFixed(2)}</td>
-      ${num(r.rate, r.rate != null)}
-      ${num(r.pay, r.rate != null)}
+        ? '<span class="tiny soft"><br>no rate set</span>' : ''}</td>
+      <td class="n">${hrs(r.hrs)}</td>
+      <td class="n">${r.rate == null ? '–' : money(r.rate)}</td>
     </tr>`).join('');
+  // The average only appears where it is doing work. On a week paid at one
+  // rate it is that rate, said twice.
+  const avgRow = w.mixed ? `<tr class="tot"><td>Average</td>
+      <td class="n">${hrs(w.hrs)}</td><td class="n">${money(w.rate)}</td></tr>` : '';
 
-  // Only when there is overtime, and it is not one of the rates — it is what
-  // the hours past the threshold earn *on top* of what they are already
-  // counted at above, which is why it carries no hours of its own.
-  const otRow = w.ot > 0.005 ? `<tr>
-      <td>Overtime premium<span class="tiny soft"><br>${w.ot.toFixed(2)} h at
-        ${money(w.rate * (mult - 1))} on top, ${mult}\u00d7 the ${money(w.rate)} average</span></td>
-      <td class="n">\u2013</td><td class="n">\u2013</td>
-      <td class="n">${money(premium)}</td>
-    </tr>` : '';
+  /* -- how the week pays out.
+
+     Two shapes, and which one is right turns on whether every hour has a
+     price. When it does, the stub's own split is exact: (H-ot) at the regular
+     rate plus ot at the regular rate times the multiplier comes to the same
+     figure `pay.js` computes as straight plus premium — §27 records that
+     identity and the tests hold it.
+
+     When some hours have no rate the split stops being available, because the
+     regular rate is the average of the hours that *have* one and the overtime
+     threshold counted the hours that do not. Pricing unrated hours at the
+     average to make the rows line up would be inventing a rate, which is the
+     one thing §27.10 says this never does. So that week is shown the way the
+     arithmetic actually ran: the priced hours, the premium on top, and the
+     unpriced hours named and left out of the money. */
+  const straight = w.byRate.reduce((a, r) => a + r.pay, 0);
+  let payRows;
+  if(!w.rated){
+    payRows = `<tr><td>No rate set anywhere</td><td class="n">${hrs(w.hrs)}</td>
+      <td class="n">–</td><td class="n">–</td></tr>`;
+  } else if(!w.unratedHrs){
+    const base = w.hrs - w.ot;
+    payRows = `<tr><td>Regular</td><td class="n">${hrs(base)}</td>
+        <td class="n">${money(w.rate)}</td><td class="n">${money(base * w.rate)}</td></tr>`
+      + (w.ot > 0.005 ? `<tr><td>Overtime</td><td class="n">${hrs(w.ot)}</td>
+        <td class="n">${money(w.rate * mult)}</td>
+        <td class="n">${money(w.ot * w.rate * mult)}</td></tr>` : '');
+  } else {
+    payRows = `<tr><td>Hours with a rate</td><td class="n">${hrs(w.hrs - w.unratedHrs)}</td>
+        <td class="n">${money(w.rate)}</td><td class="n">${money(straight)}</td></tr>`
+      + (w.ot > 0.005 ? `<tr><td>Overtime premium<span class="tiny soft"><br>on top of the hours above</span></td>
+        <td class="n">${hrs(w.ot)}</td><td class="n">${money(w.rate * (mult - 1))}</td>
+        <td class="n">${money(w.gross - straight)}</td></tr>` : '')
+      + `<tr><td>Hours with no rate<span class="tiny soft"><br>not in the gross</span></td>
+        <td class="n">${hrs(w.unratedHrs)}</td>
+        <td class="n">–</td><td class="n">–</td></tr>`;
+  }
+
+  const notes = [];
+  // A week with no overtime says so. Without it the pay table is the hours
+  // table restated, and a missing row reads as a figure that failed to load
+  // rather than as the answer to "how much of this was overtime".
+  if(w.rated && w.ot <= 0.005)
+    notes.push(+co.otAfterHrs > 0
+      ? `No overtime — the week did not reach the ${+co.otAfterHrs} h this job counts from.`
+      : 'No overtime, because this job has no threshold set. Setup takes one.');
+  // Said on every mixed week, not only the ones with overtime in them. The
+  // regular rate on the pay table is a weighted average carried at full
+  // precision, so the row does not multiply out at the two decimals it is
+  // printed to — 28.00 h at $14.14 reads as $395.92 and the pay says $396.00.
+  // On a screen built for reconciling a figure against a deposit, eight cents
+  // he cannot account for is worse than a sentence.
+  if(w.mixed)
+    notes.push(`The regular rate is the ${money(w.rate)} weighted average of the hours above, ` +
+      'and the pay is worked out from the exact average — multiplying the rounded figure ' +
+      'by the hours can land a cent or two out.' +
+      (w.ot > 0.005
+        ? ` Overtime is ${mult}× that average, not ${mult}× whichever rate the last shift ` +
+          'of the week happened to be paid at. That is what an employer paying two rates in ' +
+          'one week has to do, and it means the answer does not move when a shift moves.'
+        : ''));
+  if(assumed.hrs)
+    notes.push(`${hrs(assumed.hrs)} h of this came from the rota and nothing has confirmed it. ` +
+      'A screenshot of the week confirms it.');
+  notes.push('Estimate, before deductions.');
 
   $('#dlgbody').innerHTML = `
     <h2><span class="dot" style="background:${esc(co.color)}"></span>Week of ${
       MONTHNAMES[d.getMonth()].slice(0,3)} ${d.getDate()}</h2>
-    <p class="tiny soft" style="margin:.1rem 0 .7rem">${esc(co.name)}</p>
+    <p class="tiny soft" style="margin:.1rem 0 .2rem">${esc(co.name)}</p>
+
+    <p class="subhead">The hours</p>
+    <table>
+      <tr><th>Worked as</th><th class="n">Hours</th><th class="n">An hour</th></tr>
+      ${hourRows}${avgRow}
+    </table>
+
+    <p class="subhead">The pay</p>
     <table>
       <tr><th>Paid as</th><th class="n">Hours</th><th class="n">Rate</th><th class="n">Pay</th></tr>
-      ${rows}${otRow}
-      <tr class="tot"><td>Gross</td><td class="n">${w.hrs.toFixed(2)}</td>
-        <td class="n">\u2013</td>${num(w.gross, w.rated)}</tr>
+      ${payRows}
+      <tr class="tot"><td>Gross</td><td class="n">${hrs(w.hrs)}</td>
+        <td class="n">–</td>
+        <td class="n">${w.rated ? money(w.gross) : '–'}</td></tr>
     </table>
-    <p class="tiny soft" style="margin-top:.7rem">${
-      w.unratedHrs
-        ? `${w.unratedHrs.toFixed(2)} h of this has no rate anywhere \u2014 counted as hours and left out of the gross.<br>`
-        : ''}Estimate, before deductions.</p>
+
+    <p class="tiny soft" style="margin-top:.7rem">${notes.join('<br><br>')}</p>
     <div class="rowbtns"><button class="ghost" id="pd-close">Close</button></div>`;
   const dlg = $('#dlg');
   dlg.showModal();
@@ -1288,16 +1371,15 @@ function renderPay(){
         <td class="n">${w.hrs.toFixed(2)}</td>
         <td class="n">${w.ot ? w.ot.toFixed(2) : '–'}</td>
         <td class="n">${w.rated ? '$' + w.gross.toFixed(2) : '–'}</td>`;
-      // Offered whenever the week was worked as more than one thing, not only
-      // when the rates differ: two roles at one rate still answers "which of
-      // these was the Saturday", and the button costs a line either way.
-      if(w.byRate.length > 1){
-        const b = el('button','brk','Breakdown');
-        b.onclick = () => payDetail(co, ws, shifts);
-        const cell = tr.querySelector('td');
-        cell.appendChild(document.createElement('br'));
-        cell.appendChild(b);
-      }
+      // On every week. A single-rate week has an hourly and a straight/overtime
+      // split exactly as a mixed one does, and those are the two figures a
+      // gross is checked against — offering the breakdown only where the row
+      // was crowded would have been fixing the crowding, not the question.
+      const b = el('button','brk','Breakdown');
+      b.onclick = () => payDetail(co, ws, shifts);
+      const cell = tr.querySelector('td');
+      cell.appendChild(document.createElement('br'));
+      cell.appendChild(b);
       t.appendChild(tr);
 
       const cur = allWeeks.get(ws) || { hrs:0, gross:0 };

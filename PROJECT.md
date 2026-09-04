@@ -3600,21 +3600,28 @@ the two shifts, and still reads correctly.
 actually for is checking a deposit against what he thinks he worked, and that
 question is asked about the last few weeks — the rest is a lookup.
 
-It now opens on **this week and the three before it**, with everything older
-behind *Show earlier weeks* at the bottom. Three weeks back is a fortnightly
-deposit plus a week of slack.
+It now opens on **next week, this week and the three before it** — five weeks,
+with everything older behind *Show earlier weeks* at the bottom. Three back is
+a fortnightly deposit plus a week of slack.
 
 The window is worked out in days from the week's start rather than by
 comparing week-start strings, because two jobs can begin their weeks on
 different days (`co.weekStart`, §27) and the combined table holds keys from
 both.
 
-**Weeks ahead are not shown at all**, and that is a deletion rather than a
-fold. It was built with a *Show later* alongside the other button and taken
-out again on his reading: a week that has not happened has no pay in it. What
-the tab would print for next week is the rota's opinion of it, which is
-exactly the forecast §20.4 refused to let stand as money. Hours still ahead
-are on the Schedule tab, where they are hours and not dollars.
+**One week forward, and exactly one.** A week's pay is worth knowing the week
+before it, which is while a thin week is still something he can do something
+about. A fortnight out it is worth nothing, because what the tab would print
+is the rota's opinion of a week rather than money — the forecast §20.4 refused
+to let stand.
+
+So there is no button on the far side. Weeks past next week are dropped, not
+folded: a *Show later* was built, and taken out on his reading, because a fold
+implies a figure behind it worth opening and there is not one. This took two
+passes to land — it was first built with no forward weeks at all, on a reading
+of "pay doesn't need display until week prior" that turned out to mean the
+opposite of what it was taken for. Hours that far ahead are on the Schedule
+tab, where they are hours and not dollars.
 
 ### 29.4 The mixed-rate week could not be read as a row
 
@@ -3629,20 +3636,53 @@ the row stopped looking like a row:
 > 8.00 h Security Agent at $12.00
 > 8.00 h Training at $12.00      28.00   2.50   $413.68
 
-The rates now live behind a **Breakdown** button on the row, in a modal, and
-the move bought something the inline version could not have had: the per-role
-lines never added up to the gross once there was overtime in the week. The
-premium is charged on the weighted average of the rates (§27) and it lived
-nowhere on screen, so the four numbers he could see did not reconcile with the
-one he was checking. In the modal it is a row of its own —
+The rates now live behind a **Breakdown** button on the row, in a modal.
 
-    Overtime premium    8.00 h at $7.25 on top, 1.5× the $14.50 average   $58.00
+**On every week, not only a mixed one.** The button was first put only on weeks
+that needed the room, which was fixing the crowding rather than the question:
+what an hour is worth, and how much of the week was overtime, are the two
+figures a gross gets checked against, and a single-rate week has both of them
+just as much as a mixed one.
 
-— and the table foots to the gross exactly.
+**Two tables, and the split is the point.** *The hours* prices what was worked
+— role, hours, an hour — and carries no money column at all. *The pay* is the
+week the way a stub says it: regular hours at the regular rate, overtime at
+time and a half, gross underneath. They are kept apart because once there is
+overtime they foot to different figures — 42 h of $18.00 work is $756 of hours
+and $774 of pay — and one column carrying both is a column that gets added up
+wrong.
 
-The button is offered whenever the week was worked as more than one thing, not
-only when the rates differ: two roles at one rate still answers "which of these
-was the Saturday", and the button costs one line either way.
+    The hours
+    Cook Plant ASO    42.00   $18.00
+
+    The pay
+    Regular           40.00   $18.00   $720.00
+    Overtime           2.00   $27.00    $54.00
+    Gross             42.00        –   $774.00
+
+This is the second half of what moving it out bought. The inline per-role
+lines never added up to the gross once a week had overtime in it: the premium
+is charged on the weighted average of the rates (§27) and it appeared nowhere
+on screen, so the numbers he could see did not reconcile with the one he was
+checking. Now they do, in both shapes.
+
+**Which shape depends on whether every hour has a price.** §27's identity —
+`H·r + ot·r·(m-1) == (H-ot)·r + ot·r·m` — is what lets the stub's own split be
+printed from figures `pay.js` computed the other way, and the tests hold it.
+It only holds while every hour is rated. When some are not, the regular rate is
+the average of the ones that *are* and the overtime threshold counted the ones
+that are not, so pricing the unrated hours at the average to make the rows line
+up would be inventing a rate — the one thing §27.10 says this never does. That
+week is shown the way the arithmetic actually ran instead: priced hours, the
+premium on top, and the unpriced hours named and left out of the money.
+
+Two smaller things the modal says out loud. A week with no overtime says so
+rather than dropping the row, because a missing row reads as a figure that
+failed to load. And a mixed week says that its regular rate is a weighted
+average carried at full precision — 28.00 h at $14.14 multiplies out to
+$395.92 and the pay says $396.00, and on a screen built for reconciling
+against a deposit, eight cents he cannot account for is worse than a
+sentence.
 
 Two things stayed in the column, because they are not arithmetic: the
 unconfirmed-hours note (§20.4) and the hours-at-no-rate note. Both are about
@@ -3658,3 +3698,20 @@ but they should not survive the app being closed. Opening it tomorrow, the
 thing to see is this week again. This is the opposite call to §28's folds, and
 for the opposite reason: a fold in Setup records a decision about a job that
 still holds next week, while these record where he happens to be looking now.
+
+### 29.6 The nav bar was not floating
+
+Reported off the screenshots above: the tab bar appeared halfway down the
+Schedule tab, over the short-rest banner, instead of pinned to the bottom.
+
+It is not a bug in the app, and it is worth recording because the report was
+entirely reasonable — it is exactly what the picture showed. Playwright's
+`fullPage: true` stitches a tall image out of a scrolling capture, and a
+`position: fixed` element is painted once, at wherever it sat in the viewport,
+and then stranded mid-image. Measured in a real viewport at the top, the
+middle and the bottom of the scroll, `nav.getBoundingClientRect().bottom`
+comes back at 915 of a 915px viewport every time.
+
+The lesson is about the screenshots rather than the CSS: a page with a fixed
+bar cannot be shown with a full-page capture. Everything above was re-shot at
+viewport size and scrolled, which is also what he is actually looking at.

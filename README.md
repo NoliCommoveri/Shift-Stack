@@ -242,11 +242,9 @@ curating. Leave the list empty and the job pays one rate, exactly as before.
 - **A near miss goes amber in review naming the rate it is about to apply.**
   The site's amber line says what will be remembered; the role's has to say
   what will be paid, because that is the part you cannot see on the row.
-- **The pay tab shows its work.** A week worked as more than one thing carries
-  a **Breakdown** button, and it opens the whole sum: hours per role, the rate
-  each was paid at, the overtime premium as its own line, and a total that
-  adds up to the gross on the row. A single gross figure with two rates hidden
-  inside it is exactly the number you cannot check against a paystub.
+- **The pay tab shows its work.** Every week carries a **Breakdown** button and
+  it opens the whole sum — see below. A single gross figure with two rates
+  hidden inside it is exactly the number you cannot check against a paystub.
 - **Hours with no rate anywhere are counted and not paid**, and the week says
   so rather than showing a confident `$0.00`.
 
@@ -268,18 +266,49 @@ confirmation says which rate that is.
 
 ## What the pay tab shows
 
-**This week and the three before it**, per job, newest first. Anything older is
-behind **Show earlier weeks** at the bottom — still on file, still counted,
-just not in the way of the figure you opened the tab to check.
+**Next week, this week and the three before it**, per job, newest first.
+Anything older is behind **Show earlier weeks** at the bottom — still on file,
+still counted, just not in the way of the figure you opened the tab to check.
 
-**Nothing ahead of this week is shown at all.** A week that has not happened
-has no pay in it; what the tab would print is the rota's opinion of a week, and
-that is a forecast rather than money. Hours still to come are on the Schedule
-tab, where they are hours.
+**One week forward, and only one.** Next week's pay is worth knowing while a
+thin week is still something you can do something about. A fortnight out it is
+not money, it is the rota's opinion of a week, so those weeks are not on the
+tab at all and there is no button for them. Hours that far ahead are on the
+Schedule tab, where they are hours.
 
 A week holding shifts nothing has confirmed still says so under the date, and
 so does a week with hours at no rate — those two are about whether the figure
 beside them can be trusted, so they are read without opening anything.
+
+### The breakdown
+
+Every week has one. It opens two tables:
+
+**The hours** — what you worked it as, how many, and what an hour of it pays.
+No money column, on purpose.
+
+**The pay** — the week the way a stub says it: regular hours at the regular
+rate, overtime at time and a half, and a gross the two of them add up to.
+
+    The hours
+    Cook Plant ASO    42.00   $18.00
+
+    The pay
+    Regular           40.00   $18.00   $720.00
+    Overtime           2.00   $27.00    $54.00
+    Gross             42.00        –   $774.00
+
+They are two tables because once a week has overtime in it they foot to
+different figures — 42 hours of $18.00 work is $756 of hours and $774 of pay —
+and one column carrying both is a column you will add up wrong.
+
+On a week paid at more than one rate the regular rate is the weighted average,
+and the modal says so, along with the fact that it is carried at full precision
+— multiplying the rounded figure by the hours can land a cent or two out. A
+week with hours at no rate anywhere is shown differently again: the priced
+hours, the overtime premium on top of them, and the unpriced hours named and
+left out of the money, because pricing them at the average would be inventing
+a rate.
 
 ## Sites
 
