@@ -2986,8 +2986,13 @@ async function server(path, opts = {}){
     headers: { ...(opts.headers || {}), authorization: `Bearer ${token}` }
   });
   if(res.status === 401) throw new Error('The server did not accept that token.');
-  if(!res.ok) throw new Error(`The server answered ${res.status}.`);
-  return res.json();
+  // The Worker sends a reason with its failures. "The server answered 500" is
+  // what this said while the migration was applying two statements out of
+  // seven, and it was not enough to work out anything from.
+  let body = null;
+  try { body = await res.json(); } catch (e) { body = null; }
+  if(!res.ok) throw new Error((body && body.error) || `The server answered ${res.status}.`);
+  return body;
 }
 
 /* Shown under the Server section. `alarm` is computed on the Worker rather
@@ -3007,6 +3012,10 @@ function renderServer(st, err){
       : 'No push token yet, so the shifts are not going anywhere but this phone.';
     return;
   }
+
+  // A database with no tables yet is where every new deploy starts, and the
+  // Worker says so rather than failing. Say it back plainly.
+  if(st.needsSetup){ note.textContent = st.message; return; }
 
   const n = st.shifts || {};
   const bits = [];

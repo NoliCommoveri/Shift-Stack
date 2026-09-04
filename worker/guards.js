@@ -132,5 +132,24 @@ function tokenOK(secret, given){
   return timingSafeEqual(secret, given);
 }
 
-module.exports = { guard, alarmFor, feedJob, normalizeTimezone, DEFAULT_ZONE,
+
+/* The schema file, split into statements the database can be handed one at a
+   time. Comments are stripped rather than used to decide what to keep: the
+   first version filtered out any chunk that *began* with `--`, and every
+   CREATE TABLE in schema.sql has an explanatory block above it, so seven
+   statements became two — both of them CREATE INDEX, on tables that had just
+   been dropped from the list. The migration failed with "no such table" and
+   the app showed a bare 500.
+
+   No string literal in schema.sql contains `--`, which is what makes stripping
+   them this bluntly safe. If one ever does, this needs a real tokenizer. */
+function splitSQL(sql){
+  return String(sql || '')
+    .replace(/--[^\n]*/g, '')
+    .split(';')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+module.exports = { guard, splitSQL, alarmFor, feedJob, normalizeTimezone, DEFAULT_ZONE,
                    todayIn, shiftISO, newestStamp, timingSafeEqual, tokenOK };
