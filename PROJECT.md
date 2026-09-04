@@ -1,6 +1,9 @@
 # Shift Deck — project state
 
-_Last updated 4 September 2026_ — real screenshots of both apps landed (§3.1, §5),
+_Last updated 4 September 2026_ — §31 is a bug and its post-mortem: the
+calendar export wrote `[object Object]` in place of every title, address and
+UID from §28 onwards, because two of the seven scripts sharing one global
+scope both declared `fold`. Real screenshots of both apps landed (§3.1, §5),
 Homebase's own Calendar Sync turned out to exist and is now an import path (§12),
 and the app became the normalising step between two calendars rather than a
 second source of the same events (§13). The Worker that closes the import gap
@@ -3792,3 +3795,76 @@ colours, and the red still has only ever had this one job.
 The banner above the week list is untouched. It names both sides and the size
 of the overlap because up there nothing is next to anything, and because it
 exists for the case where nobody is looking at that week at all (§19).
+
+---
+
+## 31. Fixed: the export wrote no titles at all, 4 September 2026
+
+Ray imported a file and Samsung Calendar offered him eight rows of **My
+event**. The times were right. Everything else was gone.
+
+"My event" is what an Android calendar shows for an event with no `SUMMARY`,
+and the file had none — nor a `LOCATION`, nor a `UID`. What it had, where each
+of those should have been, was the line `[object Object]`.
+
+### What happened
+
+The app has no build step and no modules. `index.html` loads seven plain
+scripts, and every top-level `function` and `const` in them lands in **one**
+global scope, where the last file loaded wins:
+
+    parser.js  ics.js  patterns.js  holidays.js  sites.js  pay.js  app.js
+
+ics.js has owned RFC 5545 line folding since §22 — `fold(l)`, which breaks a
+long property across 75-octet lines. §28 then gave app.js a `fold(key, head,
+note, open)` of its own, the Setup screen's `<details>` helper. Same name,
+different job, and app.js is loaded last.
+
+So from §28 onwards, every call in `buildICS` that reached for the folder got
+the fold *widget*, and pushed the `<details>` element it returns into an array
+that is later `join`ed into text:
+
+    SUMMARY:[object Object]      -> no title, so "My event"
+    LOCATION:[object Object]     -> no address, so nothing to tap (§26)
+    UID:[object Object]          -> no identity at all
+    DESCRIPTION:[object Object]  -> both alarms fire with no text (§25)
+
+`buildCancelICS` in ics.js was hit the same way — in the browser it resolves
+`fold` through the same global scope, so the §22 cancellation was writing
+`UID:[object Object]` too, and cancelling nothing. Exactly the silent failure
+§22 wrote three paragraphs about: the file imports cleanly, and the alarm
+still rings at five.
+
+**The UID loss is the worst of it**, and it is worse than a missing title.
+`shiftUID` is what makes a re-import an update rather than a second copy, and
+what a cancellation names. Every event in a broken file carried the same
+literal string as its identity, which is not a name, it is a collision.
+
+### Why nothing caught it
+
+The tests `require` each file into a scope of its own, so ics.js's `fold` is
+the only `fold` any of them has ever seen. `tests/ics.test.js` exercises the
+folder directly and passes; it always did. The collision exists only in the
+browser, where the scripts share a scope — and nothing was testing the scope.
+
+The rename is the fix — the folder is `icsFold` now, alongside `icsEscape`,
+`icsStamp` and `icsLocal`, which is the prefix the rest of that file already
+carries — but the rename is not the lesson. Any of the seven files could do
+this again tomorrow.
+
+So `tests/globals.test.js` reads the `<script src>` list out of index.html and
+fails if two of those files declare the same top-level name. It reads the list
+rather than holding one, because a file added to the page and not to the test
+is exactly the file the test exists for.
+
+### What it means for a calendar that already has the bad events
+
+Nothing in the app can clean them up. A cancellation names an event by UID
+(§22), and the UID those events were saved under is not the one the store
+holds — so `shifts-cancelled.ics` will not touch them. They have to be deleted
+on the phone, by hand, once.
+
+After that: **Export everything**, not the incremental export. The incremental
+one sends only shifts with `sent` false, and the whole broken batch was marked
+`sent` on the way out. In subscription mode this is already true — the file is
+the calendar and every rebuild holds everything (§13).

@@ -33,9 +33,9 @@
    file format, and half of it lived in app.js where nothing could test it. A
    cancellation is the case where getting that wrong is silent: the file looks
    right, the calendar ignores it, and the alarm still rings. So the format
-   knowledge is all in this file now — `fold`, `icsEscape`, `shiftUID` and the
-   cancellation builder — and app.js keeps only the part that needs the store:
-   which shifts, whose job, what title.
+   knowledge is all in this file now — `icsFold`, `icsEscape`, `shiftUID` and
+   the cancellation builder — and app.js keeps only the part that needs the
+   store: which shifts, whose job, what title.
    ========================================================================== */
 
 /* Deliberately standalone — no dependency on parser.js, in either direction.
@@ -411,8 +411,17 @@ function icsEscape(s){
    over-long lines for anything non-ASCII, which some calendar apps reject
    outright — live now that real addresses go in the file, since a Montreal
    site name is two bytes a letter in the accents. Splitting on code points
-   keeps a character whole; counting their UTF-8 length keeps the line legal. */
-function fold(l){
+   keeps a character whole; counting their UTF-8 length keeps the line legal.
+
+   Named `icsFold` rather than `fold` because every file here is a plain
+   script sharing one global scope, and app.js — loaded last — has a `fold`
+   of its own for the Setup screen's `<details>`. The bare name let that one
+   win, so every line this one was meant to write came out as the string
+   "[object Object]": no SUMMARY, so the phone showed each shift as "My
+   event"; no LOCATION, so no address to tap; and no UID, so nothing could be
+   updated or cancelled. The `ics` prefix its neighbours already carry is what
+   keeps the two apart. */
+function icsFold(l){
   const enc = new TextEncoder();
   if(enc.encode(l).length <= 74) return l;
   const out = [];
@@ -478,7 +487,7 @@ function buildCancelICS(dead, opts = {}){
     // whatever the importer felt like. Dropped, not guessed at.
     if(!t || !t.uid || !t.date || !t.start) return;
     L.push('BEGIN:VEVENT',
-      fold(`UID:${t.uid}`),
+      icsFold(`UID:${t.uid}`),
       `DTSTAMP:${now}`,
       `SEQUENCE:${Number(t.seq) || 0}`,
       'STATUS:CANCELLED',
@@ -487,7 +496,7 @@ function buildCancelICS(dead, opts = {}){
     // The summary is not what identifies the event — the UID is — but an
     // importer that shows the user a confirmation shows this, and "cancelled:
     // what?" is a bad thing to be asked at a glance.
-    L.push(fold('SUMMARY:' + icsEscape(t.title || 'Shift')));
+    L.push(icsFold('SUMMARY:' + icsEscape(t.title || 'Shift')));
     L.push('END:VEVENT');
   });
   L.push('END:VCALENDAR');
@@ -499,5 +508,5 @@ if(typeof module !== 'undefined' && module.exports){
   module.exports = { ICS_FLAG, clean, unfold, splitOutsideQuotes, contentLine, unescapeText,
                      parseDT, zoneOffset, wallToUTC, partsIn, knownZone, resolve,
                      parseDuration, labelFor, eventUID, parseICS,
-                     shiftUID, icsEscape, fold, icsStamp, icsLocal, buildCancelICS };
+                     shiftUID, icsEscape, icsFold, icsStamp, icsLocal, buildCancelICS };
 }
