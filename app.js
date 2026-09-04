@@ -249,6 +249,47 @@ const el = (tag, cls, html) => {
 const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const coById = id => S.companies.find(c => c.id === id);
 
+/* -- typing a time (§24) --------------------------------------------------
+   fmtTime() above refuses to print am/pm anywhere, for the reason stated
+   there. Every field that took a time contradicted it: `<input type="time">`
+   is drawn by the phone in the phone's locale, and on his that is a 12-hour
+   spinner with an AM/PM segment. The review screen exists to catch an am/pm
+   misread (§6, §16.2) and it was handing him am/pm to correct it with.
+
+   These two build a text box instead. parseClock() in parser.js decides what
+   a typed time is; what the box does with the answer is decided here:
+
+   - anything that parses is committed as it is typed, so the note lines under
+     each row keep up with the keystrokes exactly as they did before;
+   - the box is rewritten to HH:MM when he leaves it, which is where a "9pm"
+     transcribed off the employer's screen visibly becomes 21:00;
+   - anything that does not parse stays on screen, marked, and commits
+     nothing. Half-typed times pass through this state constantly, so it is
+     drawn quietly and the value on file is simply left alone.
+
+   inputmode=numeric is deliberate: the phone offers a keypad, which is the
+   fast way to enter 1500 and no way at all to enter "3 pm". A meridiem is
+   tolerated, not invited. */
+const CLOCK_ATTRS = 'type="text" class="clock" inputmode="numeric" ' +
+  'autocomplete="off" spellcheck="false" placeholder="HH:MM"';
+const clockInput = (value, extra = '') =>
+  `<input ${CLOCK_ATTRS} ${extra} value="${esc(value || '')}">`;
+
+/* `set` is called with 'HH:MM' — or '' when the box is emptied and the caller
+   allows that — and never with anything else. The handle it returns reads the
+   field for callers that only commit on a button (the edit dialog). */
+function bindClock(inp, set, opts = {}){
+  const read = () => inp.value.trim() === ''
+    ? (opts.allowEmpty ? '' : null)
+    : parseClock(inp.value);
+  const mark = v => inp.setAttribute('aria-invalid', v === null ? 'true' : 'false');
+  const live = () => { const v = read(); mark(v); if(v !== null && set) set(v); };
+  inp.oninput = live;
+  inp.onchange = live;                       // paste, autofill
+  inp.onblur = () => { const v = read(); if(v) inp.value = v; mark(v); };
+  return { read, settle: () => inp.onblur() };
+}
+
 /* -- next shift banner -- */
 function nextShift(){
   const now = new Date();
@@ -761,9 +802,9 @@ function renderPatterns(co, host, sugHost){
                  aria-pressed="${(pat.days||[]).includes(dow) ? 'true' : 'false'}">${d[0]}</button>`
       ).join('')}</div>
       <div class="patt">
-        <input type="time" aria-label="Starts" value="${esc(pat.start||'')}">
+        ${clockInput(pat.start, 'aria-label="Starts"')}
         <span class="soft mono">to</span>
-        <input type="time" aria-label="Ends" value="${esc(pat.end||'')}">
+        ${clockInput(pat.end, 'aria-label="Ends"')}
         <button class="kill" type="button" aria-label="Remove this shift">&times;</button>
       </div>
       <p class="patwhat"></p>`;
@@ -790,8 +831,8 @@ function renderPatterns(co, host, sugHost){
       };
     });
     const [st, en] = row.querySelectorAll('input');
-    st.oninput = () => { pat.start = st.value; say(); save(); };
-    en.oninput = () => { pat.end = en.value; say(); save(); };
+    bindClock(st, v => { pat.start = v; say(); save(); }, { allowEmpty: true });
+    bindClock(en, v => { pat.end = v; say(); save(); }, { allowEmpty: true });
     row.querySelector('.kill').onclick = () => {
       co.patterns.splice(i, 1);
       save(); renderPatterns(co, host, sugHost);
@@ -985,9 +1026,10 @@ function editShift(id){
       `<option value="${c.id}"${c.id===s.companyId?' selected':''}>${esc(c.name)}</option>`).join('')}</select></label>
     <label class="f"><span>Date</span><input id="e-date" type="date" value="${s.date}"></label>
     <div class="grid2">
-      <label class="f"><span>Start</span><input id="e-start" type="time" value="${s.start}"></label>
-      <label class="f"><span>End</span><input id="e-end" type="time" value="${s.end}"></label>
+      <label class="f"><span>Start</span>${clockInput(s.start, 'id="e-start"')}</label>
+      <label class="f"><span>End</span>${clockInput(s.end, 'id="e-end"')}</label>
     </div>
+    <p class="flag" id="e-bad" hidden></p>
     <label class="f"><span>Site or role</span><input id="e-label" type="text" value="${esc(s.label)}"></label>
     <label class="f"><span>Address, for the calendar</span>
       <input id="e-place" type="text" placeholder="401 Main St, Hattiesburg MS" value="${esc(s.place||'')}"></label>
@@ -997,12 +1039,27 @@ function editShift(id){
       <button class="ghost danger" id="e-del" style="margin-left:auto">Delete</button>
     </div>`;
   dlg.showModal();
+  // Both times are 24-hour, whatever the phone's locale is (§24). Nothing is
+  // saved until they both read as times: this dialog is where he corrects a
+  // shift by hand, so a field it could not understand has to stop the save
+  // rather than file a blank over a time that was right until he touched it.
+  const hush = () => { $('#e-bad').hidden = true; };
+  const start = bindClock($('#e-start'), hush), end = bindClock($('#e-end'), hush);
   $('#e-cancel').onclick = () => dlg.close();
   $('#e-save').onclick = () => {
+    start.settle(); end.settle();
+    const st = start.read(), en = end.read();
+    if(st === null || en === null){
+      const bad = $('#e-bad');
+      bad.hidden = false;
+      bad.textContent = 'Start and end have to be times, on the 24-hour clock \u2014 ' +
+        '21:30 for half past nine at night. 2130 and 9:30pm are read too.';
+      return;
+    }
     s.companyId = $('#e-co').value;
     s.date = $('#e-date').value;
-    s.start = $('#e-start').value;
-    s.end = $('#e-end').value;
+    s.start = st;
+    s.end = en;
     s.label = $('#e-label').value.trim() || 'Shift';
     s.place = $('#e-place').value.trim();
     // He has just been through this shift by hand, which is the strongest
@@ -1541,10 +1598,10 @@ function renderReview(){
     row.innerHTML = `
       <div class="revf">
         <input type="date" value="${p.date}">
-        <input type="time" value="${p.start}">
+        ${clockInput(p.start, 'aria-label="Starts"')}
         <span class="soft mono">to</span>
-        <input type="time" value="${p.end}">
-        <input type="text" value="${esc(p.label)}">
+        ${clockInput(p.end, 'aria-label="Ends"')}
+        <input type="text" aria-label="Site or role" value="${esc(p.label)}">
         ${manyJobs ? `<select>${S.companies.map(c =>
           `<option value="${c.id}"${c.id===p.companyId?' selected':''}>${esc(c.name)}</option>`
         ).join('')}</select>` : ''}
@@ -1589,16 +1646,16 @@ function renderReview(){
       if(p.date) p.flags = p.flags.filter(f => f !== FLAG.NODATE);
       recheck();
     };
-    s.oninput = () => { p.start = s.value; byHand(); refreshAll(); };
-    e.oninput = () => {
-      p.end = e.value;
+    bindClock(s, v => { p.start = v; byHand(); refreshAll(); }, { allowEmpty: true });
+    bindClock(e, v => {
+      p.end = v;
       byHand();
       // Supplying the end answers the one-time warning and nothing else. The
       // am/pm warning is about a value that was read, not one that was absent,
       // so it survives being given the other half of the pair.
       if(p.end) p.flags = p.flags.filter(f => f !== FLAG.ONETIME);
       refreshAll();
-    };
+    }, { allowEmpty: true });
     l.oninput = () => { p.label = l.value; };
     const job = row.querySelector('select');
     if(job) job.onchange = () => { p.companyId = job.value; recheck(); };

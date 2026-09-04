@@ -397,10 +397,74 @@ function parse(text, opts = {}){
   return out;
 }
 
+/* ---------- a time he typed ----------------------------------------------
+   Everything above reads text a machine produced. This reads text a person
+   typed, into the three places a shift time is entered by hand — the edit
+   dialog, the review rows and the declared rota. It lives in this file
+   because the am/pm rule has to exist once, in to24(), or the two copies of
+   it drift apart, and an am/pm rule that drifts is the documented top risk
+   (§6) arriving by another door.
+
+   It exists because `<input type="time">` is drawn by the phone, in the
+   phone's locale: on his that is a 12-hour spinner with an AM/PM segment, so
+   the app that prints no am/pm anywhere was asking him to correct a suspected
+   am/pm misread by picking am or pm (§24). The replacement is a text box,
+   and a text box has to be told what a typed time is.
+
+   Read as 24-hour, because that is the point:
+
+       9   09   9:00   09:00   900   0900   ->  09:00
+       21  21:30  2130  21.30              ->  21:30
+       2400                                ->  00:00
+
+   A bare 9 is nine in the morning and nine at night is 21. There is no guess
+   here about which he meant; that guess is the thing being removed.
+
+   A meridiem is still accepted, because it is what the employer's screen
+   prints and he transcribes from it — but it is only ever accepted, never
+   shown back. The field rewrites 9pm as 21:00 in front of him, which turns
+   the conversion into something he can check.
+
+       9pm   9:00 PM   12am                ->  21:00, 21:00, 00:00
+
+   Anything else is null. It is never rounded to the nearest thing it might
+   have been: a field that quietly changes a number he typed is the failure
+   this was built to remove, not a nicety to add back.
+   ---------------------------------------------------------------------- */
+function parseClock(text){
+  let s = String(text == null ? '' : text).toUpperCase().replace(/\s+/g, '');
+  if(!s) return null;
+
+  // The meridiem comes off first, so what is left is digits and at most one
+  // separator. "P", "PM" and "P.M." are all the same answer.
+  let ap = '';
+  const m = s.match(/([AP])\.?M?\.?$/);
+  if(m){ ap = m[1] + 'M'; s = s.slice(0, m.index); }
+
+  let hh, mm;
+  const sep = s.match(/^(\d{1,2})[:.](\d{2})$/);
+  if(sep)                   { hh = sep[1];        mm = sep[2]; }
+  else if(/^\d{1,2}$/.test(s)){ hh = s;             mm = '00'; }
+  else if(/^\d{3}$/.test(s)) { hh = s.slice(0,1);  mm = s.slice(1); }
+  else if(/^\d{4}$/.test(s)) { hh = s.slice(0,2);  mm = s.slice(2); }
+  else return null;
+
+  if(+mm > 59) return null;
+  // 24:00 is midnight written the long way, and the employer's screens do
+  // print it. The app files midnight as 00:00 — patterns.js already reads an
+  // end of 00:00 as belonging to the next day — so it is normalised here
+  // rather than left as a second spelling of the same minute.
+  if(!ap && +hh === 24 && +mm === 0) return '00:00';
+  // With a meridiem the hour has to be one a clock face has. "1500pm" is not
+  // a time anybody means, so it is refused rather than reinterpreted.
+  if(ap && (+hh < 1 || +hh > 12)) return null;
+  return to24(hh, mm, ap);
+}
+
 /* Node picks these up for the tests; the browser just gets the globals. */
 if(typeof module !== 'undefined' && module.exports){
   module.exports = { MONTHS, WEEKDAYS, FLAG, iso, asDate, normalise, guessYear,
                      monthHeader, fullDate, leadingDay, to24, findRange,
-                     findSingle, tidy, splitLabel, NOISE, PERSON, usefulPart,
+                     findSingle, parseClock, tidy, splitLabel, NOISE, PERSON, usefulPart,
                      stripDebris, looseMeridiem, parse };
 }

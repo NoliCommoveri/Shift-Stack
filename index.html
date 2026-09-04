@@ -79,7 +79,13 @@ input,select{
   font-family:inherit;font-size:.92rem;background:var(--card);color:var(--ink);
   border:1px solid var(--rule);border-radius:2px;padding:.45rem .5rem;min-width:0;
 }
-input[type=date],input[type=time],input[type=number]{font-family:"IBM Plex Mono",monospace;font-size:.88rem}
+input[type=date],input[type=number],input.clock{font-family:"IBM Plex Mono",monospace;font-size:.88rem}
+/* A time is typed, not picked: `<input type="time">` is drawn in the phone's
+   locale, which on his puts an AM/PM segment on the one screen that exists to
+   catch an am/pm misread (PROJECT.md §24). The box below is 24-hour and holds
+   HH:MM; it goes red while what is in it is not a time it can read. */
+input.clock{width:6.4rem;text-align:center;letter-spacing:.04em}
+input.clock[aria-invalid="true"]{border-color:var(--bad);color:var(--bad)}
 input:focus,select:focus{outline:2px solid var(--signal);border-color:var(--signal)}
 label.f{display:block;margin-bottom:.55rem}
 label.f span{display:block;font-size:.8rem;color:var(--soft);margin-bottom:.15rem}
@@ -143,8 +149,7 @@ input[type=file]{display:none}
 .tick{display:flex;align-items:center;gap:.35rem;font-size:.88rem}
 .tick input{width:1.05rem;height:1.05rem;accent-color:var(--signal)}
 .revf{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
-.revf input[type=time]{width:6.4rem}
-.revf input[type=text]{flex:1 1 8rem}
+.revf input[type=text]:not(.clock){flex:1 1 8rem}
 .flag{font-size:.8rem;color:var(--signal);margin:.4rem 0 0}
 /* Declared shifts (§8.2). Seven toggles rather than a day picker: the whole
    rota has to be readable and changeable with a thumb, on a phone. */
@@ -158,7 +163,6 @@ input[type=file]{display:none}
 }
 .day-t[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--paper);font-weight:600}
 .patt{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
-.patt input[type=time]{width:6.4rem}
 .patwhat{font-size:.8rem;color:var(--soft);margin:.35rem 0 0}
 .sug{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--hair)}
 .sug button{margin-left:auto}

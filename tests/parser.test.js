@@ -40,6 +40,51 @@ test('to24 converts 12-hour times', () => {
   assert.equal(P.to24('25', '00', null), null);      // out of range
 });
 
+/* The three fields where a time is typed rather than read (§24). These are
+   about what a person means by what he typed, so they are worth stating as
+   cases in a way the browser's own time control never let us. */
+test('parseClock reads a typed time as 24-hour', () => {
+  assert.equal(P.parseClock('9'), '09:00');       // nine in the morning
+  assert.equal(P.parseClock('21'), '21:00');      // nine at night
+  assert.equal(P.parseClock('900'), '09:00');
+  assert.equal(P.parseClock('0900'), '09:00');
+  assert.equal(P.parseClock('1530'), '15:30');
+  assert.equal(P.parseClock('15:30'), '15:30');
+  assert.equal(P.parseClock('15.30'), '15:30');   // the other separator on a keypad
+  assert.equal(P.parseClock(' 23:00 '), '23:00');
+  assert.equal(P.parseClock('115'), '01:15');     // three digits: one for the hour
+});
+
+test('parseClock takes the meridiem off the employer\'s screen', () => {
+  assert.equal(P.parseClock('9pm'), '21:00');
+  assert.equal(P.parseClock('9:00 PM'), '21:00');
+  assert.equal(P.parseClock('8:00 p.m.'), '20:00');
+  assert.equal(P.parseClock('12am'), '00:00');    // midnight, not noon
+  assert.equal(P.parseClock('12pm'), '12:00');
+  assert.equal(P.parseClock('1500pm'), null);     // not a time anybody means
+  assert.equal(P.parseClock('0pm'), null);
+});
+
+test('parseClock normalises the long way of writing midnight', () => {
+  assert.equal(P.parseClock('2400'), '00:00');
+  assert.equal(P.parseClock('24:00'), '00:00');
+  assert.equal(P.parseClock('24:30'), null);      // there is no such minute
+});
+
+test('parseClock refuses rather than rounds', () => {
+  // Half-typed times pass through here on every keystroke. Each one has to
+  // come back null so the value on file is left alone, not overwritten with
+  // the nearest thing the text might have been.
+  assert.equal(P.parseClock('2:5'), null);
+  assert.equal(P.parseClock('9:60'), null);
+  assert.equal(P.parseClock('99:00'), null);
+  assert.equal(P.parseClock('25'), null);
+  assert.equal(P.parseClock('12345'), null);
+  assert.equal(P.parseClock('half three'), null);
+  assert.equal(P.parseClock(''), null);
+  assert.equal(P.parseClock(null), null);
+});
+
 test('findRange reads a time range and notices a missing am/pm', () => {
   assert.deepEqual(
     { ...P.findRange('WED 9:00am - 11:00am'), text: undefined },

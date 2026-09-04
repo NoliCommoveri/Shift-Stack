@@ -190,6 +190,32 @@ row and nothing is lost.
 Site names are fuzzy matched against ones already on file, so the same site
 spelled three different ways by OCR collapses to one.
 
+## Typing a time
+
+Every time in the app is 24-hour, entered and displayed. `23:00` cannot be
+misread the way `11:00pm` can, and the fields follow the display rather than
+the phone's locale — a US-locale phone draws `<input type="time">` as a
+12-hour spinner with an AM/PM segment, which put am/pm on the one screen that
+exists to catch an am/pm misread.
+
+The boxes take what you would actually type:
+
+| Typed | Filed |
+| --- | --- |
+| `9` `09` `900` `0900` `9:00` | `09:00` |
+| `21` `2130` `21:30` `21.30` | `21:30` |
+| `2400` | `00:00` |
+| `9pm` `9:00 PM` `12am` | `21:00` `21:00` `00:00` |
+
+A bare `9` is nine in the morning; nine at night is `21`. A meridiem is
+accepted, because the employer's screen prints one and you may be copying from
+it — but the box rewrites it as `21:00` as soon as you leave the field, so you
+can see what it made of it.
+
+Anything it cannot read goes red and changes nothing. It never rounds to the
+nearest time you might have meant: `2:5` is not `02:05`. The edit dialog will
+not save while either time is unreadable.
+
 ## Declared shifts
 
 am/pm rides on a single character, and a misread puts a shift twelve hours out
