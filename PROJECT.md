@@ -3275,3 +3275,238 @@ The site table was also the last of the three §11.3 called schema changes, so
 §4/§14's Worker is now the only thing on the list that is not an enhancement,
 and it remains the live product blocker.
 
+
+## 27. Built: roles, and a second rate at the same job, 4 September 2026
+
+The question that started this was narrow: *should role be a table too, like
+site?* It arrived with the reason attached — there was no way to pay two rates
+at one employer, and `co.rate` was a single number multiplied by a week's
+hours. Cook and Dishwasher at Homebase do not pay the same, and neither do
+Mobile Guard and Site Supervisor at DSI.
+
+The answer is yes, and the interesting part is that the table was the cheap
+half. The expensive half was the arithmetic sitting behind it.
+
+### 27.1 Why the table cost almost nothing
+
+`sites.js` had been generic since §8.1 without anyone saying so. Everything in
+it from `key()` to `suggestNames()` reads `{ name, aliases, archived }` and
+nothing else — it never knew what a site was. The only site-specific things in
+the file were the four naming functions at the bottom and one line of
+`mergeSites` about the address.
+
+So the role table is the same machinery pointed at a second list:
+
+```
+S.roles = [{ id, companyId, name, rate, aliases:[], archived }]
+shift   = { …, siteId, roleId, role, label }
+```
+
+What changed in `sites.js` was renaming rather than writing: `matchSite` →
+`matchName`, `suggestSites` → `suggestNames`, and `mergeSites` split into a
+generic `mergeRecords` plus two four-line wrappers that differ only in what
+they absorb — an address for a site, a rate for a role. A role gets the exact
+alias matching, the edit-distance matching, the amber-on-near-miss, the learn-
+on-commit, the merge, the archive and the build-from-what's-on-file, and none
+of it had to be designed twice.
+
+That is worth stating plainly because the instinct before starting was that a
+role needs *less* than a site and should therefore get something smaller and
+ad-hoc. It needs less — no address, no `LOCATION:` line — but the part it does
+need was already built, and a second smaller mechanism would have been more
+code, not less, plus a second thing to learn.
+
+### 27.2 The rate hangs off the record, never off the string
+
+`rateFor(shift, role, co)` is the whole of it: the role's rate when it has one,
+the job's when it does not. Both stages are nullable, and null is not zero —
+null means nothing has been said, zero means this pays nothing.
+
+The consequence is that a job with one rate needs no roles at all and behaves
+exactly as it did before this section. A role with no rate of its own is a
+spelling table and a curated name, which is a perfectly good reason to declare
+one.
+
+Why the record and not the string: §8.2 refused to learn normal times from the
+parser's own output, because a check that gets quieter each time it fails is
+worse than no check. The same argument, one step further along. A gross to the
+cent is checked against a real deposit weeks after the screenshot is gone, so
+it must rest on something a human confirmed. A rate keyed on whatever OCR
+produced would be a figure derived from unvalidated text, and wrong silently.
+
+### 27.3 The overtime question, which is the actual work
+
+Two rates in one week and this stops having an obvious answer:
+
+```js
+gross = base*rate + ot*rate*otMult
+```
+
+Which hours were the overtime hours? Chronologically the last ones — but then
+a week's gross depends on the order the shifts happened to fall in, and moving
+one shift from Tuesday to Saturday changes what he is owed for hours already
+worked. That is not how anybody is paid, and it is a number that cannot be
+checked against a stub.
+
+What is done instead is the **weighted-average regular rate**: every hour is
+paid at its own rate, and the overtime *premium* is charged on the average of
+them. It is what the FLSA requires of an employer paying two rates in one
+week, and it does not care what order the shifts fell in.
+
+The property that made it safe to swap in is that it reduces to the old
+formula exactly when every hour pays the same:
+
+```
+H*r + ot*r*(mult-1)  ==  (H-ot)*r + ot*r*mult
+```
+
+So not one figure the app had already shown him changed meaning. That identity
+is a test, not a claim.
+
+Hours with no rate anywhere are counted in the total and left out of the
+money, and left out of the average as well — averaging over unpriced hours
+would drag the regular rate down and under-pay the premium on the hours that
+*are* priced, which is a wrong number in the direction that matters.
+
+### 27.4 `pay.js`, and why the maths moved out of `app.js`
+
+The arithmetic is now a file of its own with sixteen tests. The reason is the
+one above: this is the only calculation in the app that gets checked against a
+bank deposit, and it was the last thing living where nothing could test it. It
+takes hours with a price on them and returns money; it does not know what a
+role is.
+
+`weekTotals()` in `app.js` is what is left — the lookup that turns each shift
+into a priced row, which is genuinely store-shaped and belongs there.
+
+### 27.5 The rota declares a standard role and site
+
+Asked for during the build, and it turned a guess into a fact. A declared
+shift now carries an optional `roleId` and `siteId`:
+
+```js
+co.patterns = [{ days:[1,2,3,5], start:'15:00', end:'23:00', roleId:'r1', siteId:'s1' }]
+```
+
+`generateWeek()` carries them onto every row it makes; `patterns.js` never
+reads them, it just has to not lose them.
+
+What this replaces is `siteFor()`, which filled a generated week by rummaging
+through the most recent shift on file with the same times. That was already a
+guess, and §20 was careful about ranking confirmed shifts above the app's own
+earlier proposals so it did not compound. The moment a role carries a rate it
+stops being an acceptable guess at all — it is a guess about money. Declared
+on the rota it is a fact he typed once, and `siteFor()` survives only as the
+fallback for a pattern that declares nothing, which is every pattern written
+before this section.
+
+The de-dupe in `generateWeek()` is still keyed on the slot alone and not on
+what he is doing in it. Two declared shifts at the same hours on the same day
+are one shift declared twice, and generating both would put him on the
+calendar in two places at once.
+
+`checkShift()` returns the matched pattern with its `roleId` on it, and
+nothing applies it. Inferring a role — and therefore a rate — from the fact
+that a read landed on a declared time would be exactly the guess §8.2 refused
+to make about the time itself.
+
+### 27.6 Which table a label is talking to
+
+The one genuinely new decision. With the employer's separator (§17.4) there is
+nothing to decide: left of the pipe is a role, right is a place. Without one
+there is nothing printed to go on — Homebase prints `Cook`, a role with no
+place in it, and a TrackTik line whose pipe was lost to OCR could be either.
+
+Before this section that case was resolved by assumption: the whole label was
+a site candidate, which is why `Cook` was being offered as a place to file
+shifts under. `readLabel()` now asks both tables and lets the better hit win.
+Exact beats near either way round; at equal confidence the site wins.
+
+That tie-break is not arbitrary. An empty role table can only ever answer
+'none', so a job with no roles declared sends every label to the site side —
+which is precisely what the app did when the site table was the only one there
+was. The ambiguity §8.1 resolved by assumption is now resolved by evidence,
+and where there is no evidence the old behaviour stands.
+
+The menus work differently on purpose. `labelCandidates()` offers a
+separator-less label to *both* build-from-file lists, because the app
+genuinely cannot tell and a menu is a question, not an answer.
+
+### 27.7 What the screens say
+
+- **Review** grows a role picker beside the site picker, and a near match gets
+  its own amber line naming both spellings **and the rate it is about to
+  apply**. The site's sentence says what will be remembered; the role's has to
+  say what will be paid, because that is the part he cannot see.
+- **Setup** grows a Roles section above Sites, deliberately the same card down
+  to the merge control. The merge confirmation names the surviving rate, since
+  the one thing two names cannot tell him is that these shifts are about to be
+  paid a different number.
+- **The rota row** grows two selects and says in its caption what a generated
+  week will be filed under, and at what rate. A field that silently prices a
+  shift has to say that it does.
+- **The pay tab** shows its work. A week paid at more than one rate lists the
+  hours per role under the date, in the same place §20.4's rota note goes — a
+  single gross with two rates hidden inside it is exactly the figure that
+  cannot be checked against a stub. Hours with no rate are named and excluded.
+- **The edit dialog** swaps its free-text Role box for the same picker and
+  prints the rate the shift will be paid. It is the one place a shift's pay
+  can be changed by hand, and the field that does it did not look like it did.
+
+### 27.8 Identity, and the change §26.8 could not see
+
+`whereKey()` now includes the role. A feed that moves him from Cook to
+Dishwasher at the same site and the same hour has changed what the night is
+worth, and a comparison that ignored the role would call that unchanged and
+leave the old rate standing against it. §26.8 built the identity; this widens
+it to the field that carries the money.
+
+### 27.9 §7 holds again, and nothing migrated
+
+Same argument as §26.9, one table along. `roleId` is nullable and `role` stays
+as text, so a shift written before today has no `roleId`, prices at the job's
+rate, and reads exactly as it always did. A backup restored from before this
+section picks up `roles: []` from `DEFAULTS`, which is what `loadState()` and
+the restore path already do for every key. Verified in the browser: an old
+backup produces a byte-identical event title and the same gross.
+
+Deleting a role is the same bargain as deleting a site. The shift keeps its
+name as text and falls back to the job's rate — a shift does not become
+nameless, or unpriced, because the record pricing it was removed.
+
+### 27.10 What it refuses to do
+
+- **Never invents a rate.** No role, or a role with no rate, means the job's
+  rate. No rate anywhere means hours and not money, said out loud on the pay
+  tab rather than shown as a confident `$0.00`.
+- **Never prices from a guess.** Not from a matched pattern, not from a
+  neighbouring shift, not from the parser. The rota's declared role is a fact
+  he typed; everything else that could have supplied one is refused.
+- **Never blocks an import.** An unknown job title files as read and is not
+  even amber, exactly as an unknown site does.
+- **Never renames a role from a screenshot.** A read that matches becomes an
+  alias. The name is what the calendar says.
+- **Never changes a rate on a merge.** A rate already on the surviving record
+  is the one he typed and it stands; the absorbed one is taken only into an
+  empty field.
+- **Never carries a role across jobs.** Changing the job drops the `roleId`,
+  the same as the `siteId`.
+
+### 27.11 Where this leaves the order
+
+§8.4 change detection is still the only one of §8's four outstanding, and it
+is better placed than it was: `whereKey()` now distinguishes same-slot shifts
+that differ by role, which is one more kind of "same shift, changed" it can
+tell apart.
+
+§4/§14's Worker remains the only thing on the list that is not an enhancement,
+and the live product blocker.
+
+One thing this deliberately did **not** build, and it is worth recording
+because it was considered and put to him directly: rates that vary by *site*
+rather than by role. Guard work is often paid per post, and if Mobile Guard at
+De la Montagne and Mobile Guard at Headquarters ever pay differently, the rate
+does not belong on the role record — it belongs on a small ordered override
+list keyed on role and/or site, falling back to `co.rate`. That is a different
+schema and a bigger one. He was asked, and the answer was per role only, so
+per role only is what exists.

@@ -171,17 +171,21 @@ input[type=file]{display:none}
 .sug{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--hair)}
 .sug button{margin-left:auto}
 /* Sites (§8.1) */
-.site{border:1px solid var(--hair);border-radius:3px;padding:.6rem;margin-bottom:.5rem}
-.site.archived{opacity:.62}
+.rec{border:1px solid var(--hair);border-radius:3px;padding:.6rem;margin-bottom:.5rem}
+.rec.archived{opacity:.62}
 .aliases{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;margin:.1rem 0 .5rem}
 .alias{display:inline-flex;align-items:center;gap:.15rem;font-size:.8rem;
   background:var(--wash);border:1px solid var(--hair);border-radius:2px;padding:.05rem .1rem .05rem .35rem}
 .alias .kill{font-size:.9rem}
 .sitebtns{margin-bottom:.2rem}
-.sitebtns select{flex:0 1 10rem}
+.sitebtns select,.rolebtns select{flex:0 1 10rem}
 /* The review row's site column: what was read, then what it was taken as. */
 .revf .read{flex:0 1 auto;max-width:9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.revf .sitesel{flex:1 1 8rem;min-width:7rem}
+.revf .sitesel,.revf .rolesel{flex:1 1 8rem;min-width:7rem}
+/* The rota's two pickers, §27. Narrower than the review screen's because the
+   row already carries seven day toggles and a pair of clocks, and they wrap
+   under them on a phone rather than squeezing the times. */
+.patt .patrole,.patt .patsite{flex:1 1 7rem;min-width:6rem;font-size:.85rem}
 /* The horizon warnings sit above the week list. A job that feeds itself gets
    the quieter treatment: worth knowing, but not a job to do. */
 .horizon{margin:0 0 .6rem;padding:.5rem .6rem;border-left:2px solid var(--signal);background:var(--card)}
@@ -200,7 +204,12 @@ input[type=file]{display:none}
 table{width:100%;border-collapse:collapse;font-size:.9rem}
 th{text-align:left;font-weight:500;color:var(--soft);font-size:.8rem;padding:.35rem 0;border-bottom:1px solid var(--rule)}
 td{padding:.45rem 0;border-bottom:1px solid var(--hair);font-variant-numeric:tabular-nums}
-td.n,th.n{text-align:right;font-family:"IBM Plex Mono",monospace}
+td.n,th.n{text-align:right;font-family:"IBM Plex Mono",monospace;
+  /* The figures never wrap and never get squeezed by the notes beside them.
+     A week paid at two rates names its hours per role in the first column
+     (§27), which is a lot of text next to three numbers that have to stay
+     readable as numbers. */
+  white-space:nowrap;padding-left:.6rem}
 tr.tot td{font-weight:600;border-bottom:none;border-top:1px solid var(--rule)}
 details{margin-top:1rem}
 summary{cursor:pointer;font-size:.88rem;color:var(--soft)}
@@ -377,6 +386,7 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
 <script src="patterns.js"></script>
 <script src="holidays.js"></script>
 <script src="sites.js"></script>
+<script src="pay.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

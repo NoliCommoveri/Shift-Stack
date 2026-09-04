@@ -483,3 +483,57 @@ test('restGaps never mutates what it is given', () => {
   T.restGaps(CHAIN);
   assert.equal(JSON.stringify(CHAIN), before);
 });
+
+/* ---------- the declared role and site (§27) -----------------------------
+   A rota row now says what he normally does and where, so a generated week
+   can be filed under a fact he typed rather than a guess rummaged out of the
+   most recent shift with the same times. Nothing in this file reads them; all
+   it has to do is not lose them. */
+
+test('a declared role and site survive validation', () => {
+  const [p] = T.validPatterns([{ days: [1], start: '15:00', end: '23:00',
+                                 roleId: 'r1', siteId: 's1' }]);
+  assert.equal(p.roleId, 'r1');
+  assert.equal(p.siteId, 's1');
+});
+
+test('a pattern that declares neither gains neither', () => {
+  const [p] = T.validPatterns([{ days: [1], start: '15:00', end: '23:00' }]);
+  assert.ok(!('roleId' in p));
+  assert.ok(!('siteId' in p));
+});
+
+test('an unreadable pattern is still dropped, role or no role', () => {
+  assert.deepEqual(T.validPatterns([{ start: 'half four', end: '23:00', roleId: 'r1' }]), []);
+});
+
+test('a generated week carries what the rota declared', () => {
+  const rows = T.generateWeek(
+    [{ days: [1, 2], start: '15:00', end: '23:00', roleId: 'r1', siteId: 's1' }],
+    ['2026-09-07', '2026-09-08']);
+  assert.equal(rows.length, 2);
+  rows.forEach(r => { assert.equal(r.roleId, 'r1'); assert.equal(r.siteId, 's1'); });
+});
+
+test('two roles at the same hours on one day still generate one shift', () => {
+  // The de-dupe is keyed on the slot and not on what he is doing in it. Two
+  // declared shifts at the same times on the same day are one shift declared
+  // twice, and generating both would put him in two places at once.
+  const rows = T.generateWeek([
+    { days: [1], start: '15:00', end: '23:00', roleId: 'r1' },
+    { days: [1], start: '15:00', end: '23:00', roleId: 'r2' }
+  ], ['2026-09-07']);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].roleId, 'r1');       // the first declared wins
+});
+
+test('the checking half is unmoved by a declared role', () => {
+  const out = T.checkShift({ date: '2026-09-07', start: '03:00', end: '11:00' },
+                           [{ days: [1], start: '15:00', end: '23:00', roleId: 'r1' }]);
+  assert.equal(out.start, '15:00');
+  assert.ok(out.flags.includes(T.PAT_FLAG.FLIPPED));
+  // Carried out on the matched pattern, so a caller that wants it has it —
+  // but nothing here applies it to the row. Inferring a rate from a time is
+  // exactly the kind of guess §8.2 refused to make about the time itself.
+  assert.equal(out.pattern.roleId, 'r1');
+});

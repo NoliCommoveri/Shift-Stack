@@ -1,6 +1,21 @@
 /* ==========================================================================
-   The site table, and the matching that decides when two spellings are the
-   same place. PROJECT.md §8.1.
+   The site and role tables, and the matching that decides when two spellings
+   are the same thing. PROJECT.md §8.1, widened by §27.
+
+   §27 asked for a second rate at the same job — "Cook" and "Dishwasher" at
+   Homebase do not pay the same — and the answer turned out to need almost
+   nothing new here. Everything below from `key()` to `suggestNames()` only
+   ever reads `{ name, aliases, archived }`; it never knew what a site was.
+   So the role table is the same machinery pointed at a second list, and the
+   only site-specific things left in this file are the four naming functions
+   at the bottom and one line of `mergeSites`.
+
+       S.roles = [{ id, companyId, name, rate, aliases:[], archived }]
+       shift   = { …, siteId, roleId, role, label }
+
+   The rate hangs off the record and not off the string, for the reason §8.2
+   gave about times: a figure checked against a deposit weeks later must rest
+   on something a human confirmed, never on the reader's own output.
 
    `shift.label` was one string doing two jobs, and the edit dialog admitted it
    by captioning the field "Site or role". TrackTik prints both at once —
@@ -65,23 +80,27 @@ function spellings(site){
 }
 
 /* Exact alias, then edit distance, then no match — §8.1's three steps, in that
-   order, because an exact hit on one site must never lose to a near hit on
+   order, because an exact hit on one record must never lose to a near hit on
    another. `how` is what the review screen colours on: 'exact' is silent,
    'near' is amber and is the case where confirming teaches the table a new
    spelling, 'none' leaves the row as read.
 
-   Archived sites are not matched against. Archiving says he has stopped
-   working there, so a fresh read that looks like it is more likely a new site
-   with a similar name than a return; the record stays for the shifts that
-   already point at it. */
-function matchSite(raw, sites){
+   Archived records are not matched against. Archiving a site says he has
+   stopped being sent there and archiving a role says he has stopped doing it,
+   so a fresh read that looks like either is more likely a new one with a
+   similar name than a return; the record stays for the shifts pointing at it.
+
+   Nothing here knows whether it is matching places or job titles. That is not
+   a coincidence discovered later — §8.1 wrote it this way — and it is why §27
+   cost a record shape rather than a second matcher. */
+function matchName(raw, records){
   const k = key(raw);
-  const none = { site: null, how: 'none', dist: 99 };
+  const none = { rec: null, how: 'none', dist: 99 };
   if(!k) return none;
-  const live = (sites || []).filter(s => s && !s.archived);
+  const live = (records || []).filter(s => s && !s.archived);
 
   for(const s of live)
-    if(spellings(s).some(sp => key(sp) === k)) return { site: s, how: 'exact', dist: 0 };
+    if(spellings(s).some(sp => key(sp) === k)) return { rec: s, how: 'exact', dist: 0 };
 
   let best = null, bestD = 99;
   for(const s of live){
@@ -93,7 +112,36 @@ function matchSite(raw, sites){
       if(d < bestD && (d <= NEAR_ABS || rel <= NEAR_REL)){ bestD = d; best = s; }
     }
   }
-  return best ? { site: best, how: 'near', dist: bestD } : none;
+  return best ? { rec: best, how: 'near', dist: bestD } : none;
+}
+
+/* Which table a label is talking to.
+
+   With the employer's separator (§17.4) there is no question: left of the pipe
+   is a role and right of it is a place, and "Cook Plant ASO | SOUTHERN HENS"
+   is the line that bought the whole design. Without one there is nothing
+   printed to go on — Homebase prints "Cook", a role with no place in it, and a
+   TrackTik line whose pipe was lost to OCR could be either — so the tables are
+   asked and the better hit wins.
+
+   Exact beats near either way round. At equal confidence the site wins, and
+   that tie-break is not arbitrary: it is what makes a job with no roles
+   declared behave exactly as it did before §27, since an empty role table can
+   only ever return 'none'.
+
+   `split` is passed in rather than done here because the separator is
+   parser.js's, and this file does not read text. */
+function readLabel(label, sites, roles, split){
+  const { role, site } = split(label);
+  if(site) return { roleRaw: role.trim(), siteRaw: site.trim() };
+
+  const one = String(role || '').trim();
+  if(!one) return { roleRaw: '', siteRaw: '' };
+  const rank = m => m.how === 'exact' ? 0 : m.how === 'near' ? 1 : 2;
+  const asSite = matchName(one, sites), asRole = matchName(one, roles);
+  const roleWins = rank(asRole) < rank(asSite) ||
+    (rank(asRole) === rank(asSite) && asRole.how === 'near' && asRole.dist < asSite.dist);
+  return roleWins ? { roleRaw: one, siteRaw: '' } : { roleRaw: '', siteRaw: one };
 }
 
 /* Records the spelling as meaning this site. Returns whether it was new, so a
@@ -120,45 +168,93 @@ function newSite(id, companyId, name, address){
            address: String(address || '').trim(), aliases: [], archived: false };
 }
 
+/* A role is a site with a rate where the address was. `rate` is null rather
+   than 0 for the same reason `co.rate` is: null means nothing has been said
+   and the job's own rate stands, where 0 would mean this role pays nothing. */
+function newRole(id, companyId, name, rate){
+  return { id, companyId, name: String(name || '').trim(),
+           rate: rate === '' || rate == null ? null : +rate,
+           aliases: [], archived: false };
+}
+
+/* What one shift is worth an hour. The role's rate when it has one, the job's
+   otherwise — so a job with a single rate needs no roles at all, and a role
+   with no rate of its own is a spelling table and nothing more. */
+function rateFor(shift, role, co){
+  const r = role && role.rate != null ? +role.rate : null;
+  if(r != null && !Number.isNaN(r)) return r;
+  const c = co && co.rate != null && co.rate !== '' ? +co.rate : null;
+  return c != null && !Number.isNaN(c) ? c : null;
+}
+
 /* Merging is permanent, not a migration step — OCR keeps inventing spellings,
    so this is a thing he will do again next month. B's name and every spelling
    B answered to become spellings of A, which is the whole value: the merge is
    what stops the same misreading needing the same decision twice.
 
    Returns the new list. Repointing the shifts is the caller's, because it is
-   the caller that has them. */
-function mergeSites(sites, fromId, intoId){
-  const list = sites || [];
-  const from = list.find(s => s.id === fromId);
-  const into = list.find(s => s.id === intoId);
-  if(!from || !into || from === into) return { sites: list, moved: 0 };
+   the caller that has them. `absorb` is the one thing a site and a role do
+   differently: each carries a field the spellings do not cover. */
+function mergeRecords(list, fromId, intoId, absorb){
+  const all = list || [];
+  const from = all.find(s => s.id === fromId);
+  const into = all.find(s => s.id === intoId);
+  if(!from || !into || from === into) return { list: all, moved: 0 };
   let moved = 0;
   spellings(from).forEach(sp => { if(addAlias(into, sp)) moved++; });
-  // An address on the record being absorbed is better than no address at all,
-  // and never better than one already there.
-  if(!into.address && from.address) into.address = from.address;
-  return { sites: list.filter(s => s.id !== fromId), moved };
+  if(absorb) absorb(into, from);
+  return { list: all.filter(s => s.id !== fromId), moved };
 }
 
-/* What names this shift, said as one string. With a site it is the curated
-   spelling and not whatever was read; without one it is the label, unchanged,
+/* An address on the record being absorbed is better than no address at all,
+   and never better than one already there. */
+function mergeSites(sites, fromId, intoId){
+  const r = mergeRecords(sites, fromId, intoId,
+    (into, from) => { if(!into.address && from.address) into.address = from.address; });
+  return { sites: r.list, moved: r.moved };
+}
+
+/* The same rule for a rate, and it matters more: merging two spellings of one
+   job title must never quietly halve what an hour of it is worth. A rate
+   already on the surviving record is the one he typed, and it stands. */
+function mergeRoles(roles, fromId, intoId){
+  const r = mergeRecords(roles, fromId, intoId,
+    (into, from) => { if(into.rate == null && from.rate != null) into.rate = from.rate; });
+  return { roles: r.list, moved: r.moved };
+}
+
+/* The role this shift reads as: the curated spelling when a record was matched,
+   and the text that was read when none was. Same rule the site has followed
+   since §8.1 — the table is what a name means, the label is what it said. */
+function roleText(shift, role){
+  return role ? String(role.name || '').trim()
+              : String((shift && shift.role) || '').trim();
+}
+
+/* What names this shift, said as one string. With a record it is the curated
+   spelling and not whatever was read; with neither it is the label, unchanged,
    which is the fallback the whole design rests on.
+
+   The role-only case is new in §27 and is Homebase's: that job prints "Cook"
+   and no place at all, so before there was a role table there was nothing to
+   curate and the label was all there was. Now a matched role speaks alone.
 
    The separator is the employer's own (§17.4) for the calendar and a middot on
    screen, because the pipe reads as punctuation in a sentence and as structure
    in a title. */
-function whereText(shift, site, sep){
+function whereText(shift, site, sep, role){
   const s = shift || {};
-  if(!site) return String(s.label || '').trim() || 'Shift';
-  const role = String(s.role || '').trim();
-  return role ? `${role}${sep || ' | '}${site.name}` : site.name;
+  const r = roleText(s, role);
+  if(site) return r ? `${r}${sep || ' | '}${site.name}` : site.name;
+  if(role && r) return r;
+  return String(s.label || '').trim() || 'Shift';
 }
 
 /* §8.1's title convention, `${company}- ${role} ${site}`, with the separator
-   §17.4 put between the last two. A shift that matched no site produces the
-   byte-identical title it produced before this file existed. */
-function eventTitle(companyName, shift, site){
-  return `${companyName || 'Shift'}- ${whereText(shift, site)}`;
+   §17.4 put between the last two. A shift that matched neither table produces
+   the byte-identical title it produced before this file existed. */
+function eventTitle(companyName, shift, site, role){
+  return `${companyName || 'Shift'}- ${whereText(shift, site, undefined, role)}`;
 }
 
 /* The address the calendar gets. The shift's own wins: a feed row carries the
@@ -168,10 +264,17 @@ function addressFor(shift, site){
   return String((shift && shift.place) || (site && site.address) || '').trim();
 }
 
-/* Are these two rows in the same place? Identity first, text only as the
-   fallback — two rows that both matched the same site are the same place
-   however they were spelled, and that is the point of the table. */
-const whereKey = x => (x && x.siteId) ? 'id:' + x.siteId : 'txt:' + key(x && x.label);
+/* Are these two rows the same shift, as far as naming goes? Identity first,
+   text only as the fallback — two rows that both matched the same records are
+   the same however they were spelled, and that is the point of the tables.
+
+   The role is part of the identity, not decoration. A calendar feed that moves
+   him from Cook to Dishwasher at the same site and hour has changed what the
+   night is worth, and a comparison that ignored the role would call that
+   unchanged and file the old rate against it (§27). */
+const whereKey = x =>
+  (x && (x.siteId || x.roleId)) ? `id:${x.siteId || ''}/${x.roleId || ''}`
+                                : 'txt:' + key(x && x.label);
 
 /* Candidate site records drawn from the labels already on file, most-used
    first — §8.2's "build from what's on file", for names instead of times.
@@ -179,20 +282,22 @@ const whereKey = x => (x && x.siteId) ? 'id:' + x.siteId : 'txt:' + key(x && x.l
    row is exactly what stops the reader's output becoming authority. Labels
    that already match a site are left off, since that question is answered.
 
-   `readSite` is how a label yields the part that could name a place. It is
-   passed in rather than done here because the answer lives in the separator
-   parser.js preserves (§17.4), and this file does not read text. It matters:
-   offering the whole of "Cook Plant ASO | SOUTHERN HENS" would file a site
-   under a name with a role stuck to the front of it, which then matches
-   nothing the next time the same screen is read. */
-function suggestSites(shifts, sites, readSite){
-  const raw = readSite || (x => x);
+   `read` is how a shift yields the part that could name the thing being built,
+   and `held` is how it says it already has one. Both are passed in rather than
+   done here because the answer lives in the separator parser.js preserves
+   (§17.4), and this file does not read text. It matters: offering the whole of
+   "Cook Plant ASO | SOUTHERN HENS" would file a site under a name with a role
+   stuck to the front of it, which then matches nothing the next time the same
+   screen is read — and would file a role with a place stuck to the end. */
+function suggestNames(shifts, records, read, held){
+  const raw = read || (s => s && s.label);
+  const has = held || (s => s.siteId);
   const seen = new Map();
   (shifts || []).forEach(s => {
-    if(!s || s.siteId) return;
-    const name = String(raw(s.label || '') || '').trim();
+    if(!s || has(s)) return;
+    const name = String(raw(s) || '').trim();
     if(!key(name)) return;
-    if(matchSite(name, sites).site) return;
+    if(matchName(name, records).rec) return;
     const k = key(name);
     if(!seen.has(k)) seen.set(k, { name, count: 0 });
     seen.get(k).count++;
@@ -203,7 +308,9 @@ function suggestSites(shifts, sites, readSite){
 /* Node picks these up for the tests; the browser just gets the globals. */
 if(typeof module !== 'undefined' && module.exports){
   module.exports = { key, editDistance, NEAR_ABS, NEAR_REL, NEAR_MIN_LEN,
-                     spellings, matchSite, addAlias, dropAlias, newSite,
-                     mergeSites, whereText, eventTitle, addressFor, whereKey,
-                     suggestSites };
+                     spellings, matchName, addAlias, dropAlias,
+                     newSite, newRole, rateFor,
+                     mergeRecords, mergeSites, mergeRoles,
+                     readLabel, roleText, whereText, eventTitle, addressFor, whereKey,
+                     suggestNames };
 }
