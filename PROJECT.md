@@ -1,6 +1,6 @@
 # Shift Deck — project state
 
-_Last updated 3 September 2026_ — real screenshots of both apps landed (§3.1, §5),
+_Last updated 4 September 2026_ — real screenshots of both apps landed (§3.1, §5),
 Homebase's own Calendar Sync turned out to exist and is now an import path (§12),
 and the app became the normalising step between two calendars rather than a
 second source of the same events (§13). The Worker that closes the import gap
@@ -12,7 +12,8 @@ DSI is the fixed one, Trupoint is PRN. §17 closes the TrackTik email as a dead
 end and makes screenshots the plan, §18 builds the first thing that follows
 from it — DSI's rota, declared, and the am/pm check that runs off it — and §19
 replaces the turnaround warning with one that catches shifts booked over each
-other, across midnight, at the point they arrive.
+other, across midnight, at the point they arrive. §26 builds §8.1's site table,
+which leaves §8.4 as the last of §8's four.
 
 A record of what has been built, why the design went the way it did, and what
 is still undecided.
@@ -395,6 +396,11 @@ changes the shape the next is written against.
 
 ### 8.1 Site table, replacing the free-text label — **do first**
 
+**Built on 4 September 2026 — §26**, which is the record of what it became.
+Two things below were overtaken and are marked where they sit: the blocker at
+the foot of this section was cleared by §17.4, and the title convention was
+overtaken by the same section.
+
 `shift.label` is one string doing two jobs. The edit dialog admits it: the field
 is captioned "Site or role". TrackTik's line is `Mobile Guard | De la Montagne`
 — a role *and* a place. Homebase's is `Cook` — a role, no place. Addresses only
@@ -424,6 +430,9 @@ shift = { …, siteId, role, label }   // label kept as fallback
 - Knock-ons: the title convention `DSI- Cook Plant` needs preserving as
   `${company}- ${role} ${site}`; changing `SUMMARY` at all rewrites every event,
   which is free in subscription mode and messy in manual-import mode.
+  *(Overtaken, §26.7: §17.4 kept the employer's pipe between role and site on
+  purpose, so a space join here would reverse it. The rewrite is handled rather
+  than only noted — `restamp()` re-queues the affected events.)*
 - ~~The gap warning gets better for free — back-to-back shifts at *different
   addresses* is a different warning from two at the same one.~~ **Withdrawn,
   §19.** There is no turnaround warning any more to improve: going straight
@@ -432,10 +441,12 @@ shift = { …, siteId, role, label }   // label kept as fallback
   change — he cannot be in two places at once whether or not they are the same
   place.
 
-**Blocked on a real TrackTik screenshot.** The site/role split assumes the real
+~~**Blocked on a real TrackTik screenshot.** The site/role split assumes the real
 line contains the `|` separator. If it does not, that split is fiction. Build
 the table and the schema now; wire the parser-side split once the real format is
-known.
+known.~~ **Cleared, §11.1 and §17.4.** The separator is real, it survives the
+parser, and `splitLabel()` was written and tested against it before this section
+was built. §26 read it and changed nothing in `parser.js`.
 
 ### 8.2 am/pm plausibility, from a declared schedule
 
@@ -3035,7 +3046,7 @@ is the recommended mode for reasons that now include this one.
 ### 25.7 Where this leaves the order
 
 Unchanged: §8.1's site table, then §8.4, with §4/§14's Worker still the live
-product blocker.
+product blocker. *(The first of those is built — §26.)*
 
 But this feature has a second half that only the Worker can build, and it is
 worth writing down now while the reasoning is fresh. A `VALARM` is a good
@@ -3060,3 +3071,207 @@ raw `r||s` form JWS wants.
 One rule for when that lands: **the `VALARM` comes out.** Two buzzes for the
 same seven hours is precisely how a warning gets muted, and §19 is the record of
 that happening in this app once already.
+
+---
+
+## 26. Built: the site table, 4 September 2026
+
+§8.1, the heaviest of the four and the one everything after it was written
+against. `shift.label` was one string doing two jobs — the edit dialog admitted
+it by captioning the field "Site or role" — and every consequence of that ran
+downstream: no address on a screenshot shift, no `LOCATION:` line, no stable
+answer to "is this the same place", and a matcher deriving its idea of a known
+site from its own unvalidated output.
+
+```js
+S.sites = [{ id, companyId, name, address, aliases:[], archived }]
+shift   = { …, siteId, role, label }
+```
+
+### 26.1 Where it lives
+
+- **`sites.js` is new**, a fifth pure module beside `parser.js`, `ics.js`,
+  `patterns.js` and `holidays.js`, and new for the same reason §18.1 gave: it
+  is a different kind of knowledge. It answers one question — are these two
+  spellings the same place — and it answers it against records a human made,
+  not against text anything read. Matching, the aliases, the merge, the title
+  convention and the address precedence are all here; there is no DOM and no
+  storage, and `tests/sites.test.js` requires it directly.
+- **`app.js` does what the table cannot say**: which sites belong to which job,
+  how a review row acquires a `siteId`, and what happens on the four screens.
+  The wiring is three functions — `applySite()`, which resolves a row;
+  `siteFlag()`, which decides whether it is worth looking at; and
+  `learnSpelling()`, which is the commit-time half of the aliases.
+- **`parser.js` is untouched.** That is §17.4 paying off exactly as intended:
+  the separator was already correct, `splitLabel()` was already exported and
+  tested, and this section is the one that finally reads it.
+
+### 26.2 `snapSite()` was the bug, not the starting point
+
+§8.1 called aliases "the real prize" and it understated it. The function being
+replaced matched a fresh read against `[...new Set(S.shifts.map(s => s.label))]`
+— the labels already filed, which are the parser's own output. One bad read
+committed once became a "known site", and every later read of that site snapped
+to the mistake. It is the same failure §8.2 refused outright for times, sitting
+unremarked in the name path, and it had the same shape: a check that gets more
+confident the more often it has been wrong.
+
+Nothing now derives a spelling from anything but a site record, and a site
+record only ever exists because somebody made one. Three routes make one, and
+all three put a human between the OCR and the record:
+
+| Route | When |
+|---|---|
+| `+ Add "…"` on a review row | Day one, and every new site after. The name is asked for, prefilled with what was read |
+| **Build from what's on file** in Setup | Labels already filed, with counts, corrected as they are added |
+| **Add a site** in Setup | Typed from scratch, for a place he knows is coming |
+
+The middle one is deliberately not a migration. Turning every string OCR has
+ever produced into a site record would be `snapSite()` again, in one pass
+instead of gradually.
+
+### 26.3 Matching, and the one place §8.1's rule needed tightening
+
+Exact spelling → edit distance → no match, as specified, with the thresholds
+lifted unchanged from the function being replaced (three characters, or 18% of
+the longer spelling). Two rules were added because a wrong `siteId` costs more
+than a wrong string did:
+
+- **An exact hit anywhere beats a near hit anywhere.** Both passes run over the
+  whole list rather than site by site, so a record that answers to the exact
+  text cannot lose to one that is two characters away.
+- **A spelling under five characters has to match exactly.** "Cook" and "Cort"
+  are two apart, which is most of the word. The real names — De la Montagne,
+  SOUTHERN HENS — are long, and it is on long names that a distance of three
+  means what it is supposed to mean.
+
+Archived sites are not matched against. Archiving says he has stopped being
+sent there, so a fresh read that looks like it is more likely a new place with
+a similar name; the record stays, and the shifts already naming it still read
+correctly.
+
+### 26.4 The confirmation, and what it costs
+
+§8.1: "confirming a fuzzy match in review adds one". The confirming act is
+**adding the row**. The review screen is already the mandatory checkpoint, the
+row is already amber and already names both spellings — *Read as "De Ia
+Montagme" and taken as De la Montagne* — so pressing Add is a decision he has
+been shown. A row he redirected by hand teaches the table too, and that is the
+more valuable of the two: it is the spelling the matcher could not reach on its
+own.
+
+**This is a trade and it is worth naming.** A separate tick-box per amber row
+would make the confirmation explicit; it would also put a second control on
+every fuzzy row, on a phone, in the screen whose whole job is to be quick
+enough to actually get used. The cost of the choice made is that ignoring an
+amber row teaches the table the spelling it was warning about. The release
+valve is that every spelling is listed on the site's card in Setup with an ×
+beside it — visible, and one tap to undo — which a tick-box in a review list
+that has since been committed would not be.
+
+Nothing is learned from an exact match, and nothing from a site carried in with
+a generated week: neither was read off anything.
+
+### 26.5 The four screens
+
+- **The review row loses its free-text label and gains a site column.** What
+  was read is shown, then a select naming what it was taken as. Typing a
+  corrected spelling into a box was never the fix — the next screenshot spells
+  it wrong again — and naming the site is. A site made on one row is matched
+  against every other unresolved row in the same batch, because one screenshot
+  routinely carries the same place four times, spelled four ways.
+- **The edit dialog splits into Role and Site**, with the text label appearing
+  only when there is no site — which is the fallback made visible. Pointing a
+  filed shift at a site here teaches the spelling too.
+- **The schedule and the banner read `role · site`**, or the label unchanged
+  when there is no site.
+- **Setup grows a Sites list per job**: name, address, the spellings with an ×
+  each, archive, merge, remove.
+
+### 26.6 `LOCATION:`, which is why any of this was worth doing
+
+One line in the `.ics`, and Android renders a tappable address: the two-hour
+alarm fires, he taps the event, taps the address, and he is navigating. §8.1
+called it the single best reason and it was right.
+
+The shift's own `place` wins over the site's address. A calendar row carries
+what the employer published for that night, which is a fact about that night;
+the site's is a standing default. The edit dialog says so rather than leaving
+it to be discovered — *"Left empty, De la Montagne uses 401 Main St"*.
+
+### 26.7 The title, and where §8.1 was overtaken
+
+§8.1 specifies `${company}- ${role} ${site}`. Written literally that produces
+`DSI- Cook Plant ASO SOUTHERN HENS`, and it should not be built that way: §17.4
+landed eleven sections later, kept the employer's pipe deliberately, and
+changed the exported `SUMMARY` to carry it. A space join now would reverse a
+change made on purpose and turn two fields back into one run-on string.
+
+So the separator stays: `DSI- Cook Plant ASO | De la Montagne`. What improves
+is which side of it is trustworthy — the site half is now the curated spelling
+rather than whatever the reader made of it that day. A shift matching no site
+produces the byte-identical title it produced yesterday.
+
+**And the knock-on §8.1 warned about is now handled rather than noted.**
+Renaming a site, adding an address to one, merging or removing one all change
+the text of events a calendar may already hold. `restamp()` bumps `SEQUENCE`
+and clears `sent` for the affected shifts, so the next export rewrites them as
+a newer revision — which is what §22 established a calendar needs before it
+will believe an update. It fires on leaving the field rather than on each
+keystroke: a revision number counting letters typed would be nonsense.
+
+### 26.8 Identity, which is what fixes the duplicate check
+
+`bySlot()` compared `key(label)` against `key(snapSite(label))`. It now compares
+`whereKey()`, which is the `siteId` when there is one and the text only when
+there is not. Two rows that resolved to the same site are the same place
+however they were spelled — the case that used to file a second shift over a
+real one — and two that resolved to *different* sites are still flagged as a
+location change rather than swallowed. `icsSame()` uses the same predicate, so
+a feed re-import compares places the same way.
+
+### 26.9 §7 is intact, and §11.4's check is spent without being needed
+
+§11.4 reserved a decision for this step: it is the one schema change that
+"moves a value out of `label` into a `siteId`, and a record written before it
+means something different afterwards". Built as §8.1 actually specifies, it is
+not that change. `siteId` is nullable, `label` is kept and still written on
+every commit, and every read goes through `whereText()`, which falls back to
+the label. A record saved yesterday has no `siteId`, renders as its label, and
+means exactly what it always meant — the same additive-optional test `extUid`
+and `place` passed in §11.4's own words.
+
+So no `S.version`, no migration path, and **Delete everything and start over**
+remains the documented answer to a shape change. §7 holds because the design
+chose the fallback, not because nothing changed.
+
+The one thing that would have needed a migration is the thing that was
+deliberately not built: auto-creating a site for every label on file. That is
+in Setup as a list to pick from instead, which is §8.2's shortcut applied to
+names, for §8.2's reason.
+
+### 26.10 What it refuses to do
+
+- **Never blocks an import.** A name matching nothing files as read. §8.1 chose
+  a nullable `siteId` precisely so one bad read cannot stop a shift arriving,
+  and an unmatched row is not even amber — there is nothing wrong with it.
+- **Never invents a site.** Not from a label, not from a feed, not on commit.
+- **Never merges on its own.** Merging is permanent and moves shifts; it is a
+  confirm dialog naming the count, and there is no undo.
+- **Never renames a site from a screenshot.** A read that matches becomes an
+  alias, never the name. The name is what the calendar says, and it changes
+  only when he changes it.
+- **Never carries a site across jobs.** Changing the job on a row or in the
+  edit dialog drops the `siteId` and matches again against the new job's list.
+
+### 26.11 Where this leaves the order
+
+§8.4 change detection is now the only one of §8's four left, and it is the one
+that was waiting for this: "needs stable site identity to tell same shift,
+different place". It has it — `whereKey()` is that identity, and §26.8 is
+already the first half of the answer.
+
+The site table was also the last of the three §11.3 called schema changes, so
+§4/§14's Worker is now the only thing on the list that is not an enhancement,
+and it remains the live product blocker.
+

@@ -194,8 +194,10 @@ date. Times without a date are flagged for review rather than guessed at; a
 site line whose times scrolled away is dropped. Overlap the screenshots by a
 row and nothing is lost.
 
-Site names are fuzzy matched against ones already on file, so the same site
-spelled three different ways by OCR collapses to one.
+Site names are matched against the site table (below), so the same place
+spelled three different ways by OCR collapses to one. They are not matched
+against names read off earlier screenshots — that would make one bad read the
+authority for every read after it.
 
 ## Typing a time
 
@@ -222,6 +224,45 @@ can see what it made of it.
 Anything it cannot read goes red and changes nothing. It never rounds to the
 nearest time you might have meant: `2:5` is not `02:05`. The edit dialog will
 not save while either time is unreadable.
+
+## Sites
+
+TrackTik prints a role and a place in one line — `Mobile Guard | De la
+Montagne` — with its own separator between them. Homebase prints `Cook`, a role
+with no place in it. Addresses attach to the place, and an address is what
+turns the two-hour alarm into a line the phone can navigate from.
+
+Under each job in **Setup** there is a **Sites** list: a name, an address, and
+the spellings that site answers to. What it changes:
+
+- **A screenshot naming a site the app knows is filed against it however badly
+  it was read.** "De Ia Montagme" and "De la Montagne" become the same place,
+  and the schedule, the pay tab and the calendar all say the good spelling.
+- **The calendar event gets a `LOCATION:` line.** The alarm fires, he taps the
+  event, taps the address, and he is navigating. A shift can still carry an
+  address of its own — a calendar import brings one — and that wins over the
+  site's when it is there.
+- **A near miss goes amber in review**, naming both spellings. Adding the row
+  is what teaches the site that spelling, so the same misreading is silent next
+  month. A spelling learned in error is one tap to forget on the site's card.
+- **Two shifts at the same time in the same place are one shift**, on identity
+  rather than on how each was spelled. Two at the same time in *different*
+  places are still flagged as a change of location, not swallowed as a repeat.
+
+Nothing here is required. A read matching no site still files, still renders as
+the text that was read, and can be pointed at a site later from the shift's own
+edit screen — or turned into one on the spot from the review row's site column.
+
+Sites are never invented from what has been read. **Build from what's on file**
+lists the labels already filed with counts, and you correct the spelling as you
+add each one; that is the same shape as the rota shortcut below and for the
+same reason. Merging two records is permanent and expected — OCR keeps
+inventing spellings, so every spelling the absorbed record answered to moves
+across with its shifts.
+
+Archiving a site keeps it on the shifts that name it and stops new reads
+matching it. Removing one drops its shifts back to the text that was read, so
+nothing loses its name.
 
 ## Declared shifts
 
@@ -321,16 +362,17 @@ ending at 15:00 and one starting at 15:00 say nothing.
 
 ## Development
 
-Four modules, all pure functions — no DOM, no storage. `parser.js` turns OCR
+Five modules, all pure functions — no DOM, no storage. `parser.js` turns OCR
 text into shift rows and `ics.js` does the same for a calendar file; they share
 nothing but the row shape, so both land in the same review screen with the same
 flags and the same commit path. `patterns.js` reads nothing at all — it takes a
 finished row and the shifts declared for its job and decides what to do about
 the difference, and it also turns a declared rota into a week of rows.
 `holidays.js` is a calendar: which dates are statutory holidays, worked out by
-rule so nothing expires. Each loads as a plain script in the browser and is
-required directly by the tests. There is still no build step and the app has no
-runtime dependencies.
+rule so nothing expires. `sites.js` decides when two spellings are the same
+place, and owns the aliases and the merge. Each loads as a plain script in the
+browser and is required directly by the tests. There is still no build step and
+the app has no runtime dependencies.
 
 ```
 npm test              # run every module's tests
@@ -344,13 +386,16 @@ do not depend on where the tests are run.
 Fixtures marked PROVISIONAL are typed from the vendors' user guides; ones
 marked TRANSCRIBED are real schedules read off screenshots by eye rather than
 by OCR. Neither kind proves the reading of the text, only the understanding of
-the layout. An unmarked fixture is pasted OCR output. `patterns.js` and `holidays.js` have no
-fixtures — they read nothing, so their tests are stated cases and dates checked
-against a calendar rather than samples.
+the layout. An unmarked fixture is pasted OCR output. `patterns.js`, `holidays.js` and
+`sites.js` have no fixtures — they read nothing, so their tests are stated
+cases, dates checked against a calendar, and misspellings of the two real site
+names rather than samples.
 
 The app is not carrying live data yet, so there are no schema migrations. When
 the stored shape changes, use **Setup → Danger zone → Delete everything and
-start over**. See PROJECT.md §7.
+start over**. See PROJECT.md §7. The site table did not need one: `siteId` is
+nullable and `label` is kept, so a record written before it reads back meaning
+exactly what it always meant.
 
 ## Known limits
 
@@ -376,6 +421,10 @@ start over**. See PROJECT.md §7.
   holiday falls, not whether your employer observes it or whether you are
   working it. That is why a holiday only ever flags a generated shift and never
   removes one.
+- A near-miss site match is confirmed by adding the row, not by a separate
+  tick. That keeps the review row to one control, and the cost is that ignoring
+  an amber row teaches the table the spelling it was warning you about. The
+  spelling shows on the site's card in Setup and is one tap to forget.
 - Android can clear the storage of a web app under pressure. Save a backup
   from Setup now and then.
 - Both layouts have been checked against real screenshots, but not yet against

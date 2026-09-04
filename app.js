@@ -6,6 +6,11 @@
 /* ---------- storage ------------------------------------------------------ */
 const DEFAULTS = {
   companies: [],
+  // Places, with the spellings each one answers to (§8.1). A flat table
+  // carrying its own `companyId` rather than a list inside each job, because
+  // the common read is a shift resolving its `siteId` — one lookup, no job to
+  // find first — and the by-job list is only ever wanted on the Setup screen.
+  sites: [],
   shifts: [],
   // Shifts that were deleted after a calendar had already been told about
   // them. Not history — a to-do list with one item on it: say the event is
@@ -134,7 +139,7 @@ function retire(list){
       // Baked now rather than looked up later: by the time this is written to
       // a file the job may have been removed too, and an event the importer
       // shows as "cancelled: Shift" tells him nothing.
-      title: `${co ? co.name : 'Shift'}- ${sh.label}`,
+      title: eventTitle(co && co.name, sh, siteById(sh.siteId)),
       at: todayISO()
     });
   });
@@ -156,6 +161,28 @@ function dropShifts(pred){
    construction — see doExport. */
 const owedCancels = () => (S.tombstones || []);
 
+/* Shifts whose event text has just changed underneath them — a site renamed,
+   an address added, a merge moving them to a record with another name. §8.1
+   warns that changing `SUMMARY` at all rewrites every event, and this is the
+   half of that warning the app can actually act on: the calendar goes on
+   showing the old name until it is told, and it may ignore a revision no newer
+   than the one it holds (§22). So the number goes up and the shift goes back
+   in the queue for the next export.
+
+   Subscription mode does not need this — the file is rebuilt whole — but it
+   costs nothing there, and manual-import mode is where an event silently
+   keeping a name nobody uses any more would sit for months. */
+function restamp(pred){
+  let n = 0;
+  S.shifts.filter(pred).forEach(sh => {
+    if(!sh.sent) return;
+    sh.seq = (sh.seq || 0) + 1;
+    sh.sent = false;
+    n++;
+  });
+  return n;
+}
+
 /* ---------- review flags -------------------------------------------------
    parser.js emits codes; the wording lives here so changing it never breaks
    a test fixture. FLAG_MOVED is raised by the importer, not the parser.
@@ -163,6 +190,10 @@ const owedCancels = () => (S.tombstones || []);
 const FLAG_MOVED = 'moved';
 const FLAG_CHANGED = 'changed';
 const FLAG_HOLIDAY = 'holiday';
+const FLAG_SITE = 'site';
+/* A value here may be a function of the row. Most of these sentences are the
+   same every time they are said; the site one has to name two spellings, and
+   naming them is the whole content of it. */
 const FLAG_TEXT = {
   [FLAG.NODATE]:  'No date found \u2014 set it below.',
   [FLAG.AMPM]:    'No am/pm was printed \u2014 check the times.',
@@ -177,40 +208,135 @@ const FLAG_TEXT = {
   [FLAG_MOVED]:   'A shift is already on file at this time in a different place \u2014 adding this will not replace it.',
   [FLAG_CHANGED]: 'The calendar has moved a shift already on file.',
   [FLAG_HOLIDAY]: 'A statutory holiday falls on this day \u2014 remove this row if he is not working it.',
+  [FLAG_SITE]: p => `Read as \u201c${p.siteRaw}\u201d and taken as `
+    + `${(siteById(p.siteId) || {}).name} \u2014 adding this row remembers that spelling.`,
   [ICS_FLAG.NOEND]: 'The calendar gave no end time \u2014 set one below.',
   [ICS_FLAG.RECUR]: 'A repeating event \u2014 only the first was read.',
   [ICS_FLAG.ZONE]:  'The time zone was not recognised \u2014 times taken as written.',
   [ICS_FLAG.LONG]:  'This runs for more than a day, which no shift should.'
 };
 
-/* ---------- site name matching ------------------------------------------
-   OCR spells the same site three different ways. Snap to one we already know.
+/* ---------- the site table (§8.1) ----------------------------------------
+   `sites.js` owns the matching, the aliases and the merge. What lives here is
+   the part that needs the store: which sites belong to which job, and how a
+   row coming off a reader acquires a `siteId`.
+
+   This replaces `snapSite()`, which matched a fresh read against the labels
+   already sitting in `S.shifts` — the parser's own unvalidated output — so one
+   bad read became a "known site" and everything after it snapped to the
+   mistake. `sites.js` says why that had to go.
    -------------------------------------------------------------------- */
-const key = s => String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
-function editDistance(a, b){
-  if(Math.abs(a.length - b.length) > 4) return 99;
-  const dp = Array.from({length:a.length+1}, (_,i) => [i, ...Array(b.length).fill(0)]);
-  for(let j = 0; j <= b.length; j++) dp[0][j] = j;
-  for(let i = 1; i <= a.length; i++)
-    for(let j = 1; j <= b.length; j++)
-      dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1] + (a[i-1]===b[j-1]?0:1));
-  return dp[a.length][b.length];
+const siteById = id => (S.sites || []).find(s => s.id === id);
+const sitesFor = companyId => (S.sites || []).filter(s => s.companyId === companyId);
+
+/* What names this shift on screen, and the address the calendar should carry.
+   Both go through the same two functions everywhere, so a shift with no site
+   reads as its label in every single place rather than in most of them. */
+const shiftWhere = s => whereText(s, siteById(s.siteId), ' \u00b7 ');
+const shiftAddress = s => addressFor(s, siteById(s.siteId));
+
+/* The part of a label that could name a place, and the role beside it. The
+   right of the separator the employer printed (§17.4) is a place and the left
+   is a role; with no pipe there is no printed boundary, so the whole label is
+   the only candidate there is — and it becomes a site only by matching a
+   record somebody made, never by being read. One function, because the review
+   path, the edit dialog and the build-from-file list all have to agree on it. */
+function siteParts(label){
+  const { role, site } = splitLabel(label);
+  return { role: site ? role : '', raw: (site || role || '').trim() };
 }
-function knownSites(companyId){
-  return [...new Set(S.shifts.filter(s => s.companyId === companyId).map(s => s.label))];
-}
-function snapSite(raw, companyId){
-  const k = key(raw);
-  if(!k) return raw;
-  let best = null, bestD = 99;
-  for(const known of knownSites(companyId)){
-    const kk = key(known);
-    if(kk === k) return known;
-    const d = editDistance(k, kk);
-    const rel = d / Math.max(k.length, kk.length, 1);
-    if(d < bestD && (d <= 3 || rel <= 0.18)){ bestD = d; best = known; }
+const siteCandidate = label => siteParts(label).raw;
+
+/* Resolve a review row against the table. Runs before the row is compared with
+   anything on file, because "same place" is an identity question once sites
+   exist and a spelling question only when they do not.
+
+   `siteRaw` is kept on the row: it is what was actually read, and it is what
+   gets recorded as a spelling if he confirms the match. */
+function applySite(p){
+  const { role, raw } = siteParts(p.label);
+  p.siteRaw = raw;
+  p.role = role;
+  // A site belongs to one job, so changing the job on a review row unsets it
+  // and the row is matched again against the sites the new job has. Undated
+  // TrackTik screens make that a routine correction (§16.1), not a rare one.
+  const held = siteById(p.siteId);
+  if(held && held.companyId !== p.companyId){ p.siteId = null; p.siteHow = ''; }
+  if(!p.siteId){
+    const m = matchSite(p.siteRaw, sitesFor(p.companyId));
+    p.siteId = m.site ? m.site.id : null;
+    p.siteHow = m.how;
+  }else if(!p.siteHow){
+    p.siteHow = 'kept';               // arrived resolved; nothing was read
   }
-  return best || raw;
+  siteFlag(p);
+}
+
+/* Amber only for the near miss. An exact hit says nothing worth reading, and a
+   row that matched nothing is not an error — §8.1 chose a nullable `siteId`
+   precisely so that a name nobody recognises still files, under the text that
+   was read. What has to be looked at is the case where the app has decided two
+   different spellings are the same place, because that is the one it can be
+   wrong about, and the one that is about to be remembered. */
+function siteFlag(p){
+  p.flags = (p.flags || []).filter(f => f !== FLAG_SITE);
+  if(p.siteHow === 'near') p.flags = [...p.flags, FLAG_SITE];
+}
+
+/* The site column of a review row. Archived sites are off the list unless the
+   row is already pointing at one, and the last option is the one that gets
+   used on day one, when the table is empty and every row matched nothing.
+
+   The name is asked for rather than taken, prefilled with what was read: a
+   record made straight out of OCR would put "De Ia Montagme" on the calendar
+   for ever, and this is the one moment somebody is looking at both the text
+   and the screen it came from. */
+function siteOptions(p){
+  const live = sitesFor(p.companyId).filter(s => !s.archived || s.id === p.siteId);
+  const opts = [`<option value=""${p.siteId ? '' : ' selected'}>\u2014 no site \u2014</option>`];
+  live.forEach(s => opts.push(
+    `<option value="${esc(s.id)}"${s.id === p.siteId ? ' selected' : ''}>${esc(s.name)}</option>`));
+  if(p.siteRaw) opts.push(`<option value="+">+ Add \u201c${esc(p.siteRaw)}\u201d\u2026</option>`);
+  return opts.join('');
+}
+
+function pickSite(p, v){
+  if(v === '+'){
+    const name = prompt('Name this site the way it should read everywhere', p.siteRaw || '');
+    if(!name || !name.trim()) return;         // cancelled: the row is unchanged
+    const site = newSite(uid(), p.companyId, name.trim(), '');
+    S.sites.push(site);
+    p.siteId = site.id;
+    p.siteHow = 'set';
+    save();
+  }else{
+    p.siteId = v || null;
+    p.siteHow = v ? 'set' : 'none';
+  }
+  siteFlag(p);
+}
+
+/* The confirmation half of §8.1's "aliases are the real prize". A row reaching
+   the commit path has been through the review screen with its match named on
+   it, so whichever site it is pointing at then is the one he is confirming,
+   and the spelling that was read becomes a spelling that site answers to. Next
+   month the same misreading is an exact hit and says nothing.
+
+   Only the two cases where something was actually decided record anything:
+   `near`, where the app guessed and he let it stand, and `set`, where he
+   pointed the row at a site himself — which is the more valuable of the two,
+   because it is the spelling the matcher could not get to on its own. An
+   `exact` hit has nothing to teach, and a site carried in with a generated row
+   was never read off anything.
+
+   A spelling learned in error is removable on the site's card in Setup, which
+   is what makes this an act of committing rather than one more tick-box on
+   every amber row. */
+function learnSpelling(p){
+  if(!p.siteId) return;
+  if(p.siteHow !== 'near' && p.siteHow !== 'set') return;
+  const site = siteById(p.siteId);
+  if(site) addAlias(site, p.siteRaw);
 }
 
 /* ---------- pay maths ---------------------------------------------------- */
@@ -320,7 +446,7 @@ function renderNext(){
   box.innerHTML = `
     <div class="lbl">NEXT SHIFT</div>
     <div class="big">${DAYNAMES[d.getDay()]} ${d.getDate()} ${MONTHNAMES[d.getMonth()].slice(0,3)} &middot; ${esc(fmtTime(n.s.start))}</div>
-    <div class="sub">${esc(co ? co.name : 'Unassigned')} &middot; ${esc(n.s.label)} &middot; ${fmtDur(durMins(n.s))}</div>
+    <div class="sub">${esc(co ? co.name : 'Unassigned')} &middot; ${esc(shiftWhere(n.s))} &middot; ${fmtDur(durMins(n.s))}</div>
     <div class="cd">${cd}</div>`;
   wrap.appendChild(box);
 }
@@ -734,7 +860,7 @@ function renderSchedule(){
           <i class="tick" style="${dot}"></i>
           <div>
             <div class="when">${esc(fmtTime(s.start))} – ${esc(fmtTime(s.end))}</div>
-            <div class="where">${esc(co ? co.name : 'Unassigned')} &middot; ${esc(s.label)}${
+            <div class="where">${esc(co ? co.name : 'Unassigned')} &middot; ${esc(shiftWhere(s))}${
               isProposed(s) ? ' &middot; <span class="rota">from the rota</span>' : ''}</div>
           </div>
           <div class="len">${fmtDur(durMins(s))}</div>`;
@@ -950,6 +1076,188 @@ function renderSuggestions(co, patHost, host){
   });
 }
 
+/* -- the site table, in the job card (§8.1) --
+   One card per place. The name is what the calendar and every screen say; the
+   address is the `LOCATION:` line and the reason this section exists; the
+   spellings are what stop the same misreading needing the same decision every
+   month.
+
+   Merge is here rather than anywhere cleverer because merging is permanent and
+   routine, not a migration step — OCR keeps inventing spellings, and the
+   answer to "these two are the same place" has to be one control he can find. */
+function renderSites(co, host, sugHost){
+  host.innerHTML = '';
+  const mine = sitesFor(co.id);
+  if(!mine.length)
+    host.appendChild(el('p','tiny soft','None yet. Add one here, or pick “Add …” on a row in the review list when a screenshot names it.'));
+
+  mine.forEach(site => {
+    const used = S.shifts.filter(x => x.siteId === site.id).length;
+    const card = el('div','site' + (site.archived ? ' archived' : ''));
+    card.innerHTML = `
+      <div class="grid2">
+        <label class="f"><span>Name</span><input data-s="name" type="text" value="${esc(site.name)}"></label>
+        <label class="f"><span>Address</span><input data-s="address" type="text"
+          placeholder="401 Main St, Hattiesburg MS" value="${esc(site.address || '')}"></label>
+      </div>
+      <div class="aliases"></div>
+      <div class="rowbtns sitebtns"></div>
+      <p class="tiny soft sitecount"></p>`;
+
+    card.querySelectorAll('[data-s]').forEach(inp => {
+      const was = inp.value;
+      inp.oninput = () => {
+        site[inp.dataset.s] = inp.value;
+        save();
+        // The name is on the schedule, the banner and every event title.
+        if(inp.dataset.s === 'name'){ renderSchedule(); renderNext(); }
+      };
+      // On leaving the field, not on every keystroke: a revision number that
+      // counted letters typed would be nonsense, and the question is only
+      // whether the text ended up different from what the calendar was told.
+      inp.onchange = () => {
+        if(inp.value === was) return;
+        restamp(x => x.siteId === site.id);
+        save(); renderSetup();
+      };
+    });
+
+    // The spellings, each removable. This is the release valve on learning an
+    // alias by committing a row: a wrong one is one tap to undo, and until it
+    // is undone it is at least visible.
+    const al = card.querySelector('.aliases');
+    const spell = site.aliases || [];
+    al.appendChild(el('span','tiny soft', spell.length
+      ? 'Also read as:&nbsp;' : 'No other spellings recorded yet.'));
+    spell.forEach(a => {
+      const chip = el('span','alias', esc(a) + ' ');
+      const x = el('button','kill','&times;');
+      x.type = 'button';
+      x.setAttribute('aria-label', `Forget the spelling ${a}`);
+      x.onclick = () => { dropAlias(site, a); save(); renderSites(co, host, sugHost); };
+      chip.appendChild(x);
+      al.appendChild(chip);
+    });
+
+    const btns = card.querySelector('.sitebtns');
+
+    // Archiving, not deleting, is the ordinary end of a site: he stops being
+    // sent there, the shifts that happened still name it, and a fresh read
+    // that looks like it is more likely a new place than a return.
+    const arch = el('button','ghost', site.archived ? 'Bring back' : 'Archive');
+    arch.type = 'button';
+    arch.onclick = () => { site.archived = !site.archived; save(); renderSites(co, host, sugHost); };
+    btns.appendChild(arch);
+
+    const others = mine.filter(x => x.id !== site.id);
+    if(others.length){
+      const sel = el('select','mergesel');
+      sel.innerHTML = `<option value="">Merge into\u2026</option>` + others.map(x =>
+        `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+      sel.onchange = () => {
+        const into = siteById(sel.value);
+        sel.value = '';
+        if(!into) return;
+        if(!confirm(`Merge ${site.name} into ${into.name}? `
+          + `${used} shift${used === 1 ? '' : 's'} move across, and everything ${site.name} `
+          + `is read as becomes a spelling of ${into.name}. This cannot be undone.`)) return;
+        const res = mergeSites(S.sites, site.id, into.id);
+        S.sites = res.sites;
+        // Restamped before they are moved, so the predicate still names them.
+        restamp(x => x.siteId === site.id);
+        S.shifts.forEach(x => { if(x.siteId === site.id) x.siteId = into.id; });
+        pending.forEach(x => { if(x.siteId === site.id) x.siteId = into.id; });
+        save(); renderAll(); renderReview();
+      };
+      btns.appendChild(sel);
+    }
+
+    const kill = el('button','ghost danger','Remove');
+    kill.type = 'button';
+    kill.onclick = () => {
+      if(!confirm(used
+        ? `Remove ${site.name}? ${used} shift${used === 1 ? '' : 's'} fall back to the text `
+          + 'that was read off the screen, and the address goes with it.'
+        : `Remove ${site.name}?`)) return;
+      S.sites = S.sites.filter(x => x.id !== site.id);
+      restamp(x => x.siteId === site.id);
+      S.shifts.forEach(x => { if(x.siteId === site.id) x.siteId = null; });
+      pending.forEach(x => { if(x.siteId === site.id){ x.siteId = null; x.siteHow = 'none'; } });
+      save(); renderAll(); renderReview();
+    };
+    btns.appendChild(kill);
+
+    card.querySelector('.sitecount').textContent =
+      (used ? `${used} shift${used === 1 ? '' : 's'} here.` : 'No shifts here yet.')
+      + (site.archived ? ' Archived \u2014 new reads will not match it.' : '');
+    host.appendChild(card);
+  });
+
+  const btns = el('div','rowbtns');
+  const add = el('button','ghost','Add a site');
+  add.onclick = () => {
+    S.sites.push(newSite(uid(), co.id, 'New site', ''));
+    save(); renderSites(co, host, sugHost);
+  };
+  const build = el('button','ghost','Build from what\u2019s on file');
+  build.onclick = () => renderSiteSuggestions(co, host, sugHost);
+  btns.appendChild(add); btns.appendChild(build);
+  host.appendChild(btns);
+  sugHost.innerHTML = '';
+}
+
+/* The same shortcut §8.2 gives the rota, for names instead of times, and the
+   answer to "what about the labels already on file". It is deliberately not a
+   migration: turning every string OCR has ever produced into a site record is
+   exactly the move `snapSite()` made, one bad read becoming authority for
+   every read after it. This is a menu, the counts say which ones are worth
+   believing, and the human ticking a row is the whole control. */
+function renderSiteSuggestions(co, siteHost, host){
+  host.innerHTML = '';
+  const filed = S.shifts.filter(s => s.companyId === co.id);
+  const sug = suggestSites(filed, sitesFor(co.id), siteCandidate);
+
+  host.appendChild(el('p','tiny soft', !filed.length
+    ? 'Nothing on file for this job yet.'
+    : !sug.length
+      ? 'Every label on file already matches a site.'
+      : 'Labels already on file, most common first. These came off screenshots, '
+        + 'so correct the spelling as you add one \u2014 the name here is what the '
+        + 'calendar will say from now on.'));
+
+  sug.forEach(x => {
+    const r = el('div','sug');
+    r.innerHTML = `<span class="tiny">${esc(x.name)}</span>
+      <span class="tiny soft">${x.count} shift${x.count === 1 ? '' : 's'}</span>`;
+    const use = el('button','ghost','Add this');
+    use.onclick = () => {
+      const name = prompt('Name this site the way it should read everywhere', x.name);
+      if(!name || !name.trim()) return;
+      const site = newSite(uid(), co.id, name.trim(), '');
+      // The label it came from is a spelling it answers to, whether or not the
+      // name was corrected — that is the point of adding it from this list.
+      addAlias(site, x.name);
+      S.sites.push(site);
+      // Repoint what it was built from. Every shift whose label now matches
+      // this site, not only the ones spelled exactly like the row: the near
+      // misses are the ones that made a site table worth having.
+      S.shifts.filter(s => s.companyId === co.id && !s.siteId).forEach(s => {
+        const { role, raw } = siteParts(s.label);
+        if(matchSite(raw, [site]).site){ s.siteId = site.id; s.role = role; }
+      });
+      save();
+      // Not renderAll(): that rebuilds this card and leaves these two panes
+      // detached, so the list he is working down would stop responding. The
+      // schedule does have to catch up — those shifts read differently now.
+      renderSchedule(); renderNext();
+      renderSites(co, siteHost, host);
+      renderSiteSuggestions(co, siteHost, host);
+    };
+    r.appendChild(use);
+    host.appendChild(r);
+  });
+}
+
 /* -- setup tab -- */
 function renderSetup(){
   const box = $('#colist');
@@ -1001,7 +1309,15 @@ function renderSetup(){
         one a few minutes out is tidied up; one an hour or two out is left alone and
         flagged, because the employer may have moved it.</p>
       <div class="patbox"></div>
-      <div class="sugbox"></div>`;
+      <div class="sugbox"></div>
+
+      <h3 class="subhead">Sites</h3>
+      <p class="tiny soft" style="margin:0 0 .4rem">The places this job sends him, and
+        the spellings each one answers to. A screenshot naming a site the app already
+        knows is filed against it however badly it was read, and its address is what the
+        calendar turns into a tappable line.</p>
+      <div class="sitebox"></div>
+      <div class="sitesugbox"></div>`;
     card.querySelectorAll('[data-k]').forEach(inp => {
       inp.oninput = () => {
         const k = inp.dataset.k;
@@ -1014,6 +1330,7 @@ function renderSetup(){
       };
     });
     renderPatterns(co, card.querySelector('.patbox'), card.querySelector('.sugbox'));
+    renderSites(co, card.querySelector('.sitebox'), card.querySelector('.sitesugbox'));
 
     const btns = el('div','rowbtns');
     const del = el('button','ghost danger','Remove this job');
@@ -1022,6 +1339,10 @@ function renderSetup(){
       if(!confirm(`Remove ${co.name}? ${n} shift${n===1?'':'s'} will be deleted too.`)) return;
       dropShifts(s => s.companyId === co.id);
       S.companies = S.companies.filter(c => c.id !== co.id);
+      // The job's sites go with it. They are its places, they can never be
+      // matched against again, and leaving them would put another job's site
+      // list in front of him the next time he opened this screen.
+      S.sites = (S.sites || []).filter(x => x.companyId !== co.id);
       save(); renderAll();
     };
     btns.appendChild(del);
@@ -1085,9 +1406,17 @@ function editShift(id){
       <label class="f"><span>End</span>${clockInput(s.end, 'id="e-end"')}</label>
     </div>
     <p class="flag" id="e-bad" hidden></p>
-    <label class="f"><span>Site or role</span><input id="e-label" type="text" value="${esc(s.label)}"></label>
+    <div class="grid2">
+      <label class="f"><span>Role</span><input id="e-role" type="text"
+        placeholder="Mobile Guard" value="${esc(s.role||'')}"></label>
+      <label class="f"><span>Site</span><select id="e-site">${siteOptions(
+        { companyId: s.companyId, siteId: s.siteId || null, siteRaw: siteCandidate(s.label) })}</select></label>
+    </div>
+    <label class="f" id="e-labelwrap"${s.siteId ? ' hidden' : ''}><span>Site or role, as text</span>
+      <input id="e-label" type="text" value="${esc(s.label)}"></label>
     <label class="f"><span>Address, for the calendar</span>
       <input id="e-place" type="text" placeholder="401 Main St, Hattiesburg MS" value="${esc(s.place||'')}"></label>
+    <p class="tiny soft" id="e-addr" style="margin:-.35rem 0 .55rem"></p>
     <div class="rowbtns">
       <button class="act" id="e-save">Save</button>
       <button class="ghost" id="e-cancel">Cancel</button>
@@ -1100,6 +1429,43 @@ function editShift(id){
   // rather than file a blank over a time that was right until he touched it.
   const hush = () => { $('#e-bad').hidden = true; };
   const start = bindClock($('#e-start'), hush), end = bindClock($('#e-end'), hush);
+
+  // The site picker, and the two things that hang off it: the text label is
+  // only shown when there is no site to name the shift, and the address box is
+  // an override rather than the address — left empty, the site's own is what
+  // reaches the calendar.
+  let siteId = s.siteId || null;
+  const sitesel = $('#e-site');
+  const coNow = () => $('#e-co').value;
+  const sayAddr = () => {
+    const site = siteById(siteId);
+    $('#e-labelwrap').hidden = !!site;
+    $('#e-addr').textContent = !site
+      ? 'No site set, so this shift carries its own address or none at all.'
+      : site.address
+        ? `Left empty, ${site.name} uses ${site.address}.`
+        : `${site.name} has no address on file. Add one on its card in Setup and every shift there gets it.`;
+  };
+  const redrawSites = () => {
+    sitesel.innerHTML = siteOptions({ companyId: coNow(), siteId, siteRaw: siteCandidate(s.label) });
+    sayAddr();
+  };
+  sitesel.onchange = () => {
+    const row = { companyId: coNow(), siteId, siteRaw: siteCandidate(s.label) };
+    pickSite(row, sitesel.value);
+    siteId = row.siteId;
+    redrawSites();
+  };
+  // A site belongs to one job. Moving the shift to another one therefore drops
+  // it rather than carrying a pointer into a list it is not in — the label is
+  // still there, which is what it is for.
+  $('#e-co').onchange = () => {
+    const held = siteById(siteId);
+    if(held && held.companyId !== coNow()) siteId = null;
+    redrawSites();
+  };
+  sayAddr();
+
   $('#e-cancel').onclick = () => dlg.close();
   $('#e-save').onclick = () => {
     start.settle(); end.settle();
@@ -1116,6 +1482,13 @@ function editShift(id){
     s.start = st;
     s.end = en;
     s.label = $('#e-label').value.trim() || 'Shift';
+    s.role = $('#e-role').value.trim();
+    // Pointing a filed shift at a site by hand is the strongest confirmation
+    // in the app — stronger than letting a fuzzy match stand in review — so
+    // the spelling it was read under becomes one that site answers to, and the
+    // next screenshot spelling it that way needs no decision at all (§8.1).
+    if(siteId && siteId !== s.siteId) learnSpelling({ siteId, siteHow: 'set', siteRaw: siteCandidate(s.label) });
+    s.siteId = siteId;
     s.place = $('#e-place').value.trim();
     // He has just been through this shift by hand, which is the strongest
     // confirmation there is. Leaving it as a proposal would keep drawing his
@@ -1247,8 +1620,10 @@ async function readFiles(files){
   fill.style.width = '100%';
 
   // Before the duplicate filter, not after: a row twelve hours out is a
-  // duplicate of nothing until it has been put right.
+  // duplicate of nothing until it has been put right, and a row whose site is
+  // still three characters of OCR damage is a duplicate of nothing either.
   pending.forEach(applyPatterns);
+  pending.forEach(applySite);
   pending = pending.filter(bySlot);
 
   txt.textContent = pending.length
@@ -1289,8 +1664,13 @@ function bySlot(p){
   const proposal = sameSlot.find(isProposed);
   if(proposal){ p.replaceId = proposal.id; return true; }            // confirmation
 
-  const snapped = key(snapSite(p.label, p.companyId));
-  if(sameSlot.some(s => key(s.label) === snapped)) return false;     // exact repeat
+  // Same place, on the identity the site table gives it (§8.1). Two rows that
+  // resolved to the same site are the same place however they were spelled,
+  // which is the difference between a duplicate the app can see and one it
+  // used to wave through as a location change. A row that matched no site
+  // falls back to comparing the text, exactly as this did before.
+  const mine = whereKey(p);
+  if(sameSlot.some(s => whereKey(s) === mine)) return false;         // exact repeat
   p.flags = [...p.flags, FLAG_MOVED];
   return true;
 }
@@ -1356,9 +1736,10 @@ function payWeekStart(co, dateStr){
    convenience default is fine for a label where it would not be for a time:
    a wrong label costs mild confusion, a wrong time costs a shift (§8.3).
 
-   `place` comes with it. It is what makes the two-hour alarm a tappable
-   address (§14, §20.8) — a label without it is a downgrade from every other
-   route into this app. */
+   Since §8.1 that guess carries a `siteId` rather than a string, so a filled
+   week inherits the site's address without inheriting a spelling — and the
+   `LOCATION:` line on a generated shift is the curated one rather than
+   whatever OCR made of the site name on the day the guess came from. */
 function siteFor(co, start, end){
   // Confirmed records first, and only then the app's own earlier guesses. A
   // label copied from one generated week into the next would be an assumption
@@ -1368,7 +1749,9 @@ function siteFor(co, start, end){
   const mine = S.shifts.filter(s => s.companyId === co.id)
     .sort((a, b) => rank(a) - rank(b) || (b.date + b.start).localeCompare(a.date + a.start));
   const same = mine.find(s => s.start === start && s.end === end) || mine[0];
-  return { label: same ? same.label : 'Shift', place: same && same.place ? same.place : '' };
+  return { label: same ? same.label : 'Shift', role: (same && same.role) || '',
+           siteId: (same && same.siteId) || null,
+           place: same && same.place ? same.place : '' };
 }
 
 /* Marked, never skipped. A silent skip generalises from one observed Labour
@@ -1408,10 +1791,16 @@ function fillWeek(co, ws){
   for(const r of rows){
     const site = siteFor(co, r.start, r.end);
     const row = { rid: uid(), companyId: co.id, date: r.date, start: r.start, end: r.end,
-                  label: site.label, flags: [], source: 'pattern' };
+                  label: site.label, role: site.role, siteId: site.siteId,
+                  flags: [], source: 'pattern' };
     if(site.place) row.place = site.place;
 
     applyHoliday(row);
+    // Carried over rather than matched: the site on this row was copied from a
+    // shift that already had one, so there is no reading to confirm and
+    // nothing to learn. It only needs `siteRaw` and `siteHow` settled so the
+    // review row and the commit path can read them like any other.
+    applySite(row);
 
     // Already on file, or already sitting in this batch: the slot is covered
     // and a second row for it would read as a second shift he is expected to
@@ -1477,7 +1866,7 @@ const ICS_FROM = () => shiftDays(todayISO(), -7);
 
 function icsSame(a, b){
   return a.date === b.date && a.start === b.start && a.end === b.end &&
-         key(a.label) === key(b.label);
+         whereKey(a) === whereKey(b);
 }
 
 function calendarRows(text){
@@ -1492,13 +1881,14 @@ function calendarRows(text){
   const fresh = [];
   for(const r of rows){
     const row = { ...r, rid: uid(), companyId: co.id, extUid: r.uid };
+    applySite(row);
 
     // Matched on UID: this is a shift the feed has already given us once.
     const onFile = r.uid && S.shifts.find(s => s.extUid === r.uid && s.companyId === co.id);
     if(onFile){
       if(icsSame(onFile, row)){ unchanged++; continue; }
       row.flags = [...row.flags, FLAG_CHANGED];
-      row.note = `Was ${fmtTime(onFile.start)}\u2013${fmtTime(onFile.end)} ${onFile.label}.`;
+      row.note = `Was ${fmtTime(onFile.start)}\u2013${fmtTime(onFile.end)} ${shiftWhere(onFile)}.`;
       row.replaceId = onFile.id;          // commit replaces rather than adds
       fresh.push(row);
       continue;
@@ -1524,6 +1914,7 @@ function cancellationRows(report){
     return {
       rid: uid(), companyId: s.companyId, removeId: s.id,
       date: s.date, start: s.start, end: s.end, label: s.label,
+      siteId: s.siteId || null, role: s.role || '',
       flags: [], source: 'ics'
     };
   }).filter(Boolean);
@@ -1604,7 +1995,11 @@ async function fetchCalendar(url){
 }
 
 function flagText(p){
-  return [...p.flags.map(f => FLAG_TEXT[f] || f), p.patNote || '', p.clashNote || '', p.note || '']
+  const say = f => {
+    const t = FLAG_TEXT[f];
+    return typeof t === 'function' ? t(p) : (t || f);
+  };
+  return [...p.flags.map(say), p.patNote || '', p.clashNote || '', p.note || '']
     .filter(Boolean).join(' ');
 }
 
@@ -1635,7 +2030,7 @@ function renderReview(){
         <div class="revf">
           <label class="tick"><input type="checkbox" checked> Remove</label>
           <span class="mono tiny">${esc(p.date)} ${esc(fmtTime(p.start))}\u2013${esc(fmtTime(p.end))}</span>
-          <span class="tiny">${esc(p.label)}</span>
+          <span class="tiny">${esc(shiftWhere(p))}</span>
           <button class="kill" aria-label="Keep this shift">&times;</button>
         </div>
         <p class="flag">Cancelled in the calendar. Removing it takes it off the phone on the next export.</p>`;
@@ -1656,15 +2051,16 @@ function renderReview(){
         ${clockInput(p.start, 'aria-label="Starts"')}
         <span class="soft mono">to</span>
         ${clockInput(p.end, 'aria-label="Ends"')}
-        <input type="text" aria-label="Site or role" value="${esc(p.label)}">
-        ${manyJobs ? `<select>${S.companies.map(c =>
+        <span class="tiny soft read">${esc(p.siteRaw || p.label || '\u2014')}</span>
+        <select class="sitesel" aria-label="Site">${siteOptions(p)}</select>
+        ${manyJobs ? `<select class="cosel">${S.companies.map(c =>
           `<option value="${c.id}"${c.id===p.companyId?' selected':''}>${esc(c.name)}</option>`
         ).join('')}</select>` : ''}
         <button class="kill" aria-label="Remove">&times;</button>
       </div>
       <p class="flag"${p.flags.length ? '' : ' hidden'}>${esc(flagText(p))}</p>`;
 
-    const [d,s,e,l] = row.querySelectorAll('input');
+    const [d,s,e] = row.querySelectorAll('input');
     const note = row.querySelector('.flag');
     // Refresh this row in place. Re-rendering the whole list on every
     // keystroke would reorder rows and drop focus mid-edit.
@@ -1711,9 +2107,20 @@ function renderReview(){
       if(p.end) p.flags = p.flags.filter(f => f !== FLAG.ONETIME);
       refreshAll();
     }, { allowEmpty: true });
-    l.oninput = () => { p.label = l.value; };
-    const job = row.querySelector('select');
-    if(job) job.onchange = () => { p.companyId = job.value; recheck(); };
+    const sel = row.querySelector('.sitesel');
+    sel.onchange = () => {
+      pickSite(p, sel.value);
+      // A site made here is a site every other unresolved row in the batch can
+      // now match. One screenshot routinely carries the same place four times,
+      // spelled four ways, and naming it once is meant to answer all four.
+      pending.forEach(x => { if(x !== p && !x.removeId && !x.siteId) applySite(x); });
+      renderReview();
+    };
+    const job = row.querySelector('.cosel');
+    // The site list belongs to the job, so changing the job rebuilds the row
+    // rather than refreshing its note line — the options on it are wrong the
+    // moment the job is.
+    if(job) job.onchange = () => { p.companyId = job.value; recheck(); applySite(p); renderReview(); };
     row.querySelector('.kill').onclick = () => {
       pending = pending.filter(x => x.rid !== p.rid);
       renderReview();
@@ -1746,7 +2153,7 @@ function buildICS(only){
     // is where §8.3's stated risk actually lands. The title carries the mark,
     // and the alarm body reuses the title, so a 05:00 buzz for a shift nothing
     // has confirmed says which kind it is (§20.5).
-    const title = `${co ? co.name : 'Shift'}- ${s.label}` +
+    const title = eventTitle(co && co.name, s, siteById(s.siteId)) +
                   (isProposed(s) ? ' (from the rota)' : '');
     L.push('BEGIN:VEVENT',
       fold(`UID:${shiftUID(s.id)}`),
@@ -1766,7 +2173,12 @@ function buildICS(only){
         + (rests.has(s.id) ? `\nOnly ${fmtDur(rests.get(s.id))} off before this one.` : ''))));
     // An address here is a tappable link to a map. The two-hour alarm fires,
     // he taps the event, taps the address, and he is navigating.
-    if(s.place) L.push(fold('LOCATION:' + icsEscape(s.place)));
+    // §8.1's single best reason to have built any of this: the two-hour alarm
+    // fires, he taps the event, taps the address, and he is navigating. The
+    // shift's own address wins over the site's standing one — a feed row
+    // carries what the employer published for that night.
+    const where = shiftAddress(s);
+    if(where) L.push(fold('LOCATION:' + icsEscape(where)));
     leads.forEach(h => {
       L.push('BEGIN:VALARM','ACTION:DISPLAY',
         fold('DESCRIPTION:' + icsEscape(title)),
@@ -1848,9 +2260,17 @@ $('#commit').onclick = () => {
   });
 
   pending.filter(p => !p.removeId && p.date && p.start && p.end && p.companyId).forEach(p => {
+    // The spelling that was read becomes one this site answers to, before the
+    // record is built — so a row he pointed at a site by hand teaches the
+    // table on the way past (§8.1).
+    learnSpelling(p);
     const rec = {
       id: uid(), companyId: p.companyId, date: p.date, start: p.start, end: p.end,
-      label: snapSite(p.label, p.companyId), source: p.source || 'ocr'
+      // `label` is kept whatever happens. It is what a shift renders as when
+      // its site is later deleted, and it is the only record of what the
+      // screen actually said.
+      label: p.label, siteId: p.siteId || null, role: p.role || '',
+      source: p.source || 'ocr'
     };
     // A calendar row carries the event's UID. Keeping it is what makes the
     // next import of the same feed an update rather than a second copy.
@@ -1959,8 +2379,10 @@ $('#fillweek').onclick = () => {
 $('#manual').onclick = () => {
   const co = $('#impco').value;
   if(!co){ alert('Add a job in Setup first.'); return; }
-  pending.push({ rid: uid(), companyId: co, date: todayISO(), start: '09:00',
-                 end: '17:00', label: 'Shift', flags: [], source: 'manual' });
+  const row = { rid: uid(), companyId: co, date: todayISO(), start: '09:00',
+                end: '17:00', label: 'Shift', flags: [], source: 'manual' };
+  applySite(row);
+  pending.push(row);
   renderReview();
   $('#prog').classList.add('on');
 };

@@ -57,7 +57,10 @@ nav button{
 nav button[aria-current="true"]{color:var(--ink);font-weight:600;border-top-color:var(--signal)}
 nav button:focus-visible{outline:2px solid var(--signal);outline-offset:-2px}
 
-section[hidden]{display:none}
+/* `hidden` has to win over any display rule set here, or an element the
+   app hides stays on screen — `label.f{display:block}` quietly beat the
+   browser's own [hidden] rule until this was widened from `section`. */
+[hidden]{display:none !important}
 
 /* generic bits */
 .card{background:var(--card);border:1px solid var(--hair);border-radius:3px;padding:.85rem;margin-bottom:.7rem}
@@ -167,6 +170,18 @@ input[type=file]{display:none}
 .patwhat{font-size:.8rem;color:var(--soft);margin:.35rem 0 0}
 .sug{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--hair)}
 .sug button{margin-left:auto}
+/* Sites (§8.1) */
+.site{border:1px solid var(--hair);border-radius:3px;padding:.6rem;margin-bottom:.5rem}
+.site.archived{opacity:.62}
+.aliases{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;margin:.1rem 0 .5rem}
+.alias{display:inline-flex;align-items:center;gap:.15rem;font-size:.8rem;
+  background:var(--wash);border:1px solid var(--hair);border-radius:2px;padding:.05rem .1rem .05rem .35rem}
+.alias .kill{font-size:.9rem}
+.sitebtns{margin-bottom:.2rem}
+.sitebtns select{flex:0 1 10rem}
+/* The review row's site column: what was read, then what it was taken as. */
+.revf .read{flex:0 1 auto;max-width:9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.revf .sitesel{flex:1 1 8rem;min-width:7rem}
 /* The horizon warnings sit above the week list. A job that feeds itself gets
    the quieter treatment: worth knowing, but not a job to do. */
 .horizon{margin:0 0 .6rem;padding:.5rem .6rem;border-left:2px solid var(--signal);background:var(--card)}
@@ -361,6 +376,7 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
 <script src="ics.js"></script>
 <script src="patterns.js"></script>
 <script src="holidays.js"></script>
+<script src="sites.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
