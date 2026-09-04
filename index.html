@@ -24,6 +24,7 @@
   --rule:#C6CAC1;
   --hair:#DCDFD7;
   --signal:#B0631A;
+  --deep:#8A4C12;
   --wash:#F6E9D8;
   --bad:#A32B1E;
 }
@@ -119,7 +120,16 @@ tr.assumed td:first-child{color:var(--ink)}
 .shift .where{font-size:.86rem;color:var(--soft)}
 .shift .len{margin-left:auto;font-size:.82rem;color:var(--soft);font-family:"IBM Plex Mono",monospace;padding-top:.15rem}
 .gapwarn{font-size:.8rem;color:var(--bad);padding:.15rem 0 .35rem 1.2rem}
-.restline{font-size:.8rem;color:var(--soft);padding:.15rem 0 .35rem 1.2rem}
+/* The gap between two shifts, drawn between the two shifts it is about
+   (PROJECT.md §29). It is filled rather than tinted because it is read in the
+   half-second of scrolling past a week, and because sitting in the gap it
+   describes it has to read as a thing in its own right and not as a footnote
+   to the shift above it. */
+.restline{
+  font-size:.8rem;font-weight:500;
+  background:var(--signal);color:#FFF;border:1px solid var(--deep);border-radius:2px;
+  padding:.25rem .5rem;margin:.35rem 0 .35rem 1.2rem;
+}
 .empty{padding:2rem 0;color:var(--soft)}
 
 /* next shift banner */
@@ -244,6 +254,23 @@ td.n,th.n{text-align:right;font-family:"IBM Plex Mono",monospace;
 tr.tot td{font-weight:600;border-bottom:none;border-top:1px solid var(--rule)}
 details{margin-top:1rem}
 summary{cursor:pointer;font-size:.88rem;color:var(--soft)}
+
+/* "Show earlier" on both lists (§29). Small, quiet and full width: it is the
+   end of the list rather than an action, and it must not read as one. */
+button.more{
+  display:block;width:100%;background:none;border:1px dashed var(--rule);
+  color:var(--soft);font-family:inherit;font-size:.82rem;padding:.5rem;
+  border-radius:2px;cursor:pointer;margin:.6rem 0;
+}
+button.more:hover{border-color:var(--soft);color:var(--ink)}
+/* The pay row's breakdown (§29). Sits under the date, and is the only thing in
+   the first column besides the date and a warning. */
+button.brk{
+  background:none;border:1px solid var(--rule);color:var(--soft);
+  font-family:inherit;font-size:.75rem;padding:.05rem .35rem;
+  border-radius:2px;cursor:pointer;margin-top:.2rem;
+}
+button.brk:hover{border-color:var(--soft);color:var(--ink)}
 
 .dot{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:.35rem;vertical-align:baseline}
 

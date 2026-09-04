@@ -3549,3 +3549,112 @@ under it is worse than none.
 
 Removing a job prunes its keys. Nothing reads a stale one, but a store that
 only ever grows eventually holds more dead jobs than live ones.
+
+## 29. Built: what each list opens on, 4 September 2026
+
+Four findings from watching the app used on a phone, all of them about the
+same thing: a screen that opens showing something other than what it was
+opened for.
+
+### 29.1 The schedule opened on last week
+
+`renderSchedule()` cut the list at `today - 7`. A fixed seven-day offset lands
+mid-week, so the top of the screen was the tail of a week already worked,
+sliced in half, and this week began somewhere below the fold. Every open of
+the tab started with a scroll.
+
+The cut is now `weekStart(today)` and the past is behind a button: *Show 8
+earlier shifts*, drawn above the list because what it opens goes above the
+list — the button does not move when it is pressed. Nothing is dropped. Last
+Tuesday is still on file, still in the export, still in the pay figures.
+
+### 29.2 The rest note was at the end of the day
+
+§25 put the short-rest note on the shift he comes back to. It was appended
+after that shift's row, which on the day that actually triggers it — a
+Trupoint night at 00:15–08:15 and a DSI afternoon at 15:00–23:00 — put it
+underneath *both*, at the bottom of the day. So it had to name the shift it
+followed, in a sentence longer than the gap it was describing:
+
+> Only 6h 45m off after Tru-Point 00:15–08:15.
+
+It is now drawn *before* the shift it belongs to, which is to say in the gap
+it is about, and it says `Only 6h 45m off` and stops. The naming was only ever
+there to disambiguate a note that had floated away from its subject; placed
+between the two, the sentence was telling him what he could see.
+
+It is also filled now — the signal colour, white letters, a darker border —
+rather than the grey line §25 gave it. §25's reasoning was that a gap is a
+fact about the night and not a fault in the schedule, so it must not be given
+the red the clash gets. That still holds: it is not red. But grey text at
+0.8rem in the middle of a week list is not read at all, and a warning nobody
+reads is worse than one pitched slightly loud. The red still has one job.
+
+The shift he is coming back from is often in the day row above. There this
+lands at the top of a day rather than between two rows, which is still between
+the two shifts, and still reads correctly.
+
+### 29.3 The pay tab showed eight weeks and counting
+
+`slice(0, 8)` per job, plus eight in the combined table. What the tab is
+actually for is checking a deposit against what he thinks he worked, and that
+question is asked about the last few weeks — the rest is a lookup.
+
+It now opens on **this week and the three before it**, with everything older
+behind *Show earlier weeks* at the bottom. Three weeks back is a fortnightly
+deposit plus a week of slack.
+
+The window is worked out in days from the week's start rather than by
+comparing week-start strings, because two jobs can begin their weeks on
+different days (`co.weekStart`, §27) and the combined table holds keys from
+both.
+
+**Weeks ahead are not shown at all**, and that is a deletion rather than a
+fold. It was built with a *Show later* alongside the other button and taken
+out again on his reading: a week that has not happened has no pay in it. What
+the tab would print for next week is the rota's opinion of it, which is
+exactly the forecast §20.4 refused to let stand as money. Hours still ahead
+are on the Schedule tab, where they are hours and not dollars.
+
+### 29.4 The mixed-rate week could not be read as a row
+
+§27 put the per-role hours under the date, and the reasoning was right — a
+gross with two rates hidden inside it cannot be checked against a paystub. The
+execution was wrong. Three roles in a week is four lines of small text in the
+first column beside three numbers that have to stay readable as numbers, and
+the row stopped looking like a row:
+
+> Sep 3
+> 12.00 h Security Officer at $17.00
+> 8.00 h Security Agent at $12.00
+> 8.00 h Training at $12.00      28.00   2.50   $413.68
+
+The rates now live behind a **Breakdown** button on the row, in a modal, and
+the move bought something the inline version could not have had: the per-role
+lines never added up to the gross once there was overtime in the week. The
+premium is charged on the weighted average of the rates (§27) and it lived
+nowhere on screen, so the four numbers he could see did not reconcile with the
+one he was checking. In the modal it is a row of its own —
+
+    Overtime premium    8.00 h at $7.25 on top, 1.5× the $14.50 average   $58.00
+
+— and the table foots to the gross exactly.
+
+The button is offered whenever the week was worked as more than one thing, not
+only when the rates differ: two roles at one rate still answers "which of these
+was the Saturday", and the button costs one line either way.
+
+Two things stayed in the column, because they are not arithmetic: the
+unconfirmed-hours note (§20.4) and the hours-at-no-rate note. Both are about
+whether the figure beside them can be trusted at all, and that has to be
+readable without opening anything.
+
+### 29.5 Where the two flags live
+
+`pastOpen` and `payOpen` are module-level variables, deliberately not in the
+store. `renderAll()` runs on every edit, so they have to survive a redraw —
+opening the past and then editing a shift in it must not fold it away again —
+but they should not survive the app being closed. Opening it tomorrow, the
+thing to see is this week again. This is the opposite call to §28's folds, and
+for the opposite reason: a fold in Setup records a decision about a job that
+still holds next week, while these record where he happens to be looking now.

@@ -242,10 +242,11 @@ curating. Leave the list empty and the job pays one rate, exactly as before.
 - **A near miss goes amber in review naming the rate it is about to apply.**
   The site's amber line says what will be remembered; the role's has to say
   what will be paid, because that is the part you cannot see on the row.
-- **The pay tab shows its work.** A week paid at more than one rate lists the
-  hours per role under the date — `30.00 h Cook at $20.00` — because a single
-  gross figure with two rates hidden inside it is exactly the number you cannot
-  check against a paystub.
+- **The pay tab shows its work.** A week worked as more than one thing carries
+  a **Breakdown** button, and it opens the whole sum: hours per role, the rate
+  each was paid at, the overtime premium as its own line, and a total that
+  adds up to the gross on the row. A single gross figure with two rates hidden
+  inside it is exactly the number you cannot check against a paystub.
 - **Hours with no rate anywhere are counted and not paid**, and the week says
   so rather than showing a confident `$0.00`.
 
@@ -264,6 +265,21 @@ model it.
 Removing a role leaves its shifts named — the text stays — and drops them back
 to the job's rate. Merging two roles keeps the surviving record's rate, and the
 confirmation says which rate that is.
+
+## What the pay tab shows
+
+**This week and the three before it**, per job, newest first. Anything older is
+behind **Show earlier weeks** at the bottom — still on file, still counted,
+just not in the way of the figure you opened the tab to check.
+
+**Nothing ahead of this week is shown at all.** A week that has not happened
+has no pay in it; what the tab would print is the rota's opinion of a week, and
+that is a forecast rather than money. Hours still to come are on the Schedule
+tab, where they are hours.
+
+A week holding shifts nothing has confirmed still says so under the date, and
+so does a week with hours at no rate — those two are about whether the figure
+beside them can be trusted, so they are read without opening anything.
 
 ## Sites
 
@@ -382,6 +398,19 @@ Set **Statutory holidays** on the job and a generated shift landing on one is
 flagged — *"A statutory holiday falls on this day."* It is never dropped for
 you: the rota may well run that day, and a shift quietly skipped is a shift
 missed. Past weeks are never filled, and a week already covered is left alone.
+
+## What the Schedule tab shows
+
+**This week first.** The list opens on the week you are in, because that is
+what you opened it to see; **Show earlier shifts** at the top brings back
+everything before it. Nothing is dropped — a shift last Tuesday is still on
+file, still exported and still in the pay figures — it is one tap down rather
+than a week of scrolling in front of the thing you wanted.
+
+**A short gap is drawn in the gap.** When two shifts leave you between two and
+eight hours off, the banner saying how long sits *between* the two shifts it is
+about — filled, in white, so it reads at scrolling speed. It does not name
+either shift, because they are the two either side of it.
 
 ## What the Schedule tab warns about
 

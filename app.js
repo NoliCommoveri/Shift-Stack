@@ -1008,6 +1008,25 @@ function renderHorizon(){
   });
 }
 
+/* -- how far back each list opens (§29) -----------------------------------
+   Both lists used to open on a fixed slice of the past — the schedule on the
+   last seven days, the pay tab on eight weeks — and both were wrong in the
+   same way. What he opens the schedule to see is this week; what a week's
+   worth of scrolling before it costs is the first thing he wanted, above the
+   fold, pushed below it.
+
+   So the past is behind a button on both. Not thrown away: last Tuesday's
+   shift is still on file, still exported, still counted. It is one tap down
+   rather than in the way.
+
+   These two flags are deliberately *not* in the store. `renderAll()` runs on
+   every edit, so they have to survive a redraw — opening the past and then
+   editing a shift in it must not fold it away again — but they should not
+   survive the app being closed. Coming back to it tomorrow, the thing to see
+   is this week again. */
+let pastOpen = false;   // schedule: weeks before the current one
+let payOpen = false;    // pay: weeks before the window §29 draws
+
 function renderSchedule(){
   renderNext();
   renderHorizon();
@@ -1015,11 +1034,27 @@ function renderSchedule(){
   const box = $('#sched');
   box.innerHTML = '';
 
-  const cutoff = shiftDays(todayISO(), -7);
-  const list = S.shifts.filter(s => s.date >= cutoff)
-                       .sort((a,b) => (a.date+a.start).localeCompare(b.date+b.start));
-  if(!list.length){
+  // The current week's start, not "seven days ago": a fixed offset lands
+  // mid-week and cuts the block he is looking at in half.
+  const cutoff = weekStart(todayISO(), 0);
+  const all = S.shifts.slice().sort((a,b) => (a.date+a.start).localeCompare(b.date+b.start));
+  const list = pastOpen ? all : all.filter(s => s.date >= cutoff);
+  const behind = all.filter(s => s.date < cutoff).length;
+  if(!list.length && !behind){
     box.appendChild(el('p','empty','Nothing scheduled yet. Use the Add tab to bring shifts in.'));
+    return;
+  }
+  // Above the list, because what it opens goes above the list. Drawn before
+  // the weeks so the button does not move when it is pressed.
+  if(behind){
+    const b = el('button','more', pastOpen
+      ? 'Hide earlier shifts'
+      : `Show ${plural(behind, 'earlier shift')}`);
+    b.onclick = () => { pastOpen = !pastOpen; renderSchedule(); };
+    box.appendChild(b);
+  }
+  if(!list.length){
+    box.appendChild(el('p','empty','Nothing scheduled from this week on. Use the Add tab to bring shifts in.'));
     return;
   }
 
@@ -1030,10 +1065,8 @@ function renderSchedule(){
   // before a Monday morning is a Sunday night, and the two are in different
   // week blocks.
   const rests = new Map();
-  restGaps(S.shifts).filter(g => isShortRest(g.mins)).forEach(({ a, b, mins: m }) => {
-    const co = coById(a.companyId);
-    rests.set(b.id, { after: `${co ? co.name : 'a shift'} ${fmtTime(a.start)}\u2013${fmtTime(a.end)}`,
-                      mins: m });
+  restGaps(S.shifts).filter(g => isShortRest(g.mins)).forEach(({ b, mins: m }) => {
+    rests.set(b.id, m);
   });
 
   const clashes = new Map();
@@ -1092,6 +1125,20 @@ function renderSchedule(){
           </div>
           <div class="len">${fmtDur(durMins(s))}</div>`;
         item.onclick = () => editShift(s.id);
+
+        // Before the shift, not after the day (§29). The note is about the
+        // gap in front of this shift, so it is drawn in the gap in front of
+        // this shift — which is also why it no longer names the shift it
+        // follows. It used to, because appended at the end of a day holding
+        // two shifts it had no other way to say which two it meant; sitting
+        // between them, the sentence was saying what the reader could see.
+        //
+        // The shift it comes back from is often in the day row above (a
+        // Trupoint night into a DSI afternoon is exactly the case), and there
+        // this lands at the top of the day, still between the two.
+        const rst = rests.get(s.id);
+        if(rst) col.appendChild(el('div','restline', `Only ${fmtDur(rst)} off`));
+
         col.appendChild(item);
 
         // Only real overlap. A tight turnaround used to be flagged here too
@@ -1105,13 +1152,6 @@ function renderSchedule(){
         const hit = clashes.get(s.id);
         if(hit) col.appendChild(el('div','gapwarn',
           `Overlaps ${hit.other} by ${fmtDur(hit.mins)}. He cannot work both.`));
-
-        // Not the red the clash gets (§25). This is a fact about the shift,
-        // not a fault in it, and colouring it like a fault is how the one
-        // line that means something gets scrolled past.
-        const rst = rests.get(s.id);
-        if(rst) col.appendChild(el('div','restline',
-          `Only ${fmtDur(rst.mins)} off after ${rst.after}.`));
       });
       row.appendChild(col);
       box.appendChild(row);
@@ -1120,6 +1160,84 @@ function renderSchedule(){
 }
 
 /* -- pay tab -- */
+/* How much of the past the tab opens on (§29). Four weeks: this one and the
+   three before it. Three is what a fortnightly deposit needs to be checked
+   against with a week of slack, and beyond that he is not checking a figure,
+   he is looking something up — which is what the button below the list is for.
+
+   Nothing ahead of this week is shown at all, and that is a deletion rather
+   than a fold. A week that has not happened has no pay in it: what the tab
+   would print is the rota's opinion of a week, which is the forecast §20.4
+   already refused to let stand as money. Hours still ahead are on the Schedule
+   tab, where they are hours. */
+const PAY_BACK_WEEKS = 3;
+
+/* Which side of the window a pay week falls on, worked out in days rather than
+   by comparing week-start strings: two jobs can start their weeks on different
+   days (§27's `co.weekStart`), and the combined table below holds keys from
+   both. Days from the week's start to today, so a week ahead is negative. */
+function payWhen(ws){
+  const days = Math.round((asDate(todayISO()) - asDate(ws)) / 86400000);
+  if(days < 0) return 'ahead';
+  return days < 7 * (PAY_BACK_WEEKS + 1) ? 'now' : 'earlier';
+}
+
+/* One week's work, shown (§29). A week paid at more than one rate used to
+   print its rates under the date, and with three roles in a week that is four
+   lines of small text in the column beside three numbers that have to stay
+   readable as numbers — the row stopped looking like a row. The breakdown is
+   the same information, on its own, asked for.
+
+   It is also the only place the arithmetic can actually be followed: the
+   per-role lines never added up to the gross once there was overtime in the
+   week, because the premium is charged on the average of the rates and lived
+   nowhere on screen. Here it is a row. */
+function payDetail(co, ws, shifts){
+  const w = weekTotals(shifts, co);
+  const d = asDate(ws);
+  const mult = Number.isFinite(+co.otMult) && +co.otMult > 0 ? +co.otMult : OT_MULT;
+  const straight = w.byRate.reduce((a, r) => a + r.pay, 0);
+  const premium = w.gross - straight;
+  const num = (v, on) => `<td class="n">${on ? money(v) : '\u2013'}</td>`;
+
+  const rows = w.byRate.map(r => `<tr>
+      <td>${esc(r.name)}${r.rate == null
+        ? '<span class="tiny soft"><br>no rate set, so not in the gross</span>' : ''}</td>
+      <td class="n">${r.hrs.toFixed(2)}</td>
+      ${num(r.rate, r.rate != null)}
+      ${num(r.pay, r.rate != null)}
+    </tr>`).join('');
+
+  // Only when there is overtime, and it is not one of the rates — it is what
+  // the hours past the threshold earn *on top* of what they are already
+  // counted at above, which is why it carries no hours of its own.
+  const otRow = w.ot > 0.005 ? `<tr>
+      <td>Overtime premium<span class="tiny soft"><br>${w.ot.toFixed(2)} h at
+        ${money(w.rate * (mult - 1))} on top, ${mult}\u00d7 the ${money(w.rate)} average</span></td>
+      <td class="n">\u2013</td><td class="n">\u2013</td>
+      <td class="n">${money(premium)}</td>
+    </tr>` : '';
+
+  $('#dlgbody').innerHTML = `
+    <h2><span class="dot" style="background:${esc(co.color)}"></span>Week of ${
+      MONTHNAMES[d.getMonth()].slice(0,3)} ${d.getDate()}</h2>
+    <p class="tiny soft" style="margin:.1rem 0 .7rem">${esc(co.name)}</p>
+    <table>
+      <tr><th>Paid as</th><th class="n">Hours</th><th class="n">Rate</th><th class="n">Pay</th></tr>
+      ${rows}${otRow}
+      <tr class="tot"><td>Gross</td><td class="n">${w.hrs.toFixed(2)}</td>
+        <td class="n">\u2013</td>${num(w.gross, w.rated)}</tr>
+    </table>
+    <p class="tiny soft" style="margin-top:.7rem">${
+      w.unratedHrs
+        ? `${w.unratedHrs.toFixed(2)} h of this has no rate anywhere \u2014 counted as hours and left out of the gross.<br>`
+        : ''}Estimate, before deductions.</p>
+    <div class="rowbtns"><button class="ghost" id="pd-close">Close</button></div>`;
+  const dlg = $('#dlg');
+  dlg.showModal();
+  $('#pd-close').onclick = () => dlg.close();
+}
+
 function renderPay(){
   const box = $('#payout');
   box.innerHTML = '';
@@ -1129,20 +1247,26 @@ function renderPay(){
   }
 
   const allWeeks = new Map();
+  let behind = false;
 
   S.companies.forEach(co => {
-    const weeks = weeksFor(co).slice(0, 8);
+    // Weeks still ahead are dropped rather than folded: see PAY_BACK_WEEKS.
+    const weeks = weeksFor(co).filter(([ws]) => payWhen(ws) !== 'ahead');
+    const older = weeks.filter(([ws]) => payWhen(ws) === 'earlier');
+    if(older.length) behind = true;
+    const shown = payOpen ? weeks : weeks.filter(([ws]) => payWhen(ws) === 'now');
     const card = el('div','card');
     card.appendChild(el('h2', null,
       `<span class="dot" style="background:${esc(co.color)}"></span>${esc(co.name)}`));
-    if(!weeks.length){
-      card.appendChild(el('p','tiny soft','No shifts yet.'));
+    if(!shown.length){
+      card.appendChild(el('p','tiny soft',
+        weeks.length ? 'Nothing in the last four weeks.' : 'No shifts yet.'));
       box.appendChild(card);
       return;
     }
     const t = el('table');
     t.innerHTML = `<tr><th>Week of</th><th class="n">Hours</th><th class="n">OT</th><th class="n">Gross</th></tr>`;
-    weeks.forEach(([ws, shifts]) => {
+    shown.forEach(([ws, shifts]) => {
       const w = weekTotals(shifts, co);
       const d = asDate(ws);
       // A week holding shifts nothing has confirmed says so, with the assumed
@@ -1151,16 +1275,11 @@ function renderPay(){
       // deposit weeks later when the screenshot is long gone, must not quietly
       // rest on a rota.
       const assumed = weekTotals(shifts.filter(isProposed), co);
-      // A week paid at more than one rate has to be able to show its work
-      // (§27). The gross is a weighted average behind the scenes, and a single
-      // figure with two rates hidden inside it is exactly the sort of number
-      // that cannot be checked against a pay stub — so the hours are named per
-      // role, under the date, in the same place the rota note goes.
+      // The two warnings stay in the column, because they are about whether
+      // the figure beside them can be trusted and that has to be read without
+      // opening anything. What moved out is the per-role arithmetic (§29).
       const notes = [];
       if(assumed.hrs) notes.push(`${assumed.hrs.toFixed(2)} h from the rota, unconfirmed`);
-      if(w.mixed)
-        w.byRate.filter(r => r.rate != null).forEach(r =>
-          notes.push(`${r.hrs.toFixed(2)} h ${esc(r.name)} at $${r.rate.toFixed(2)}`));
       if(w.unratedHrs)
         notes.push(`${w.unratedHrs.toFixed(2)} h at no rate set, and not in the gross`);
       const tr = el('tr', assumed.hrs ? 'assumed' : null);
@@ -1169,6 +1288,16 @@ function renderPay(){
         <td class="n">${w.hrs.toFixed(2)}</td>
         <td class="n">${w.ot ? w.ot.toFixed(2) : '–'}</td>
         <td class="n">${w.rated ? '$' + w.gross.toFixed(2) : '–'}</td>`;
+      // Offered whenever the week was worked as more than one thing, not only
+      // when the rates differ: two roles at one rate still answers "which of
+      // these was the Saturday", and the button costs a line either way.
+      if(w.byRate.length > 1){
+        const b = el('button','brk','Breakdown');
+        b.onclick = () => payDetail(co, ws, shifts);
+        const cell = tr.querySelector('td');
+        cell.appendChild(document.createElement('br'));
+        cell.appendChild(b);
+      }
       t.appendChild(tr);
 
       const cur = allWeeks.get(ws) || { hrs:0, gross:0 };
@@ -1184,7 +1313,7 @@ function renderPay(){
     card.appendChild(el('h2', null, 'Both jobs together'));
     const t = el('table');
     t.innerHTML = `<tr><th>Week of</th><th class="n">Hours</th><th class="n">Gross</th></tr>`;
-    [...allWeeks.entries()].sort((a,b) => b[0].localeCompare(a[0])).slice(0,8).forEach(([ws,v]) => {
+    [...allWeeks.entries()].sort((a,b) => b[0].localeCompare(a[0])).forEach(([ws,v]) => {
       const d = asDate(ws);
       const tr = el('tr');
       tr.innerHTML = `<td>${MONTHNAMES[d.getMonth()].slice(0,3)} ${d.getDate()}</td>
@@ -1194,6 +1323,13 @@ function renderPay(){
     });
     card.appendChild(t);
     box.appendChild(card);
+  }
+
+  // Under everything, because what it opens goes under everything.
+  if(behind){
+    const b = el('button','more', payOpen ? 'Hide earlier weeks' : 'Show earlier weeks');
+    b.onclick = () => { payOpen = !payOpen; renderPay(); };
+    box.appendChild(b);
   }
 }
 
