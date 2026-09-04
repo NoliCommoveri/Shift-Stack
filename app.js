@@ -391,6 +391,137 @@ function fmtDay(d){
   return `${DAYNAMES[x.getDay()].slice(0,3)} ${x.getDate()} ${MONTHNAMES[x.getMonth()].slice(0,3)}`;
 }
 
+/* The same date, said the way he would say it. "Fri 11 Sep" is right for a
+   week away and wrong for tomorrow, and tomorrow is when it matters. */
+function dayPhrase(d){
+  const today = todayISO();
+  if(d === today) return 'today';
+  if(d === shiftDays(today, 1)) return 'tomorrow';
+  return fmtDay(d);
+}
+
+/* ---------- the calendar is behind this screen (§10.5, §23) ---------------
+   The other half of §10.5. The horizon note says the app is missing shifts;
+   this says the *phone* is, which is worse: he looks at a calendar that is
+   confidently wrong rather than visibly empty, and the alarms come from it.
+
+   Until now the only signal was a line in Setup he has no reason to open.
+
+   When it fires is the whole design, and §19.1 is why. A note that appears
+   the moment anything is uncommitted would be on screen through the ordinary
+   import-review-export minute, every time, and a permanently amber screen
+   teaches him to stop reading the amber that means something. So the trigger
+   is not "something is unexported" — it is "something unexported is close
+   enough that the alarms are the next thing to happen". Outside that window
+   there is time, and nothing is wrong yet.
+
+   §10.5 asked for "last exported N days ago" as the headline. It is not the
+   headline: a feed saved ten days ago with nothing changed since is not stale,
+   it is correct. What is pending is the fact; how long it has been pending is
+   colour, and it is said as colour.
+   ---------------------------------------------------------------------- */
+
+/* Inside this, the alarms for it are the next thing due and an export is late
+   rather than pending. Outside the second, there is time and no warning. */
+const EXPORT_LATE_DAYS = 2;
+const EXPORT_SOON_DAYS = 7;
+
+/* Joins clauses the way a person would: "a", "a and b", "a, b and c". */
+function andList(parts){
+  if(parts.length < 3) return parts.join(' and ');
+  return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
+}
+
+/* "tomorrow", not "on tomorrow". */
+function onDay(d){
+  const p = dayPhrase(d);
+  return (p === 'today' || p === 'tomorrow') ? p : `on ${p}`;
+}
+
+function staleNotes(){
+  const today = todayISO();
+  const sub = S.settings.feedMode !== 'import';
+  const soon = shiftDays(today, EXPORT_SOON_DAYS);
+  const late = shiftDays(today, EXPORT_LATE_DAYS);
+  const out = [];
+
+  // A shift in the past is not a calendar problem any more. Its alarms have
+  // been and gone, and exporting now changes nothing that can still happen.
+  const pend = S.shifts.filter(s => !s.sent && s.date >= today);
+  // `seq` tells the two apart with no new field: it only rises when a shift
+  // that had already been sent is changed (§22.3). So an unsent shift with a
+  // sequence number is one the calendar holds an *older version* of, and one
+  // without is a shift the calendar has never heard of. The distinction is
+  // worth making because the failures differ — nothing at all, or an alarm at
+  // the wrong time — even though the fix is the same export.
+  const missing = pend.filter(s => !s.seq);
+  const changed = pend.filter(s => s.seq);
+
+  if(pend.length){
+    const first = pend.reduce((a, s) => s.date < a ? s.date : a, '9999-99-99');
+    if(first <= soon){
+      // One shift names its own day; several need the day of the nearest, or
+      // "the soonest" has nothing to be the soonest of.
+      let lead;
+      if(pend.length === 1){
+        lead = missing.length
+          ? `A shift ${onDay(first)} is not in the calendar.`
+          : `A shift ${onDay(first)} has changed since it was sent — the calendar still has the old one.`;
+      } else {
+        const bits = [];
+        if(missing.length) bits.push(missing.length === 1
+          ? '1 shift is not in the calendar'
+          : `${missing.length} shifts are not in the calendar`);
+        if(changed.length) bits.push(missing.length
+          ? (changed.length === 1 ? '1 has changed since it was sent'
+                                  : `${changed.length} have changed since they were sent`)
+          : `${changed.length} shifts have changed since they were sent`);
+        lead = `${andList(bits)}. The soonest is ${dayPhrase(first)}.`;
+      }
+
+      let t = lead;
+      // Only when it is late. Said always, this is the clause he stops seeing.
+      if(first <= late)
+        t += ' The alarms on the phone come from the last export, not from this screen.';
+      t += ` Save ${sub ? 'the feed file' : 'new shifts'} in Setup.`;
+
+      const days = daysSinceExport();
+      if(days !== null && days >= 3) t += ` Last saved ${days} days ago.`;
+
+      out.push({ text: t, late: first <= late });
+    }
+  }
+
+  // The other direction, and manual import only: the calendar holding an event
+  // for a shift that is not happening. A subscription drops it on the next
+  // rebuild without being asked (§22).
+  const owed = (sub ? [] : owedCancels()).filter(t => t.date >= today);
+  if(owed.length){
+    const first = owed.reduce((a, t) => t.date < a ? t.date : a, '9999-99-99');
+    if(first <= soon){
+      out.push({
+        text: (owed.length === 1
+          ? `A deleted shift is still in the calendar ${onDay(first)}, with its alarms.`
+          : `${owed.length} deleted shifts are still in the calendar, the soonest ${onDay(first)}, with their alarms.`)
+          + ' Save the cancellations in Setup.',
+        late: first <= late
+      });
+    }
+  }
+
+  return out;
+}
+
+/* Whole days since the feed was last written, or null if it never has been.
+   Only ever used to explain a backlog that has already earned a warning. */
+function daysSinceExport(){
+  const at = S.settings.lastExport;
+  if(!at) return null;
+  const then = new Date(at);
+  if(isNaN(then)) return null;
+  return Math.floor((Date.now() - then.getTime()) / 86400000);
+}
+
 /* The standing warning. The horizon notes say what is missing; this says what
    is wrong, and it is louder because it is worse.
 
@@ -423,12 +554,20 @@ function renderHorizon(){
   wrap.innerHTML = '';
   const notes = horizonNotes();
   const bad = clashNotes();
-  wrap.hidden = !(notes.length || bad.length);
-  // Clashes first. A missing week is a job to do; a double booking is a shift
-  // he is going to miss.
+  const stale = staleNotes();
+  wrap.hidden = !(notes.length || bad.length || stale.length);
+  // Worst first, and the order is by what it costs. A double booking is a
+  // shift he is going to miss. A stale calendar is a shift he has, whose alarm
+  // will not fire or will fire at the wrong time. A short horizon is only a
+  // job to do.
   bad.forEach(t => {
     const p = el('p','flag horizon clash');
     p.textContent = t;
+    wrap.appendChild(p);
+  });
+  stale.forEach(n => {
+    const p = el('p', 'flag horizon' + (n.late ? ' late' : ''));
+    p.textContent = n.text;
     wrap.appendChild(p);
   });
   notes.forEach(n => {
@@ -1719,12 +1858,13 @@ function doExport(all){
     if(!S.shifts.length){ alert('No shifts to export yet.'); return; }
     download('shifts.ics', buildICS(S.shifts), 'text/calendar;charset=utf-8');
     S.shifts.forEach(s => s.sent = true);
+    S.settings.lastExport = new Date().toISOString();
     // The rebuild *is* the cancellation here: a deleted shift is simply not in
     // the file, so the subscription drops the event on the next sync. Nothing
     // is owed, and leaving the records to pile up would nag about work the
     // export just did (§22).
     S.tombstones = [];
-    save(); renderSetup();
+    save(); renderAll();
     return;
   }
   const list = all ? S.shifts : S.shifts.filter(s => !s.sent);
@@ -1735,7 +1875,11 @@ function doExport(all){
   }
   download(`shifts-${todayISO()}.ics`, buildICS(list), 'text/calendar;charset=utf-8');
   list.forEach(s => s.sent = true);
-  save(); renderSetup();
+  S.settings.lastExport = new Date().toISOString();
+  // renderAll rather than renderSetup: the warning this clears lives on
+  // Schedule, and a warning that outlives the thing it warned about is the
+  // stale amber §19.1 is the record of.
+  save(); renderAll();
 }
 /* §10.6, built in §22. A separate file, and it has to be: METHOD is a property
    of the calendar, not the event, so cancellations cannot ride along inside a
@@ -1747,7 +1891,7 @@ function doCancelExport(){
   download(`shifts-cancelled-${todayISO()}.ics`,
            buildCancelICS(dead), 'text/calendar;charset=utf-8');
   S.tombstones = [];
-  save(); renderSetup();
+  save(); renderAll();
 }
 
 $('#exportics').onclick = () => doExport(false);

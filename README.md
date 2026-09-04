@@ -244,6 +244,31 @@ flagged — *"A statutory holiday falls on this day."* It is never dropped for
 you: the rota may well run that day, and a shift quietly skipped is a shift
 missed. Past weeks are never filled, and a week already covered is left alone.
 
+## What the Schedule tab warns about
+
+Three kinds of warning sit above the week list, ordered by what they cost.
+
+**Red — a shift that is going to go wrong on the phone.** Two shifts scheduled
+over each other, covered below. And a calendar that has fallen behind this
+screen for something happening within two days: the alarms come from the last
+export, so a shift the calendar has never seen has no alarm, and one whose time
+changed still rings at the old one.
+
+**Amber — the same thing, with time to fix it.** *"2 shifts are not in the
+calendar and 1 has changed since it was sent. The soonest is Tue 8 Sep. Save
+new shifts in Setup."* In manual-import mode a deleted shift that is still in
+the calendar gets its own line, since the fix is the other button.
+
+This one is deliberately quiet outside a week. A shift added three weeks ahead
+and not yet exported is not a problem — there is time — and a warning that sat
+there amber for three weeks would teach you to stop reading the amber that
+means something. It appears when the soonest unexported thing comes within
+seven days, and turns red at two.
+
+**Amber — nothing on file after Friday.** The schedule is running out. Per job,
+because the two fail differently: a job on a calendar sync should be filling
+itself, and a job on screenshots will not fill itself at all.
+
 ## Overlapping shifts
 
 Two shifts scheduled over each other is the one failure with no recovery, so it

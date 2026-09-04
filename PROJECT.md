@@ -660,10 +660,10 @@ Carried forward, plus what today added.
    soften the privacy objection: the feed does not need site names. A
    **minimal-feed option** publishing `DSI shift` with times only, keeping site
    and role local to the phone, puts nothing meaningful in KV.
-5. **Staleness should be loud, and is not.** The only signal is `#unsent`
-   buried in Setup. Two cheap, transport-independent additions, worth doing
-   whatever happens with (4):
-   - "Last exported N days ago, 4 shifts changed since" on the **Schedule** tab.
+5. ~~**Staleness should be loud, and is not.**~~ Both halves built. Two cheap,
+   transport-independent additions, worth doing whatever happens with (4):
+   - ~~"Last exported N days ago, 4 shifts changed since" on the **Schedule**
+     tab.~~ Built, §23 — and not with that headline, which §23.1 explains.
      If the `.ics` is stale the calendar is lying, and Schedule is where he looks.
    - **"Nothing on file after Friday."** If the last shift held is within ~3
      days, the schedule is probably unimported rather than empty — and an empty
@@ -773,8 +773,8 @@ was written before Homebase's Calendar Sync was found, and four rows moved:
   am/pm risk in §6 lives. A real Tesseract pass is now the only unproven part
   of the input side rather than one of two.
 - **Step 2's `fold()` is done**, forced by §13 emitting real addresses.
-  §10.6's `METHOD:CANCEL` is done too (§22). The §10.5 staleness warnings are
-  what is left of step 2, and §13 sharpened them: if Calendar Sync publishes only two months
+  §10.6's `METHOD:CANCEL` is done too (§22), and §10.5's staleness warnings
+  with it (§17.3, §23) — **step 2 is finished**. §13 had sharpened them: if Calendar Sync publishes only two months
   and the exported calendar is the one he reads, the horizon is a silent gap
   in the only place he looks.
 - **Steps 3 and 6 are partly delivered on the calendar side.** §8.1's
@@ -2639,8 +2639,140 @@ still stands unspent for §8.1, which remains the step that will actually need i
 ### 22.7 Where this leaves the order
 
 §10.5's two staleness warnings are now the whole of §11.3's step 2, then §8.1's
-site table, then §8.4. The one thing worth doing before any of it is the
+site table, then §8.4. *(The second of those is built too — §23.)* The one thing worth doing before any of it is the
 five-minute test in §22.5: delete a shift, save the cancellation, open it, and
 see whether the event goes. If it does not, the note is doing the work and the
 §14 Worker — where the feed is rebuilt whole and this problem does not exist —
 gets a little more urgent.
+
+---
+
+## 23. Built: the calendar is behind this screen, 4 September 2026
+
+The other half of §10.5, and with it §11.3's step 2 is finished. §17.3 built the
+warning that says *the app* is missing shifts. This one says the **phone** is,
+which is the worse of the two: an app with a gap in it looks empty, and a
+calendar with a gap in it looks like a day off.
+
+Until now the only signal was the `#unsent` line in Setup, on a screen he has no
+reason to open. This sits on Schedule, beside the horizon note and the overlap
+banner.
+
+### 23.1 What §10.5 asked for, and what it actually needed
+
+§10.5 wrote the headline as *"Last exported N days ago, 4 shifts changed since"*.
+The days-since half is not the headline, and building it as one would have been
+wrong: a feed saved ten days ago with nothing changed since is not stale, it is
+**correct**. The calendar and the app agree; there is nothing to say.
+
+What makes the calendar lie is a *difference* — something on file the phone has
+not been told about. So the count is the fact and the elapsed time is colour,
+said only once the difference has already earned a warning: "Last saved 9 days
+ago", appended, explaining a backlog rather than announcing one.
+
+### 23.2 When it fires, which is the whole design
+
+§19.1 is the standing lesson here: a warning that fires on the ordinary case
+destroys every warning beside it. "Something is unexported" is the ordinary
+case — it is true for the whole import-review-export minute, every single time,
+and a screen that is permanently amber teaches him to stop reading amber.
+
+So the trigger is not that something is unexported. It is that **something
+unexported is close enough that the alarms are the next thing to happen**:
+
+| Soonest unexported thing | |
+|---|---|
+| More than 7 days away | Nothing. There is time, and nothing is wrong yet |
+| Within 7 days | Amber, naming the day and the button |
+| Within 2 days | Red, and it says the alarms come from the last export |
+| Already past | Nothing. The alarms have been and gone; exporting changes nothing that can still happen |
+
+Two days is where it turns red because the default alarm leads are 12 and 2
+hours (§3.3): inside that, the export is not a chore any more, it is late.
+
+### 23.3 Three differences, and `seq` told two of them apart for free
+
+The calendar can disagree with the app in three ways, and they are not the same
+failure:
+
+- **A shift it has never heard of.** No event, so no alarm at all.
+- **A shift it holds an older version of.** An event exists and rings — at the
+  wrong time, which is worse than silence because it looks like it worked.
+- **An event for a shift that was deleted.** §22's case: a ghost at 05:00.
+  Manual-import only; a subscription drops it on the next rebuild.
+
+The first two needed telling apart to be said honestly, and **§22 had already
+built the discriminator without either section noticing**. `seq` rises only when
+a shift that had already been sent is changed. So an unsent shift *with* a
+sequence number is one the calendar holds an old version of, and one without is
+a shift it has never seen. No new field, nothing to migrate — the distinction
+came free from a change made for a different reason.
+
+The third is read straight off `S.tombstones`, filtered to dates still ahead:
+a ghost event whose date has passed has already rung, and there is nothing left
+to prevent.
+
+### 23.4 What it says
+
+> A shift tomorrow is not in the calendar. The alarms on the phone come from the
+> last export, not from this screen. Save new shifts in Setup.
+
+> 2 shifts are not in the calendar and 1 has changed since it was sent. The
+> soonest is Tue 8 Sep. Save new shifts in Setup. Last saved 9 days ago.
+
+> A deleted shift is still in the calendar on Sun 6 Sep, with its alarms. Save
+> the cancellations in Setup.
+
+Every one of them names the button. A warning about a calendar being wrong is
+worth nothing if the fix is two screens away and unnamed — that was the fault of
+the `#unsent` line it replaces.
+
+The cancellation gets its own note rather than a clause in the first, because
+the fix is a different button.
+
+### 23.5 One field, and a render that clears itself
+
+`S.settings.lastExport`, an ISO timestamp, written by the publish export in both
+modes. Additive optional, absent means "never exported", and both `loadState()`
+and the backup restore already go through
+`Object.assign(structuredClone(DEFAULTS), v)` — so §7 holds and §11.4's check is
+still unspent for §8.1.
+
+The exports now call `renderAll()` rather than `renderSetup()`. The warning they
+clear lives on Schedule, and a warning still standing after the thing it warned
+about was fixed is exactly the stale amber §19.1 is the record of.
+
+### 23.6 It has no test, and that is a choice worth naming
+
+`staleNotes()` sits in `app.js` beside `horizonNotes()` and `clashNotes()`,
+which have no tests either, and for the same reason: they are policy about the
+whole store rather than a function of their arguments, and there is no DOM
+harness in this repo to drive them. It was written in a shape that could move —
+dates in, sentences out, no rendering — but extracting it to earn a test would
+have put app-state policy in a file about file formats or about rotas, and it
+belongs with the other two.
+
+What it got instead is fifteen states driven through the real page in a
+headless browser: nothing pending, unexported but weeks away, inside the window,
+inside two days, changed-not-resent, mixed counts, both plural forms, both feed
+modes, a ghost event, a past ghost, a past unexported shift, never exported at
+all, and the export clearing the note. That is not in `npm test` and it should
+be honest about that. If a third warning ever wants to join these two, the
+harness is the thing to build first.
+
+### 23.7 Where this leaves the order
+
+§11.3's step 2 is done — every §10.5–§10.7 item is now built or closed. What is
+left is the two heavy ones, in the order they were always in:
+
+| | Work | |
+|---|---|---|
+| 3 | **§8.1 site table** | Unblocked since §17.4. Everything after assumes `siteId`, and it is the one remaining schema change, so §11.4's check gets spent here |
+| 6 | **§8.4 change detection** | Wants stable site identity first, and has a worked example on the feed side to copy (§13) |
+
+Beside them, unchanged: **§4/§14's Worker** is still the live product blocker
+and still entirely unbuilt. It is worth noting what the last two days did to the
+argument for it — §22 and §23 are both, in the end, elaborate handling of a
+problem the Worker deletes. In subscription mode fed from a URL there is no
+export to forget, no cancellation file to open, and nothing for either warning
+to fire about.
