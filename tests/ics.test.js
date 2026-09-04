@@ -179,6 +179,101 @@ test('the filter separates the shifts from the rest of his calendar', () => {
   assert.ok(report.filtered > 0);
 });
 
+/* ---------- writing: the cancellation (§10.6, §22) -----------------------
+   The failure this guards against is silent by nature. A cancellation with a
+   UID that does not match the publication to the character, or a sequence
+   number no higher than the one the calendar holds, imports without complaint
+   and cancels nothing — and the alarm still goes off at five in the morning.
+   Nothing on any screen would say so, which is why it is worth a test rather
+   than a look.
+   ---------------------------------------------------------------------- */
+
+const DEAD = {
+  uid: I.shiftUID('abc-123'), seq: 1,
+  date: '2026-09-07', start: '15:00', end: '23:00', endDate: '2026-09-07',
+  title: 'DSI- De la Montagne'
+};
+const cancel = (rows, o = {}) =>
+  I.buildCancelICS(rows, Object.assign({ now: '20260903T120000Z' }, o));
+const lines = t => t.split('\r\n');
+
+test('the UID is built the one way, so a cancel names what was published', () => {
+  // The publish side calls the same function. If it ever stops, this is the
+  // test that fails rather than the phone.
+  assert.equal(I.shiftUID('abc-123'), 'abc-123@shiftdeck');
+  assert.ok(lines(cancel([DEAD])).includes(`UID:${I.shiftUID('abc-123')}`));
+});
+
+test('the method is on the calendar and the status is on the event', () => {
+  const L = lines(cancel([DEAD]));
+  assert.ok(L.includes('METHOD:CANCEL'));
+  assert.ok(L.includes('STATUS:CANCELLED'));
+  assert.ok(!L.includes('METHOD:PUBLISH'));
+});
+
+test('the sequence is carried through, so the revision is newer', () => {
+  assert.ok(lines(cancel([DEAD])).includes('SEQUENCE:1'));
+  assert.ok(lines(cancel([Object.assign({}, DEAD, { seq: 4 })])).includes('SEQUENCE:4'));
+  // Missing or nonsense, and it still has to be a legal integer.
+  assert.ok(lines(cancel([Object.assign({}, DEAD, { seq: undefined })])).includes('SEQUENCE:0'));
+});
+
+test('no alarms ride along in a cancellation', () => {
+  // The alarms are the thing being taken away. An importer that half-reads the
+  // file must not be handed a fresh set of them.
+  assert.ok(!/VALARM/.test(cancel([DEAD])));
+});
+
+test('the times match the floating local form the publish side writes', () => {
+  const L = lines(cancel([DEAD]));
+  assert.ok(L.includes('DTSTART:20260907T150000'));
+  assert.ok(L.includes('DTEND:20260907T230000'));
+});
+
+test('an overnight shift ends on the day the record says it does', () => {
+  const night = Object.assign({}, DEAD,
+    { start: '20:00', end: '04:00', endDate: '2026-09-08' });
+  assert.ok(lines(cancel([night])).includes('DTEND:20260908T040000'));
+});
+
+test('an entry with no UID is dropped, not guessed at', () => {
+  // Without one there is no event to name, and an importer would be free to
+  // apply it to whatever it liked.
+  const out = cancel([Object.assign({}, DEAD, { uid: '' }), DEAD]);
+  assert.equal(out.match(/BEGIN:VEVENT/g).length, 1);
+});
+
+test('an empty list still produces a valid, empty calendar', () => {
+  const out = cancel([]);
+  assert.ok(out.startsWith('BEGIN:VCALENDAR'));
+  assert.ok(out.endsWith('END:VCALENDAR'));
+  assert.ok(!/BEGIN:VEVENT/.test(out));
+});
+
+test('the summary is escaped and folded like any other text line', () => {
+  const long = Object.assign({}, DEAD,
+    { title: 'DSI- Poste de garde, Montréal; ' + 'x'.repeat(70) });
+  const out = cancel([long]);
+  // Read it back through the unfolder rather than matching the raw text: the
+  // point is that the value survives, not which column it broke at.
+  const summary = I.unfold(out).split('\n').find(l => l.startsWith('SUMMARY:'));
+  assert.equal(I.unescapeText(summary.slice('SUMMARY:'.length)), long.title);
+  // Folded at 75 octets, not characters: the accent is two bytes.
+  const enc = new TextEncoder();
+  for(const l of lines(out)) assert.ok(enc.encode(l).length <= 75, `over-long: ${l}`);
+});
+
+test('what it writes reads back as a cancellation', () => {
+  // The reader already knows what a cancelled event is (§13). Round-tripping
+  // is the cheapest proof the file is well formed rather than merely the
+  // shape this test expected.
+  const { rows, report } = I.parseICS(cancel([DEAD]), { zone: ZONE });
+  assert.equal(rows.length, 0);
+  assert.equal(report.cancelled, 1);
+  assert.equal(report.cancelledRows[0].uid, I.shiftUID('abc-123'));
+  assert.equal(report.cancelledRows[0].date, '2026-09-07');
+});
+
 /* ---------- golden fixtures ---------------------------------------------- */
 
 const feeds = fs.existsSync(FIX)

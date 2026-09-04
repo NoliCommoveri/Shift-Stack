@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Shift Deck — calendar (.ics) reader
+   Shift Deck — the calendar (.ics) file, both directions
 
    Pure functions only: iCalendar text in, shift rows out. No DOM, no storage,
    no clock of its own. Loaded as a plain script after parser.js in the
@@ -25,6 +25,17 @@
    they carry that OCR rows cannot is the event's UID, which is a stable
    identity: re-importing the same calendar updates the shift it already made
    instead of adding a second one.
+
+   WHY THE WRITER IS HERE TOO
+
+   It was not, and that was the reason §10.6 sat open as long as it did. Line
+   folding, text escaping and UID identity are one body of knowledge about one
+   file format, and half of it lived in app.js where nothing could test it. A
+   cancellation is the case where getting that wrong is silent: the file looks
+   right, the calendar ignores it, and the alarm still rings. So the format
+   knowledge is all in this file now — `fold`, `icsEscape`, `shiftUID` and the
+   cancellation builder — and app.js keeps only the part that needs the store:
+   which shifts, whose job, what title.
    ========================================================================== */
 
 /* Deliberately standalone — no dependency on parser.js, in either direction.
@@ -376,9 +387,117 @@ function eventUID(p){
   return rid ? `${base}#${rid}` : base;
 }
 
+/* ==========================================================================
+   WRITING
+
+   The reader above is about someone else's file. What follows is about ours:
+   the identity we put on an event, and the one message that takes an event
+   back off the phone.
+   ========================================================================== */
+
+/* Every event this app writes is named after the shift record that made it,
+   and nothing else. That is the whole of the identity scheme, and it lives in
+   one function on purpose: a cancellation whose UID does not match the
+   publication to the character cancels nothing, and the failure is silent —
+   the file imports cleanly and the alarm still rings at five. Both callers
+   go through here so the two can never drift apart. */
+function shiftUID(id){ return `${id}@shiftdeck`; }
+
+function icsEscape(s){
+  return String(s).replace(/([,;\\])/g, '\\$1').replace(/\n/g, '\\n');
+}
+
+/* The spec folds at 75 octets, not 75 characters. Slicing by character wrote
+   over-long lines for anything non-ASCII, which some calendar apps reject
+   outright — live now that real addresses go in the file, since a Montreal
+   site name is two bytes a letter in the accents. Splitting on code points
+   keeps a character whole; counting their UTF-8 length keeps the line legal. */
+function fold(l){
+  const enc = new TextEncoder();
+  if(enc.encode(l).length <= 74) return l;
+  const out = [];
+  let line = '', limit = 74;               // continuation lines carry a space
+  for(const ch of l){
+    const n = enc.encode(ch).length;
+    if(enc.encode(line).length + n > limit){
+      out.push(line);
+      line = ' ' + ch;
+      limit = 74;
+    } else line += ch;
+  }
+  if(line) out.push(line);
+  return out.join('\r\n');
+}
+
+/* UTC stamp, the only form DTSTAMP is allowed to take. */
+function icsStamp(d = new Date()){
+  return d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+}
+
+/* A local wall time as the file writes it: floating, no zone, because that is
+   what every event this app publishes uses and a cancellation has to look
+   like the thing it cancels. */
+function icsLocal(date, time){
+  return `${String(date).replace(/-/g, '')}T${String(time).replace(':', '')}00`;
+}
+
+/* ---------- the cancellation ---------------------------------------------
+   §10.6: in manual-import mode a deleted shift keeps its calendar event and
+   its alarms forever. Subscription mode is immune, because there the file is
+   the whole calendar and a rebuild simply does not contain the shift any more.
+   Manual import has no such moment — it only ever adds — so the removal has to
+   be said out loud, and RFC 5545 has exactly one way to say it.
+
+   Three things make it a cancellation rather than a wish:
+
+   - `METHOD:CANCEL` on the calendar. It is a calendar-level property, which is
+     why this cannot be appended to the publish file: one iCalendar object
+     carries one method, and a file claiming PUBLISH while holding cancelled
+     events is asking the importer to guess.
+   - `STATUS:CANCELLED` on each event. Belt and braces, deliberately: the
+     method is the instruction, the status is the same instruction written on
+     the event itself, and importers vary in which one they read.
+   - `SEQUENCE` above the one that published it. A calendar is entitled to
+     ignore a revision that is not newer than what it holds, and an event this
+     app published carries `SEQUENCE:0` unless it has been edited since.
+
+   No VALARM goes in. The alarms are the thing being taken away, and an
+   importer that half-understands the file should not be handed a fresh set.
+
+   Records in, text out, and the caller keeps the store: each entry is
+   { uid, seq, date, start, end, endDate, title } as app.js recorded it at the
+   moment of deletion. It is recorded rather than looked up because by the time
+   this runs the shift is gone, and so, often, is the job it belonged to.
+   -------------------------------------------------------------------- */
+function buildCancelICS(dead, opts = {}){
+  const now = opts.now || icsStamp();
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Shift Deck//EN',
+             'CALSCALE:GREGORIAN', 'METHOD:CANCEL', 'X-WR-CALNAME:Work Schedule'];
+  (dead || []).forEach(t => {
+    // Without a UID there is no event to name and the entry would cancel
+    // whatever the importer felt like. Dropped, not guessed at.
+    if(!t || !t.uid || !t.date || !t.start) return;
+    L.push('BEGIN:VEVENT',
+      fold(`UID:${t.uid}`),
+      `DTSTAMP:${now}`,
+      `SEQUENCE:${Number(t.seq) || 0}`,
+      'STATUS:CANCELLED',
+      `DTSTART:${icsLocal(t.date, t.start)}`);
+    if(t.end) L.push(`DTEND:${icsLocal(t.endDate || t.date, t.end)}`);
+    // The summary is not what identifies the event — the UID is — but an
+    // importer that shows the user a confirmation shows this, and "cancelled:
+    // what?" is a bad thing to be asked at a glance.
+    L.push(fold('SUMMARY:' + icsEscape(t.title || 'Shift')));
+    L.push('END:VEVENT');
+  });
+  L.push('END:VCALENDAR');
+  return L.join('\r\n');
+}
+
 /* Node picks these up for the tests; the browser just gets the globals. */
 if(typeof module !== 'undefined' && module.exports){
   module.exports = { ICS_FLAG, clean, unfold, splitOutsideQuotes, contentLine, unescapeText,
                      parseDT, zoneOffset, wallToUTC, partsIn, knownZone, resolve,
-                     parseDuration, labelFor, eventUID, parseICS };
+                     parseDuration, labelFor, eventUID, parseICS,
+                     shiftUID, icsEscape, fold, icsStamp, icsLocal, buildCancelICS };
 }

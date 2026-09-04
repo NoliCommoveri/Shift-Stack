@@ -166,9 +166,10 @@ input[type=file]{display:none}
    the quieter treatment: worth knowing, but not a job to do. */
 .horizon{margin:0 0 .6rem;padding:.5rem .6rem;border-left:2px solid var(--signal);background:var(--card)}
 .horizon.fed{color:var(--soft);border-left-color:var(--hair)}
-/* A double booking is the one failure with no recovery, so it is the one
-   thing on this screen allowed to be red. */
-.horizon.clash{color:var(--bad);border-left-color:var(--bad)}
+/* Red is for a shift that is going to go wrong on the phone rather than a job
+   to do here: a double booking, which has no recovery, and a calendar too far
+   behind to be carrying the right alarms for what is about to happen. */
+.horizon.clash,.horizon.late{color:var(--bad);border-left-color:var(--bad)}
 .kill{background:none;border:none;color:var(--soft);font-size:1.15rem;cursor:pointer;padding:.3rem .45rem;border-radius:2px}
 .kill:hover{color:var(--bad);background:#F3DEDA}
 
@@ -301,8 +302,10 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
   <div class="rowbtns">
     <button class="act" id="exportics"></button>
     <button class="ghost" id="exportall" hidden>Rebuild the whole calendar</button>
+    <button class="ghost" id="cancelics" hidden>Save the cancellations</button>
   </div>
   <p class="tiny soft" id="unsent" style="margin-top:.5rem"></p>
+  <p class="flag" id="cancelnote" style="margin-top:.35rem" hidden></p>
 
   <h2 style="margin-top:1.8rem">Backup</h2>
   <div class="rowbtns">

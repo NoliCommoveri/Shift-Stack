@@ -7,6 +7,10 @@
 const DEFAULTS = {
   companies: [],
   shifts: [],
+  // Shifts that were deleted after a calendar had already been told about
+  // them. Not history — a to-do list with one item on it: say the event is
+  // off. Emptied the moment that has been said (§22).
+  tombstones: [],
   settings: { leads: [12, 2], feedMode: 'subscribe', icsUrl: '' }
 };
 let S = structuredClone(DEFAULTS);
@@ -95,6 +99,62 @@ function weekStart(dateStr, startDow){
    — the schedule, the pay tab, the horizon note and the calendar file — and
    §20 is the record of what each of them did before it could. */
 const isProposed = s => !!s && s.source === 'pattern';
+
+/* ---------- deleting a shift the calendar already has (§10.6, §22) --------
+   Subscription mode is immune: the file is the whole calendar, so a shift
+   removed from the store is removed from the next rebuild and the event goes
+   with it. Manual import has no such moment — it only ever adds — so a shift
+   deleted here keeps its event and its alarms on the phone forever, and the
+   app had no idea it had done that.
+
+   So every removal of a shift goes through here first. A shift that was never
+   sent leaves nothing behind and is dropped silently; one that was sent leaves
+   a record naming the event it left on the phone, which is the only thing a
+   cancellation can be built from once the shift — and often the job — is gone.
+
+   The sequence number goes up. RFC 5545 lets a calendar ignore a revision no
+   newer than the one it holds, so a cancellation counting from the same number
+   as the publication can legitimately be thrown away.
+   ---------------------------------------------------------------------- */
+function retire(list){
+  if(!S.tombstones) S.tombstones = [];        // a backup restored from before §22
+  (list || []).forEach(sh => {
+    if(!sh || !sh.sent) return;                 // no event out there to cancel
+    const co = coById(sh.companyId);
+    // An overnight shift's event ends on the next day. Guarded, because this
+    // runs on the way out and a delete that throws is a delete that does not
+    // happen — a filed shift always has both times, but nothing here needs to
+    // depend on that being true.
+    const overnight = sh.start && sh.end && mins(sh.end) <= mins(sh.start);
+    S.tombstones.push({
+      uid: shiftUID(sh.id),
+      seq: (sh.seq || 0) + 1,
+      date: sh.date, start: sh.start, end: sh.end,
+      endDate: overnight ? shiftDays(sh.date, 1) : sh.date,
+      // Baked now rather than looked up later: by the time this is written to
+      // a file the job may have been removed too, and an event the importer
+      // shows as "cancelled: Shift" tells him nothing.
+      title: `${co ? co.name : 'Shift'}- ${sh.label}`,
+      at: todayISO()
+    });
+  });
+}
+
+/* Removes shifts and records what the calendar still needs telling about.
+   Every delete path in the app goes through this one, because a path that
+   forgets is a shift that rings at five in the morning for a job he no longer
+   has, and nothing on any screen would say why. */
+function dropShifts(pred){
+  const going = S.shifts.filter(pred);
+  if(!going.length) return 0;
+  retire(going);
+  S.shifts = S.shifts.filter(x => !pred(x));
+  return going.length;
+}
+
+/* Cancellations still owed to the calendar. Empty in subscription mode by
+   construction — see doExport. */
+const owedCancels = () => (S.tombstones || []);
 
 /* ---------- review flags -------------------------------------------------
    parser.js emits codes; the wording lives here so changing it never breaks
@@ -331,6 +391,137 @@ function fmtDay(d){
   return `${DAYNAMES[x.getDay()].slice(0,3)} ${x.getDate()} ${MONTHNAMES[x.getMonth()].slice(0,3)}`;
 }
 
+/* The same date, said the way he would say it. "Fri 11 Sep" is right for a
+   week away and wrong for tomorrow, and tomorrow is when it matters. */
+function dayPhrase(d){
+  const today = todayISO();
+  if(d === today) return 'today';
+  if(d === shiftDays(today, 1)) return 'tomorrow';
+  return fmtDay(d);
+}
+
+/* ---------- the calendar is behind this screen (§10.5, §23) ---------------
+   The other half of §10.5. The horizon note says the app is missing shifts;
+   this says the *phone* is, which is worse: he looks at a calendar that is
+   confidently wrong rather than visibly empty, and the alarms come from it.
+
+   Until now the only signal was a line in Setup he has no reason to open.
+
+   When it fires is the whole design, and §19.1 is why. A note that appears
+   the moment anything is uncommitted would be on screen through the ordinary
+   import-review-export minute, every time, and a permanently amber screen
+   teaches him to stop reading the amber that means something. So the trigger
+   is not "something is unexported" — it is "something unexported is close
+   enough that the alarms are the next thing to happen". Outside that window
+   there is time, and nothing is wrong yet.
+
+   §10.5 asked for "last exported N days ago" as the headline. It is not the
+   headline: a feed saved ten days ago with nothing changed since is not stale,
+   it is correct. What is pending is the fact; how long it has been pending is
+   colour, and it is said as colour.
+   ---------------------------------------------------------------------- */
+
+/* Inside this, the alarms for it are the next thing due and an export is late
+   rather than pending. Outside the second, there is time and no warning. */
+const EXPORT_LATE_DAYS = 2;
+const EXPORT_SOON_DAYS = 7;
+
+/* Joins clauses the way a person would: "a", "a and b", "a, b and c". */
+function andList(parts){
+  if(parts.length < 3) return parts.join(' and ');
+  return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
+}
+
+/* "tomorrow", not "on tomorrow". */
+function onDay(d){
+  const p = dayPhrase(d);
+  return (p === 'today' || p === 'tomorrow') ? p : `on ${p}`;
+}
+
+function staleNotes(){
+  const today = todayISO();
+  const sub = S.settings.feedMode !== 'import';
+  const soon = shiftDays(today, EXPORT_SOON_DAYS);
+  const late = shiftDays(today, EXPORT_LATE_DAYS);
+  const out = [];
+
+  // A shift in the past is not a calendar problem any more. Its alarms have
+  // been and gone, and exporting now changes nothing that can still happen.
+  const pend = S.shifts.filter(s => !s.sent && s.date >= today);
+  // `seq` tells the two apart with no new field: it only rises when a shift
+  // that had already been sent is changed (§22.3). So an unsent shift with a
+  // sequence number is one the calendar holds an *older version* of, and one
+  // without is a shift the calendar has never heard of. The distinction is
+  // worth making because the failures differ — nothing at all, or an alarm at
+  // the wrong time — even though the fix is the same export.
+  const missing = pend.filter(s => !s.seq);
+  const changed = pend.filter(s => s.seq);
+
+  if(pend.length){
+    const first = pend.reduce((a, s) => s.date < a ? s.date : a, '9999-99-99');
+    if(first <= soon){
+      // One shift names its own day; several need the day of the nearest, or
+      // "the soonest" has nothing to be the soonest of.
+      let lead;
+      if(pend.length === 1){
+        lead = missing.length
+          ? `A shift ${onDay(first)} is not in the calendar.`
+          : `A shift ${onDay(first)} has changed since it was sent — the calendar still has the old one.`;
+      } else {
+        const bits = [];
+        if(missing.length) bits.push(missing.length === 1
+          ? '1 shift is not in the calendar'
+          : `${missing.length} shifts are not in the calendar`);
+        if(changed.length) bits.push(missing.length
+          ? (changed.length === 1 ? '1 has changed since it was sent'
+                                  : `${changed.length} have changed since they were sent`)
+          : `${changed.length} shifts have changed since they were sent`);
+        lead = `${andList(bits)}. The soonest is ${dayPhrase(first)}.`;
+      }
+
+      let t = lead;
+      // Only when it is late. Said always, this is the clause he stops seeing.
+      if(first <= late)
+        t += ' The alarms on the phone come from the last export, not from this screen.';
+      t += ` Save ${sub ? 'the feed file' : 'new shifts'} in Setup.`;
+
+      const days = daysSinceExport();
+      if(days !== null && days >= 3) t += ` Last saved ${days} days ago.`;
+
+      out.push({ text: t, late: first <= late });
+    }
+  }
+
+  // The other direction, and manual import only: the calendar holding an event
+  // for a shift that is not happening. A subscription drops it on the next
+  // rebuild without being asked (§22).
+  const owed = (sub ? [] : owedCancels()).filter(t => t.date >= today);
+  if(owed.length){
+    const first = owed.reduce((a, t) => t.date < a ? t.date : a, '9999-99-99');
+    if(first <= soon){
+      out.push({
+        text: (owed.length === 1
+          ? `A deleted shift is still in the calendar ${onDay(first)}, with its alarms.`
+          : `${owed.length} deleted shifts are still in the calendar, the soonest ${onDay(first)}, with their alarms.`)
+          + ' Save the cancellations in Setup.',
+        late: first <= late
+      });
+    }
+  }
+
+  return out;
+}
+
+/* Whole days since the feed was last written, or null if it never has been.
+   Only ever used to explain a backlog that has already earned a warning. */
+function daysSinceExport(){
+  const at = S.settings.lastExport;
+  if(!at) return null;
+  const then = new Date(at);
+  if(isNaN(then)) return null;
+  return Math.floor((Date.now() - then.getTime()) / 86400000);
+}
+
 /* The standing warning. The horizon notes say what is missing; this says what
    is wrong, and it is louder because it is worse.
 
@@ -363,12 +554,20 @@ function renderHorizon(){
   wrap.innerHTML = '';
   const notes = horizonNotes();
   const bad = clashNotes();
-  wrap.hidden = !(notes.length || bad.length);
-  // Clashes first. A missing week is a job to do; a double booking is a shift
-  // he is going to miss.
+  const stale = staleNotes();
+  wrap.hidden = !(notes.length || bad.length || stale.length);
+  // Worst first, and the order is by what it costs. A double booking is a
+  // shift he is going to miss. A stale calendar is a shift he has, whose alarm
+  // will not fire or will fire at the wrong time. A short horizon is only a
+  // job to do.
   bad.forEach(t => {
     const p = el('p','flag horizon clash');
     p.textContent = t;
+    wrap.appendChild(p);
+  });
+  stale.forEach(n => {
+    const p = el('p', 'flag horizon' + (n.late ? ' late' : ''));
+    p.textContent = n.text;
     wrap.appendChild(p);
   });
   notes.forEach(n => {
@@ -725,7 +924,7 @@ function renderSetup(){
     del.onclick = () => {
       const n = S.shifts.filter(s => s.companyId === co.id).length;
       if(!confirm(`Remove ${co.name}? ${n} shift${n===1?'':'s'} will be deleted too.`)) return;
-      S.shifts = S.shifts.filter(s => s.companyId !== co.id);
+      dropShifts(s => s.companyId === co.id);
       S.companies = S.companies.filter(c => c.id !== co.id);
       save(); renderAll();
     };
@@ -751,6 +950,24 @@ function renderSetup(){
   if(note) note.textContent = sub
     ? `${S.shifts.length} shift${S.shifts.length===1?'':'s'} in the feed.`
     : (un ? `${un} shift${un===1?'':'s'} not yet in the calendar.` : 'The calendar is up to date.');
+
+  // Deleted shifts the calendar has not been told about. Only in manual-import
+  // mode: subscription rebuilds the whole file and the event goes with it.
+  // Hidden when the count is zero rather than saying "0 cancellations", which
+  // would be one more permanently amber thing to learn to ignore (§19.1).
+  const owed = sub ? 0 : owedCancels().length;
+  const cbtn = document.getElementById('cancelics');
+  if(cbtn) cbtn.hidden = !owed;
+  const cnote = document.getElementById('cancelnote');
+  if(cnote){
+    cnote.hidden = !owed;
+    cnote.textContent = owed
+      ? `${owed} deleted shift${owed===1?'':'s'} still in the calendar, with alarms. `
+        + 'Save the cancellations and open that file the same way. '
+        + 'If the event is still there afterwards, delete it in the calendar by hand — '
+        + 'some importers ignore the file\u2019s identifiers.'
+      : '';
+  }
 }
 
 function renderAll(){
@@ -793,11 +1010,15 @@ function editShift(id){
     // own numbers as an assumption and keep counting them as unconfirmed
     // (§20.8).
     if(isProposed(s)) s.source = 'manual';
-    s.sent = false;              // changed, so send it to the calendar again
+    // Changed, so send it to the calendar again — and as a *newer* revision of
+    // the event it already has, or a calendar is within its rights to keep
+    // showing the old time (§22).
+    if(s.sent) s.seq = (s.seq || 0) + 1;
+    s.sent = false;
     save(); dlg.close(); renderAll();
   };
   $('#e-del').onclick = () => {
-    S.shifts = S.shifts.filter(x => x.id !== id);
+    dropShifts(x => x.id === id);
     save(); dlg.close(); renderAll();
   };
 }
@@ -1389,31 +1610,13 @@ function renderReview(){
   });
 }
 
-/* ---------- calendar file ------------------------------------------------ */
-function icsEscape(s){ return String(s).replace(/([,;\\])/g,'\\$1').replace(/\n/g,'\\n'); }
-/* The spec folds at 75 octets, not 75 characters. Slicing by character wrote
-   over-long lines for anything non-ASCII, which some calendar apps reject
-   outright — live now that real addresses go in the file, since a Montréal
-   site name is two bytes a letter in the accents. Splitting on code points
-   keeps a character whole; counting their UTF-8 length keeps the line legal. */
-function fold(l){
-  const enc = new TextEncoder();
-  if(enc.encode(l).length <= 74) return l;
-  const out = [];
-  let line = '', limit = 74;               // continuation lines carry a space
-  for(const ch of l){
-    const n = enc.encode(ch).length;
-    if(enc.encode(line).length + n > limit){
-      out.push(line);
-      line = ' ' + ch;
-      limit = 74;
-    } else line += ch;
-  }
-  if(line) out.push(line);
-  return out.join('\r\n');
-}
+/* ---------- calendar file ------------------------------------------------
+   `fold`, `icsEscape`, `icsStamp` and `shiftUID` come from ics.js, which is
+   loaded first and now owns the file format in both directions. What is left
+   here is the half that needs the store: which shifts, whose job, what title.
+   ---------------------------------------------------------------------- */
 function buildICS(only){
-  const now = new Date().toISOString().replace(/[-:]/g,'').split('.')[0] + 'Z';
+  const now = icsStamp();
   const leads = (S.settings.leads || []).filter(n => n > 0);
   const L = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Shift Deck//EN','CALSCALE:GREGORIAN',
              'METHOD:PUBLISH','X-WR-CALNAME:Work Schedule'];
@@ -1427,8 +1630,12 @@ function buildICS(only){
     const title = `${co ? co.name : 'Shift'}- ${s.label}` +
                   (isProposed(s) ? ' (from the rota)' : '');
     L.push('BEGIN:VEVENT',
-      fold(`UID:${s.id}@shiftdeck`),
+      fold(`UID:${shiftUID(s.id)}`),
       `DTSTAMP:${now}`,
+      // A calendar may ignore a revision no newer than the one it holds, so a
+      // shift that has been moved or retimed since it was sent has to say so.
+      // The cancellation in ics.js counts from the same number (§22).
+      `SEQUENCE:${s.seq || 0}`,
       `DTSTART:${s.date.replace(/-/g,'')}T${s.start.replace(':','')}00`,
       `DTEND:${endDate.replace(/-/g,'')}T${s.end.replace(':','')}00`,
       // Every event says which job it is. That is the whole point of the
@@ -1505,9 +1712,7 @@ $('#commit').onclick = () => {
   let added = 0, replaced = 0, removed = 0;
 
   pending.filter(p => p.removeId && !p.keep).forEach(p => {
-    const before = S.shifts.length;
-    S.shifts = S.shifts.filter(x => x.id !== p.removeId);
-    if(S.shifts.length < before) removed++;
+    removed += dropShifts(x => x.id === p.removeId);
   });
 
   pending.filter(p => !p.removeId && p.date && p.start && p.end && p.companyId).forEach(p => {
@@ -1525,7 +1730,12 @@ $('#commit').onclick = () => {
       // event it already sent rather than leaving the old time sitting there.
       const i = S.shifts.findIndex(x => x.id === p.replaceId);
       if(i >= 0){
-        rec.id = S.shifts[i].id;
+        const was = S.shifts[i];
+        rec.id = was.id;
+        // Same event, later revision. Without this the rewrite carries the
+        // same SEQUENCE as the version the calendar already holds, which it
+        // may ignore — the old time would sit there with its alarms (§22).
+        rec.seq = was.sent ? (was.seq || 0) + 1 : (was.seq || 0);
         S.shifts[i] = rec;
         replaced++;
         return;
@@ -1648,7 +1858,13 @@ function doExport(all){
     if(!S.shifts.length){ alert('No shifts to export yet.'); return; }
     download('shifts.ics', buildICS(S.shifts), 'text/calendar;charset=utf-8');
     S.shifts.forEach(s => s.sent = true);
-    save(); renderSetup();
+    S.settings.lastExport = new Date().toISOString();
+    // The rebuild *is* the cancellation here: a deleted shift is simply not in
+    // the file, so the subscription drops the event on the next sync. Nothing
+    // is owed, and leaving the records to pile up would nag about work the
+    // export just did (§22).
+    S.tombstones = [];
+    save(); renderAll();
     return;
   }
   const list = all ? S.shifts : S.shifts.filter(s => !s.sent);
@@ -1659,9 +1875,27 @@ function doExport(all){
   }
   download(`shifts-${todayISO()}.ics`, buildICS(list), 'text/calendar;charset=utf-8');
   list.forEach(s => s.sent = true);
-  save(); renderSetup();
+  S.settings.lastExport = new Date().toISOString();
+  // renderAll rather than renderSetup: the warning this clears lives on
+  // Schedule, and a warning that outlives the thing it warned about is the
+  // stale amber §19.1 is the record of.
+  save(); renderAll();
 }
+/* §10.6, built in §22. A separate file, and it has to be: METHOD is a property
+   of the calendar, not the event, so cancellations cannot ride along inside a
+   file that says PUBLISH. Two saves is the price of an unambiguous file, and
+   it is only paid on the weeks something was actually deleted. */
+function doCancelExport(){
+  const dead = owedCancels();
+  if(!dead.length){ alert('Nothing has been deleted since the last export.'); return; }
+  download(`shifts-cancelled-${todayISO()}.ics`,
+           buildCancelICS(dead), 'text/calendar;charset=utf-8');
+  S.tombstones = [];
+  save(); renderAll();
+}
+
 $('#exportics').onclick = () => doExport(false);
+$('#cancelics').onclick = doCancelExport;
 $('#exportall').onclick = () => {
   if(!confirm('Export every shift again? Only do this after clearing the shift calendar, or you will get duplicates.')) return;
   doExport(true);
@@ -1683,7 +1917,7 @@ $('#jsonpick').onchange = async () => {
 };
 $('#wipeshifts').onclick = () => {
   if(!confirm('Delete every shift? Jobs and rates are kept.')) return;
-  S.shifts = []; save(); renderAll();
+  dropShifts(() => true); save(); renderAll();
 };
 $('#wipeall').onclick = async () => {
   if(!confirm('Delete jobs, shifts and settings? Everything on this device goes.')) return;
