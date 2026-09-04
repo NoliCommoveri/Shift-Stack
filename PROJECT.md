@@ -2776,3 +2776,114 @@ argument for it — §22 and §23 are both, in the end, elaborate handling of a
 problem the Worker deletes. In subscription mode fed from a URL there is no
 export to forget, no cancellation file to open, and nothing for either warning
 to fire about.
+
+---
+
+## 24. Built: the time fields are 24-hour too, 4 September 2026
+
+`app.js` has said this since the beginning, above `fmtTime()`:
+
+> 24-hour throughout. am/pm is the single most dangerous character in this app
+> — 23:00 cannot be misread the way 11:00pm can, so the display never uses it.
+> The parser still reads am/pm off screenshots; that is input.
+
+That was true of everything the app *printed* and false of everything it
+*asked for*. All three fields where a time is entered by hand were
+`<input type="time">`, which is not drawn by the app at all — it is drawn by
+the phone, in the phone's locale. On a US-locale Android that is a 12-hour
+spinner with an AM/PM segment.
+
+### 24.1 Where that lands
+
+On the review screen, which exists for one reason: to catch the am/pm misread
+that §6 names as the top risk and that §16.2 caught happening on real input,
+where Homebase's "8:00 pm" came back as 08:00. §18 built the declared-pattern
+check on top of that, which corrects an exact twelve-hour flip and shows the
+row amber.
+
+So the sequence was: the parser reads 08:00, patterns.js says that is twelve
+hours off DSI's rota and corrects it to 20:00, the row explains itself in
+24-hour — and the box he then taps to check it offers him am and pm. The one
+control in the product for fixing an am/pm mistake was the only place in the
+product that spoke am/pm.
+
+The Setup rota fields had the same shape, and they are worse in one respect:
+they are typed once and then everything else is measured against them. A rota
+entered as 3:00 AM instead of 3:00 PM does not produce a wrong shift, it
+produces a wrong *check*, silently, on every import afterwards.
+
+### 24.2 What replaced it
+
+A plain text box. `parseClock()` in `parser.js` decides what a typed time is;
+`bindClock()` in `app.js` decides what the box does with the answer.
+
+`parseClock()` lives in `parser.js` and not next to the field because the am/pm
+rule has to exist exactly once, in `to24()`. Two copies of that rule drift, and
+an am/pm rule that drifts is §6's risk arriving by another door.
+
+Bare digits are read as 24-hour, with no guess about which half of the day was
+meant — that guess is the thing being removed:
+
+```
+9  09  9:00  09:00  900  0900   ->  09:00      (nine in the morning)
+21  21:30  2130  21.30          ->  21:30      (nine at night)
+2400  24:00                     ->  00:00
+```
+
+A meridiem is still **accepted**, because the employer's screen prints one and
+he transcribes from it — but only ever accepted, never shown back. `9pm`
+becomes `21:00` in the box the moment he leaves it, which turns the conversion
+into something he can see and check rather than something done behind the
+value. This is the same line §6 already drew: am/pm is input, never display.
+
+`inputmode="numeric"` is deliberate. The phone offers a keypad, which is the
+fast way to type `1500` and no way at all to type "3 pm". The meridiem is
+tolerated, not invited.
+
+### 24.3 What it refuses to do
+
+It never rounds to the nearest thing the text might have been. `2:5` is not
+02:05, `9:60` is not 10:00, `1500pm` is not anything. All of them come back
+null, the box is marked, and **the value on file is left exactly as it was**.
+
+That matters more than it looks, because half-typed times pass through the
+invalid state on every keystroke. The rule that makes this safe is: only a
+value that parses is ever committed, so the note lines under each row keep up
+with the typing exactly as they did before, and a field the app could not
+understand changes nothing.
+
+The edit dialog goes one step further and refuses to save at all while either
+time is unreadable. It is the screen where he corrects a shift by hand, so
+filing a blank over a time that was right until he touched it is the one
+outcome it must not have.
+
+### 24.4 What it does not do
+
+It does not touch what the parser reads off a screenshot. §16.2's failure was
+OCR losing a meridiem, and nothing here helps with that — §18's declared
+patterns are still the only control on it. This closes the hole on the other
+side: the correction.
+
+It also leaves the date fields as `<input type="date">`. A date picker in the
+phone's locale can be read the wrong way round — 09/04 — but unlike a time it
+commits an unambiguous ISO value, and unlike am/pm a wrong date shows up as
+the wrong day of the week on a row that already prints the weekday.
+
+### 24.5 §7 is intact
+
+Nothing about the stored shape changed. `start` and `end` were `'HH:MM'`
+strings before this and are `'HH:MM'` strings after it; what changed is only
+which control produces them. A job saved yesterday reads back identically.
+
+### 24.6 Where this leaves the order
+
+Unchanged from §23.7 — §8.1's site table, then §8.4, with §4/§14's Worker
+still the live product blocker beside them.
+
+This was not on the list and should not have been on one: it is a
+contradiction between a stated principle and the code, found by reading the
+two against each other, and the fix is smaller than the section describing it.
+Worth noting where it was found, though — not in the app, but in the comment
+above `fmtTime()` claiming something the fields underneath it did not do. The
+comments in this codebase are load-bearing enough to be worth auditing that
+way again.
