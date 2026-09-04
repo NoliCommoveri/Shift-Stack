@@ -6,7 +6,12 @@
 
 CREATE TABLE IF NOT EXISTS cfg (
   id         INTEGER PRIMARY KEY CHECK (id = 1),   -- one row, enforced
-  json       TEXT    NOT NULL,                     -- companies, sites, roles, settings
+  -- companies, sites, roles, and the narrow slice of settings the server is
+  -- allowed to hold. Not `S.settings` whole: that carries the push token and
+  -- the employer's secret calendar address, neither of which is ever read from
+  -- here, and both of which this row would otherwise keep in cleartext.
+  -- `safeSettings` in guards.js is the list, and enforces it on the way in.
+  json       TEXT    NOT NULL,
   updated_at TEXT    NOT NULL
 );
 

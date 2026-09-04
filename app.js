@@ -1,6 +1,12 @@
 /* ==========================================================================
    Shift Deck
-   Everything lives on this device. Nothing is sent anywhere.
+
+   The shifts live on this device, and the app works with nothing behind it.
+   Since §14 there may also be a Worker: if a push token has been set, the
+   config and the hand-entered shifts are sent to it and the calendar feed is
+   served from there. Nothing leaves this device without that token, and what
+   does leave is narrowed at both ends — `SETTINGS_SENT` below, and
+   `safeSettings` in worker/guards.js.
    ========================================================================== */
 
 /* ---------- storage ------------------------------------------------------ */
@@ -3055,16 +3061,42 @@ function whenWords(iso){
   return `${d} day${d === 1 ? '' : 's'} ago`;
 }
 
-/* What the phone owns, sent whole: the config, and every shift that did not
-   come from the feed. The Worker replaces its half with this and leaves the
-   cron's rows alone (§14.3). */
+/* Which settings go with it. `S.settings` used to be sent whole, and it holds
+   two things that had no business on a server: `pushToken`, the secret that
+   authorises this very request, and `icsUrl`, the employer's secret calendar
+   address. Both were written into the `cfg` row as cleartext and neither was
+   ever read back — the Worker has its own PUSH_TOKEN and ICS_URL as dashboard
+   secrets — so the row held two credentials it could not use, somewhere far
+   more widely readable than a binding.
+
+   `open` and `lastExport` are withheld for a duller reason: a fold state and
+   an export stamp belong to the phone that made them, and this phone's are
+   not another's to overwrite.
+
+   The list mirrors `SETTINGS_KEPT` in worker/guards.js, which is where it is
+   enforced. Drift between the two is safe in this direction only — anything
+   extra sent from here is dropped there — and that is deliberate, because the
+   server has to be the one that refuses. sw.js caches app.js in the shell, so
+   a phone still running the old code keeps sending the old shape. */
+const SETTINGS_SENT = ['leads'];
+
+const settingsToSend = () => {
+  const out = {};
+  for(const k of SETTINGS_SENT) if(k in S.settings) out[k] = S.settings[k];
+  return out;
+};
+
+/* What the phone owns: the config, and every shift that did not come from the
+   feed. The Worker replaces its half with this and leaves the cron's rows
+   alone (§14.3). */
 async function pushToServer(){
   const mine = S.shifts.filter(s => s.source !== 'feed');
   return server('/push', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      cfg: { companies: S.companies, sites: S.sites, roles: S.roles, settings: S.settings },
+      cfg: { companies: S.companies, sites: S.sites, roles: S.roles,
+             settings: settingsToSend() },
       shifts: mine
     })
   });
@@ -3388,8 +3420,31 @@ $('#exportall').onclick = () => {
   if(!confirm('Export every shift again? Only do this after clearing the shift calendar, or you will get duplicates.')) return;
   doExport(true);
 };
+/* The two settings that are credentials rather than preferences: the token
+   that authorises writes to the Worker, and the employer's secret calendar
+   address, which grants read of the calendar to anyone holding it.
+
+   They are kept out of the backup file for the same reason they are kept out
+   of the push. IndexedDB is origin-scoped and stays on the phone; a file in
+   Downloads is a different thing entirely — it gets mailed to himself, copied
+   to a laptop, picked up by whatever is syncing that folder. A backup is for
+   the schedule, and the schedule is not a secret in the way these two are. */
+const SETTINGS_PRIVATE = ['pushToken', 'icsUrl'];
+
+/* The backup, without them. A deep clone first, so that stripping the copy
+   cannot reach back into the live store — `S.settings` is the object the whole
+   app is reading, and deleting a key from it here would log him out of his own
+   server on the way to saving a file. */
+function backupOf(state){
+  const copy = structuredClone(state);
+  copy.settings = copy.settings || {};
+  for(const k of SETTINGS_PRIVATE) delete copy.settings[k];
+  return copy;
+}
+
 $('#exportjson').onclick = () =>
-  download(`shift-deck-${todayISO()}.json`, JSON.stringify(S, null, 2), 'application/json');
+  download(`shift-deck-${todayISO()}.json`, JSON.stringify(backupOf(S), null, 2),
+           'application/json');
 $('#importjson').onclick = () => $('#jsonpick').click();
 $('#jsonpick').onchange = async () => {
   const f = $('#jsonpick').files[0];
@@ -3397,8 +3452,16 @@ $('#jsonpick').onchange = async () => {
   try{
     const v = JSON.parse(await f.text());
     if(!v.companies || !v.shifts) throw new Error('not a backup');
-    if(!confirm('Replace everything on this device with the backup?')) return;
+    if(!confirm('Replace everything on this device with the backup?\n\n' +
+                'The push token stays as it is on this phone — a backup does not carry one.')) return;
+    // Whatever this phone already has, it keeps. A restore brings the schedule
+    // across; it does not hand the device a credential out of a file, and an
+    // older backup made before those were stripped does not get to overwrite
+    // the token that is working right now.
+    const held = {};
+    for(const k of SETTINGS_PRIVATE) if(k in S.settings) held[k] = S.settings[k];
     S = Object.assign(structuredClone(DEFAULTS), v);
+    S.settings = Object.assign(S.settings || {}, held);
     save(); renderAll();
   }catch(e){ alert('That file could not be read as a backup.'); }
   $('#jsonpick').value = '';
