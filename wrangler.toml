@@ -11,6 +11,26 @@ name = "shift-deck"
 main = "worker/index.js"
 compatibility_date = "2026-09-01"
 
+# Wrangler treats this file as the source of truth for the Worker's
+# configuration, the way a terraform file is. Its own schema puts it plainly:
+# "If you change your vars in the dashboard, wrangler *will* override/delete
+# them on its next deploy." The default is `false`, and there is no `[vars]`
+# block here, so every git build deployed an empty set of environment
+# variables and took PUSH_TOKEN, FEED_TOKEN and ICS_URL with it. Secrets are
+# not exempt: `plain_text` and `secret_text` are one binding family, which is
+# why the dashboard shows them in a single panel.
+#
+# They cannot live in this file — a committed secret is not a secret — and
+# §14.9's rule is that Ray is never asked to run `wrangler secret put`. So the
+# dashboard has to be both where they are set and where they survive.
+#
+# Top level, and it has to be: this is a top-level-only field, and TOML puts a
+# bare key under whichever table header precedes it. Sitting below [assets] it
+# was read as an asset setting, ignored with a warning buried in the build log,
+# and the secrets went on being deleted by a fix that looked applied.
+keep_vars = true
+
+
 # The app is served by the Worker itself rather than from GitHub Pages, which
 # is what makes every call in the page a relative path to its own origin: no
 # CORS, no preflight, no second URL to configure in Setup, and the push token
@@ -22,21 +42,6 @@ binding = "ASSETS"
 # `directory = "./"` means everything not excluded is publicly downloadable,
 # so .assetsignore at the repo root is not optional. Its `.git/` line least of
 # all: wrangler's default ignore list does not skip it (§14.9).
-
-# Wrangler treats this file as the source of truth for the Worker's
-# configuration, the way a terraform file is. Its own schema puts it plainly:
-# "If you change your vars in the dashboard, wrangler *will* override/delete
-# them on its next deploy." The default is `false`, and there is no `[vars]`
-# block here, so every git build was deploying an empty set of environment
-# variables and taking PUSH_TOKEN, FEED_TOKEN and ICS_URL with it. Secrets are
-# not exempt: `plain_text` and `secret_text` are one binding family, which is
-# why the dashboard shows them in a single panel.
-#
-# They cannot live in this file — a committed secret is not a secret — and
-# §14.9's rule is that Ray is never asked to run `wrangler secret put`. So the
-# dashboard has to be the place they are set and the place they survive, which
-# is what this line buys.
-keep_vars = true
 
 [[d1_databases]]
 binding = "DB"
