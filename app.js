@@ -2960,9 +2960,11 @@ function renderReview(){
 }
 
 /* ---------- calendar file ------------------------------------------------
-   `fold`, `icsEscape`, `icsStamp` and `shiftUID` come from ics.js, which is
-   loaded first and now owns the file format in both directions. What is left
-   here is the half that needs the store: which shifts, whose job, what title.
+   `icsFold`, `icsEscape`, `icsStamp` and `shiftUID` come from ics.js, which
+   is loaded first and now owns the file format in both directions. What is
+   left here is the half that needs the store: which shifts, whose job, what
+   title. The folder is `icsFold` and not `fold` because `fold` in this file
+   is the Setup screen's `<details>` helper, and this file is loaded last.
    ---------------------------------------------------------------------- */
 function buildICS(only){
   const now = icsStamp();
@@ -2986,7 +2988,7 @@ function buildICS(only){
     const title = eventTitle(co && co.name, s, siteById(s.siteId), roleById(s.roleId)) +
                   (isProposed(s) ? ' (from the rota)' : '');
     L.push('BEGIN:VEVENT',
-      fold(`UID:${shiftUID(s.id)}`),
+      icsFold(`UID:${shiftUID(s.id)}`),
       `DTSTAMP:${now}`,
       // A calendar may ignore a revision no newer than the one it holds, so a
       // shift that has been moved or retimed since it was sent has to say so.
@@ -2998,8 +3000,8 @@ function buildICS(only){
       // normalising step: an employer's own sync writes "Security Officer"
       // with nothing to say whose shift it is, and two jobs' worth of those
       // on one calendar is unreadable.
-      fold('SUMMARY:' + icsEscape(title)),
-      fold('DESCRIPTION:' + icsEscape(`${fmtDur(durMins(s))} scheduled`
+      icsFold('SUMMARY:' + icsEscape(title)),
+      icsFold('DESCRIPTION:' + icsEscape(`${fmtDur(durMins(s))} scheduled`
         + (rests.has(s.id) ? `\nOnly ${fmtDur(rests.get(s.id))} off before this one.` : ''))));
     // An address here is a tappable link to a map. The two-hour alarm fires,
     // he taps the event, taps the address, and he is navigating.
@@ -3008,10 +3010,10 @@ function buildICS(only){
     // shift's own address wins over the site's standing one — a feed row
     // carries what the employer published for that night.
     const where = shiftAddress(s);
-    if(where) L.push(fold('LOCATION:' + icsEscape(where)));
+    if(where) L.push(icsFold('LOCATION:' + icsEscape(where)));
     leads.forEach(h => {
       L.push('BEGIN:VALARM','ACTION:DISPLAY',
-        fold('DESCRIPTION:' + icsEscape(title)),
+        icsFold('DESCRIPTION:' + icsEscape(title)),
         `TRIGGER:-PT${h}H`, 'END:VALARM');
     });
     // It fires as the shift before it ends, not on the morning of this one.
@@ -3023,7 +3025,7 @@ function buildICS(only){
     if(rest){
       const rh = Math.floor(rest / 60), rm = rest % 60;
       L.push('BEGIN:VALARM','ACTION:DISPLAY',
-        fold('DESCRIPTION:' + icsEscape(`Heads up: only ${fmtDur(rest)} off between shifts.`)),
+        icsFold('DESCRIPTION:' + icsEscape(`Heads up: only ${fmtDur(rest)} off between shifts.`)),
         `TRIGGER:-PT${rh}H${rm ? rm + 'M' : ''}`, 'END:VALARM');
     }
     L.push('END:VEVENT');
