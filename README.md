@@ -69,6 +69,13 @@ there the feed is rebuilt whole and a deleted shift simply is not in it.
 
 Alarm lead times are set in Setup, in hours before each shift.
 
+One alarm is not a lead time. When two shifts leave him between two and eight
+hours off — home, but not for a night's sleep — the exported calendar carries a
+second alarm on the later shift, set to go off as the earlier one ends: "Heads
+up: only 6h off between shifts." Under two hours he is not going home and it
+says nothing; over eight there is a night in it and it says nothing. The app
+says the gap and leaves the rest to him.
+
 ## How the two calendars fit together
 
 The shape that makes this work, and the one to set up:

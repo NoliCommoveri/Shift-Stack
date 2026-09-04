@@ -589,6 +589,37 @@ function clashNotes(){
     });
 }
 
+/* The rest note (§25). Quieter than the clash above it and louder than the
+   horizon notes below, which is exactly what it costs: a clash is a shift he
+   is going to miss and a short horizon is a job to do, while this is a night
+   he is going to spend differently than he planned to.
+
+   Near horizon only. The gap is a fact about next Thursday as much as about
+   tonight, but it is only *actionable* on the day — what he does with the
+   information is set an alarm before he lies down — and a standing note about
+   a week away is the amber screen §23 refused to build. So it appears when the
+   shift he is going back to is today, tomorrow, or the day after.
+
+   It states the gap and stops. How he spends six hours is not this app's
+   business, and §19.4's reason applies again in a different key: a warning
+   that also gives advice is one he has to disagree with rather than read. */
+const REST_SOON_DAYS = 2;
+
+function restNotes(){
+  const today = todayISO();
+  const soon = shiftDays(today, REST_SOON_DAYS);
+  return restGaps(S.shifts)
+    .filter(g => isShortRest(g.mins) && g.b.date >= today && g.b.date <= soon)
+    .map(({ a, b, mins: m }) => {
+      const side = sh => {
+        const co = coById(sh.companyId);
+        return `${co ? co.name : 'Unassigned'} ${fmtTime(sh.start)}\u2013${fmtTime(sh.end)}`;
+      };
+      return `Heads up: only ${fmtDur(m)} off ${onDay(b.date)}, between ` +
+             `${side(a)} and ${side(b)}.`;
+    });
+}
+
 function renderHorizon(){
   const wrap = $('#horizon');
   if(!wrap) return;
@@ -596,11 +627,12 @@ function renderHorizon(){
   const notes = horizonNotes();
   const bad = clashNotes();
   const stale = staleNotes();
-  wrap.hidden = !(notes.length || bad.length || stale.length);
+  const rest = restNotes();
+  wrap.hidden = !(notes.length || bad.length || stale.length || rest.length);
   // Worst first, and the order is by what it costs. A double booking is a
   // shift he is going to miss. A stale calendar is a shift he has, whose alarm
-  // will not fire or will fire at the wrong time. A short horizon is only a
-  // job to do.
+  // will not fire or will fire at the wrong time. A short rest is a shift he
+  // will work tired. A short horizon is only a job to do.
   bad.forEach(t => {
     const p = el('p','flag horizon clash');
     p.textContent = t;
@@ -609,6 +641,11 @@ function renderHorizon(){
   stale.forEach(n => {
     const p = el('p', 'flag horizon' + (n.late ? ' late' : ''));
     p.textContent = n.text;
+    wrap.appendChild(p);
+  });
+  rest.forEach(t => {
+    const p = el('p','flag horizon rest');
+    p.textContent = t;
     wrap.appendChild(p);
   });
   notes.forEach(n => {
@@ -635,6 +672,17 @@ function renderSchedule(){
 
   // Worked out over every shift on file, not week by week and not day by day:
   // a clash does not respect either boundary.
+  // The rest note in the week list, on the shift he comes back to. Worked out
+  // over every shift on file for the same reason the clashes are: the shift
+  // before a Monday morning is a Sunday night, and the two are in different
+  // week blocks.
+  const rests = new Map();
+  restGaps(S.shifts).filter(g => isShortRest(g.mins)).forEach(({ a, b, mins: m }) => {
+    const co = coById(a.companyId);
+    rests.set(b.id, { after: `${co ? co.name : 'a shift'} ${fmtTime(a.start)}\u2013${fmtTime(a.end)}`,
+                      mins: m });
+  });
+
   const clashes = new Map();
   clashPairs(S.shifts).forEach(({ a, b, mins: m }) => {
     const name = sh => {
@@ -704,6 +752,13 @@ function renderSchedule(){
         const hit = clashes.get(s.id);
         if(hit) col.appendChild(el('div','gapwarn',
           `Overlaps ${hit.other} by ${fmtDur(hit.mins)}. He cannot work both.`));
+
+        // Not the red the clash gets (§25). This is a fact about the shift,
+        // not a fault in it, and colouring it like a fault is how the one
+        // line that means something gets scrolled past.
+        const rst = rests.get(s.id);
+        if(rst) col.appendChild(el('div','restline',
+          `Only ${fmtDur(rst.mins)} off after ${rst.after}.`));
       });
       row.appendChild(col);
       box.appendChild(row);
@@ -1675,6 +1730,13 @@ function renderReview(){
 function buildICS(only){
   const now = icsStamp();
   const leads = (S.settings.leads || []).filter(n => n > 0);
+  // §25's alarm, and the one place in this file that has to look outside the
+  // list it was handed. Rest is a property of a *pair*, and in manual-import
+  // mode `only` is the shifts not sent before — so the shift on the other side
+  // of the gap is routinely not in it. Worked out over the whole store.
+  const rests = new Map();
+  restGaps(S.shifts).filter(g => isShortRest(g.mins))
+                    .forEach(g => rests.set(g.b.id, g.mins));
   const L = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Shift Deck//EN','CALSCALE:GREGORIAN',
              'METHOD:PUBLISH','X-WR-CALNAME:Work Schedule'];
   only.forEach(s => {
@@ -1700,7 +1762,8 @@ function buildICS(only){
       // with nothing to say whose shift it is, and two jobs' worth of those
       // on one calendar is unreadable.
       fold('SUMMARY:' + icsEscape(title)),
-      fold('DESCRIPTION:' + icsEscape(`${fmtDur(durMins(s))} scheduled`)));
+      fold('DESCRIPTION:' + icsEscape(`${fmtDur(durMins(s))} scheduled`
+        + (rests.has(s.id) ? `\nOnly ${fmtDur(rests.get(s.id))} off before this one.` : ''))));
     // An address here is a tappable link to a map. The two-hour alarm fires,
     // he taps the event, taps the address, and he is navigating.
     if(s.place) L.push(fold('LOCATION:' + icsEscape(s.place)));
@@ -1709,6 +1772,18 @@ function buildICS(only){
         fold('DESCRIPTION:' + icsEscape(title)),
         `TRIGGER:-PT${h}H`, 'END:VALARM');
     });
+    // It fires as the shift before it ends, not on the morning of this one.
+    // The gap here is 08:00 to 15:00 as often as not, and a notice that
+    // arrives at 09:00 reaches him driving home off a twelve-hour night with
+    // the decision already made. At the clock-out he is awake and can still
+    // choose what to do with the afternoon.
+    const rest = rests.get(s.id);
+    if(rest){
+      const rh = Math.floor(rest / 60), rm = rest % 60;
+      L.push('BEGIN:VALARM','ACTION:DISPLAY',
+        fold('DESCRIPTION:' + icsEscape(`Heads up: only ${fmtDur(rest)} off between shifts.`)),
+        `TRIGGER:-PT${rh}H${rm ? rm + 'M' : ''}`, 'END:VALARM');
+    }
     L.push('END:VEVENT');
   });
   L.push('END:VCALENDAR');

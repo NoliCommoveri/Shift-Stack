@@ -374,11 +374,94 @@ function clashPairs(shifts){
   return out.sort((x, y) => y.mins - x.mins);
 }
 
+/* ---------- rest between shifts (§25) ------------------------------------
+   How long he is off between one shift and the next, and whether that is a
+   length worth saying out loud.
+
+   §19 deleted a turnaround warning and the reason it did has to be answered
+   before anything here is allowed to exist. That one fired on any two shifts
+   under an hour apart, which for these two jobs is the ordinary week — he goes
+   straight from one to the other — so it fired constantly on nothing and
+   taught him to scroll past the line that also carries the double-booking.
+
+   This is not that warning re-tuned, and the difference is which case is
+   silent. Under two hours he is not going home at all; that is the case §19
+   killed and it stays killed. Over eight there is a night's sleep in it and
+   nothing to say. What is left is the band in between, where he is home, and
+   whether he knows it before he gets there decides whether he sleeps four
+   hours on purpose or wakes up with ninety minutes left.
+
+   The message states the gap and stops. It proposes nothing — how he spends
+   six hours is not this app's business, and a warning that gives advice is one
+   he has to disagree with rather than read.
+
+   Absolute timeline again, for §19.2's reason: Trupoint runs 19:15-07:15 and
+   00:15-08:15, so the rest that matters is nearly always measured across
+   midnight and a check that worked inside a date could not see it.
+   -------------------------------------------------------------------- */
+
+/* Under REST_MIN he is not coming home; over REST_MAX there is a night in it.
+   Both are the human's numbers rather than derived ones, which is why they are
+   stated here and not computed from a sleep figure somewhere else. */
+const REST_MIN_MINS = 120;
+const REST_MAX_MINS = 480;
+
+/* The band, as a predicate, so the two places in the app that ask cannot
+   drift apart on the boundaries. Inclusive at the bottom, exclusive at the
+   top: exactly two hours is worth saying, exactly eight is not. */
+function isShortRest(mins){
+  return Number.isFinite(mins) && mins >= REST_MIN_MINS && mins < REST_MAX_MINS;
+}
+
+/* Every stretch of time off between consecutive shifts, in order.
+
+   Two things stop this being a sort and a subtraction.
+
+   **The previous shift is not the one before it in the list.** A shift wholly
+   inside another — which happens, and is separately flagged as a clash — would
+   otherwise end the pair early and report a rest that includes hours he is
+   still at work. So the sweep carries the furthest end reached so far, not the
+   end of the last shift started.
+
+   **A shift nobody can read breaks the chain.** A row with a date and no
+   usable times has no place on the timeline, and skipping over it would join
+   the shifts either side and measure a gap with a shift sitting in it. The
+   number would be wrong and it would name the wrong two shifts, so no gap is
+   reported across a day holding one. That is a silence about something real,
+   which is the right way round: the row is already flagged and asking to be
+   completed. */
+function restGaps(shifts){
+  const spans = [], murky = new Set();
+  (shifts || []).forEach(s => {
+    const sp = absSpan(s);
+    if(sp) spans.push({ shift: s, from: sp.from, to: sp.to });
+    else { const d = dayNum(s && s.date); if(d !== null) murky.add(d); }
+  });
+  spans.sort((a, b) => a.from - b.from || a.to - b.to);
+
+  // A gap is unreadable if any day holding an unplaceable shift touches it.
+  const readable = (from, to) => ![...murky].some(d => d * 1440 < to && (d + 1) * 1440 > from);
+
+  const out = [];
+  let prev = spans[0];
+  for(let i = 1; i < spans.length; i++){
+    const next = spans[i];
+    const mins = next.from - prev.to;
+    // Zero is a handover and negative is a clash. Neither is time off, and the
+    // clash has its own warning that says something this one must not muddy.
+    if(mins > 0 && readable(prev.to, next.from))
+      out.push({ a: prev.shift, b: next.shift, mins });
+    if(next.to > prev.to) prev = next;
+  }
+  return out;
+}
+
 /* Node picks these up for the tests; the browser just gets the globals. */
 if(typeof module !== 'undefined' && module.exports){
   module.exports = { PAT_FLAG, SNAP_MINS, FLIP_MINS, MIN_SHIFT_MINS, MAX_SHIFT_MINS,
                      clockGap, spanMins, validPatterns, patternsFor, endFit,
                      checkShift, suggestPatterns,
                      isoFromDayNum, dowOf, weekDates, generateWeek, canGenerate,
-                     dayNum, absSpan, clashMins, findClashes, clashPairs };
+                     dayNum, absSpan, clashMins, findClashes, clashPairs,
+                     REST_MIN_MINS, REST_MAX_MINS, isShortRest, restGaps };
 }
