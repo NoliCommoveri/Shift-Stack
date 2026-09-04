@@ -302,9 +302,12 @@ They are two tables because once a week has overtime in it they foot to
 different figures — 42 hours of $18.00 work is $756 of hours and $774 of pay —
 and one column carrying both is a column you will add up wrong.
 
-On a week paid at more than one rate the regular rate is the weighted average,
-and the modal says so, along with the fact that it is carried at full precision
-— multiplying the rounded figure by the hours can land a cent or two out. A
+On a week paid at more than one rate the regular rate is a weighted average,
+marked `avg` in the cell because it is carried at full precision and so does
+not multiply out to the cent at the two decimals it is shown to. Where such a
+week has overtime, a line underneath explains that the overtime is time and a
+half *of that average* — not of whichever rate the last shift happened to be
+paid at — which is what an employer paying two rates in one week has to do. A
 week with hours at no rate anywhere is shown differently again: the priced
 hours, the overtime premium on top of them, and the unpriced hours named and
 left out of the money, because pricing them at the average would be inventing

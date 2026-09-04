@@ -3676,13 +3676,23 @@ up would be inventing a rate — the one thing §27.10 says this never does. Tha
 week is shown the way the arithmetic actually ran instead: priced hours, the
 premium on top, and the unpriced hours named and left out of the money.
 
-Two smaller things the modal says out loud. A week with no overtime says so
-rather than dropping the row, because a missing row reads as a figure that
-failed to load. And a mixed week says that its regular rate is a weighted
-average carried at full precision — 28.00 h at $14.14 multiplies out to
-$395.92 and the pay says $396.00, and on a screen built for reconciling
-against a deposit, eight cents he cannot account for is worse than a
-sentence.
+A week with no overtime says so rather than dropping the row, because a
+missing row reads as a figure that failed to load rather than as the answer to
+"how much of this was overtime".
+
+The averaging is explained only on weeks that have overtime in them. On a
+mixed week the regular rate is a weighted average carried at full precision,
+so the row does not multiply out at the two decimals it is printed to —
+28.00 h at $14.14 reads as $395.92 against a stated $396.00 — and on a screen
+built for reconciling against a deposit, eight cents he cannot account for is
+worse than a sentence. That sentence was first printed on every mixed week,
+and on one with no overtime it was a paragraph about a row that is not on the
+screen: it opens on "the regular rate", which is a term that exists to work
+out overtime, under a table that says there was none.
+
+So the cents are answered where they occur, by one word in the cell —
+`$14.14 avg` — and the paragraph is kept for the week that has an overtime
+line to justify it, where it explains that line as well as the rounding.
 
 Two things stayed in the column, because they are not arithmetic: the
 unconfirmed-hours note (§20.4) and the hours-at-no-rate note. Both are about

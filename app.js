@@ -1243,11 +1243,18 @@ function payDetail(co, ws, shifts){
     payRows = `<tr><td>No rate set anywhere</td><td class="n">${hrs(w.hrs)}</td>
       <td class="n">–</td><td class="n">–</td></tr>`;
   } else if(!w.unratedHrs){
+    // On a mixed week the regular rate is a weighted average carried at full
+    // precision, so the row does not multiply out at the two decimals it is
+    // printed to — 28.00 h at $14.14 reads as $395.92 against a stated
+    // $396.00. That used to be a paragraph underneath, which put an
+    // explanation of averaging on weeks that had nothing to average against.
+    // One word in the cell says it where the number is.
+    const avg = w.mixed ? '<span class="tiny soft"> avg</span>' : '';
     const base = w.hrs - w.ot;
     payRows = `<tr><td>Regular</td><td class="n">${hrs(base)}</td>
-        <td class="n">${money(w.rate)}</td><td class="n">${money(base * w.rate)}</td></tr>`
+        <td class="n">${money(w.rate)}${avg}</td><td class="n">${money(base * w.rate)}</td></tr>`
       + (w.ot > 0.005 ? `<tr><td>Overtime</td><td class="n">${hrs(w.ot)}</td>
-        <td class="n">${money(w.rate * mult)}</td>
+        <td class="n">${money(w.rate * mult)}${avg}</td>
         <td class="n">${money(w.ot * w.rate * mult)}</td></tr>` : '');
   } else {
     payRows = `<tr><td>Hours with a rate</td><td class="n">${hrs(w.hrs - w.unratedHrs)}</td>
@@ -1268,21 +1275,15 @@ function payDetail(co, ws, shifts){
     notes.push(+co.otAfterHrs > 0
       ? `No overtime — the week did not reach the ${+co.otAfterHrs} h this job counts from.`
       : 'No overtime, because this job has no threshold set. Setup takes one.');
-  // Said on every mixed week, not only the ones with overtime in them. The
-  // regular rate on the pay table is a weighted average carried at full
-  // precision, so the row does not multiply out at the two decimals it is
-  // printed to — 28.00 h at $14.14 reads as $395.92 and the pay says $396.00.
-  // On a screen built for reconciling a figure against a deposit, eight cents
-  // he cannot account for is worse than a sentence.
-  if(w.mixed)
-    notes.push(`The regular rate is the ${money(w.rate)} weighted average of the hours above, ` +
-      'and the pay is worked out from the exact average — multiplying the rounded figure ' +
-      'by the hours can land a cent or two out.' +
-      (w.ot > 0.005
-        ? ` Overtime is ${mult}× that average, not ${mult}× whichever rate the last shift ` +
-          'of the week happened to be paid at. That is what an employer paying two rates in ' +
-          'one week has to do, and it means the answer does not move when a shift moves.'
-        : ''));
+  // Only where there is overtime to explain. How a mixed week's overtime is
+  // averaged is a fact about overtime, and on a week that has none it was a
+  // paragraph about a row that is not on the screen.
+  if(w.mixed && w.ot > 0.005)
+    notes.push(`Overtime is ${mult}× the ${money(w.rate)} weighted average of the hours above, ` +
+      `not ${mult}× whichever rate the last shift of the week happened to be paid at. That is ` +
+      'what an employer paying two rates in one week has to do, and it means the answer does ' +
+      'not move when a shift moves. The average is carried at full precision, so multiplying ' +
+      'the rounded figure by the hours can land a cent or two out.');
   if(assumed.hrs)
     notes.push(`${hrs(assumed.hrs)} h of this came from the rota and nothing has confirmed it. ` +
       'A screenshot of the week confirms it.');
