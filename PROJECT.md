@@ -1,6 +1,13 @@
 # Shift Deck — project state
 
-_Last updated 5 September 2026_ — §42 turns the title round: job, site, role,
+_Last updated 5 September 2026_ — §44 puts a **Confirm all** button in the
+banner that reports a week filled from the rota, because saying "yes, that is
+what I worked" should not cost one dialog per shift.
+§43 reorders the nav bar to Pay before Add and sets it a size up, and takes the
+calendar-file box, **Fetch from a link** and **Paste calendar text** off the Add
+screen — three doors onto a path the Worker's cron has walked on its own since
+§14.
+§42 turns the title round: job, site, role,
 on the calendar and on every screen, because the place is the half worth
 keeping when a line is cut short.
 §39 puts each job's colour on its own events,
@@ -4946,3 +4953,176 @@ rule outright: the label goes in as `role | place` and the title comes out as
 `place | role`, with the single-half cases asserted alongside so the fallbacks
 cannot drift with it. `feed.js` and `ics.js` needed no changes — the writer
 takes the title from `eventTitle` and the reader never sees one.
+
+---
+
+## 43. Changed: the nav bar, and three doors that led nowhere, 5 September 2026
+
+Two small things Ray asked for in one breath, both about the Add screen and the
+bar under it.
+
+### 43.1 Pay before Add
+
+The bar is `Schedule · Pay · Add · Setup` where it was `Schedule · Add · Pay ·
+Setup`. It is a `repeat(4,1fr)` grid, so the order is the order the buttons are
+written in and nothing else moved; `b.dataset.tab` is what the click handler
+reads, so no wiring knows or cares which slot a button sits in.
+
+The order it should have been in from the start. Adding shifts is the thing he
+does once a fortnight when a rota lands; checking what a week paid is the thing
+he does on the way home. The two tabs he opens most are now the two ends of the
+bar, which are also the two easiest to hit with a thumb.
+
+### 43.2 A size up
+
+`nav button` goes from `.85rem` to `.95rem`, padding `.85rem` to `.95rem` with
+it. `.85rem` was the body's own small-text size, which is why it read as a
+caption rather than as a control — the only four controls on screen at all
+times were set in the type reserved for asides.
+
+The padding moves with the size deliberately: it is what puts each button over
+the ~44px both platforms ask of a touch target, on a phone held one-handed in a
+car park at 05:00. Nothing else in the bar changed, and it is the only rule in
+the file that had to.
+
+### 43.3 The calendar-file pathways are gone
+
+Off the Add screen: the *"Add a calendar file"* drop box, the `#icspick` input
+behind it, **Fetch from a link**, **Paste calendar text**, and the `<details>`
+explaining how to get an .ics out of Homebase and Google Calendar. `fetchCalendar`
+went with the button that was its only caller.
+
+Three doors onto one path, and the path is one Ray has never walked. **Fetch
+from a link** could not work and was documented as not working in its own help
+text: Google's iCal addresses send no CORS headers, the browser refuses to hand
+the page the response, and the function spent its whole life printing an
+apology for a failure it could not distinguish from being offline. §14 is what
+replaced it — the Worker fetches `env.ICS_URL` server-side on a cron, where
+CORS is not a rule that applies, and nothing has to be tapped at all.
+
+What is left on the screen is what he actually does: screenshots, the rota, one
+by hand.
+
+### 43.4 What was kept, and why it is not on the screen
+
+`handleFiles` still splits its input by extension and sends an `.ics` to
+`readCalendarText`, so a calendar file dropped on the **screenshot** box is
+still read exactly as it was. `readCalendarFiles`, `readCalendarText` and
+`ics.js` are all untouched — the Worker's importer is the same reader, and the
+golden fixtures still test it.
+
+That is the right shape for a path nobody uses: a fallback with no promise on
+the screen. It costs nothing to keep, it is the only way back in if the Worker
+is down, and it does not spend a line of the Add screen advertising itself.
+
+`S.settings.icsUrl` was written only by `fetchCalendar` and is now written
+nowhere. It stays in `SETTINGS_PRIVATE` regardless: a store restored
+from an older backup can still be carrying one, and a secret calendar address
+is not a thing to start writing into an export file on the technicality that
+nothing sets it any more.
+
+---
+
+## 44. Built: a week from the rota, confirmed from its banner, 5 September 2026
+
+> *filled from the rota to Fri 12 Sep — 5 shifts, none confirmed yet.
+> A screenshot of that week confirms them.* **[ Confirm all 5 ]**
+
+Ray: *"opening each to save is silly."* It was.
+
+### 44.1 The friction, and what it cost
+
+`isProposed(s)` is `s.source === 'pattern'`, and the only thing that had ever
+cleared it was line 2603 — `if(isProposed(s)) s.source = 'manual'` — on the way
+*out of the edit dialog*. So a rota that filled a week wrote five proposals and
+confirming them meant opening five dialogs and pressing Save five times, to
+answer one question the banner above had already asked him.
+
+That is not merely tedious, it is self-defeating: the app has a *second* banner
+whose whole job is to complain that shifts in the last fortnight came from the
+rota and were never confirmed. The friction in the first banner is what
+produces the state the second one exists to report. A week goes unconfirmed
+because saying so cost five dialogs, and then the app tells him off for it.
+
+### 44.2 `confirmProposals`, and the two lines that are not obvious
+
+```js
+going.forEach(s => { s.source = 'manual'; });
+restamp(s => ids.has(s.id));
+```
+
+The first line is the whole feature. The second is the part inherited from the
+edit dialog's own reasoning, and it is easy to leave out:
+
+`feedICS` marks a proposal's event *"(from the rota)"*. Confirming therefore
+changes the `SUMMARY` of an event a phone may already be holding, and §22 is
+blunt about what happens to a rewrite at an equal `SEQUENCE` — a calendar is
+free to ignore it. `restamp()` bumps the sequence and clears `sent`, which is
+what makes it a *newer* revision rather than a suggestion (§26.7). A shift that
+was never sent has nothing to revise and `restamp` leaves it alone.
+
+Times, records and pay are untouched. Confirming says the assumption was
+right; it does not claim to know anything the rota did not.
+
+### 44.3 The predicate, not the company
+
+The button carries a `pred` built from the exact ids the sentence counted:
+
+```js
+const ids = new Set(proposed.map(s => s.id));
+act: { label: `Confirm all ${proposed.length}`, pred: s => ids.has(s.id) }
+```
+
+Not "every proposal for this job". The two banners on one job select different
+shifts — one looks ahead, one looks back fourteen days — and a button that
+confirmed by company would have the forward banner silently confirming last
+fortnight's as well. Confirming the set the sentence just described is the
+only behaviour a person reading it can predict.
+
+### 44.4 The second banner asks first
+
+The past-fortnight note gets the same button and a `confirm()` in front of it.
+The difference is not squeamishness about a click: the forward banner is about
+a week still ahead, which the next screenshot corrects for free. The backward
+one is about nights that have already been worked or not, where confirming is
+a statement about money that has been earned — the hours stop being counted as
+assumptions in `weekTotals`, and the pay screen stops hedging them.
+
+### 44.5 Inline, and only where there is something to press
+
+`.horizon .doit` is a bordered button in `currentColor` at `.78rem`, appended
+after the sentence rather than given its own row. It inherits the banner's
+colour, so it is quiet in the fed banner and carries the warning colour in the
+other, with no rule of its own for either.
+
+A full-width button under a note set this quietly would outweigh the note. And
+a note with no `act` gets no button — most of them describe a state there is
+nothing to press about, and the ones that do are the point of §44.
+
+### 44.6 What is tested
+
+In `browser.test.js`, because the button does not exist outside a loaded page —
+`renderHorizon` builds it out of `S`, and a unit test could reach
+`confirmProposals` and prove none of what matters. The bugs worth catching are
+a banner that says four and confirms three, and one that confirms them and goes
+on saying four.
+
+So the test seeds two proposals and one already-manual shift, asserts the label
+reads `Confirm all 2`, clicks it, and then asserts all three ways it could be
+wrong: every source is `manual`, only the proposal that had been `sent` went up
+a `SEQUENCE`, and the banner redrew without the button — which is the assertion
+that the state the sentence described is actually gone.
+
+### 44.7 The shell, for all three of these
+
+`SHELL` goes to `v14` (§37's lesson, fourth time). §42, §43 and §44 are four
+things Ray asked for and will go looking for on the phone, and a release
+someone is waiting to see is the definition of one that has to arrive on the
+next load rather than the one after. `RUNTIME` is untouched, as always — it
+carries the OCR engine and the fonts, and bumping it costs a 10MB re-download
+to deliver a reordered nav bar.
+
+The one thing still owed is from §42 and is on the phone rather than in the
+repo: shifts already marked `sent` keep the old role-first title until the
+calendar is cleared and **Rebuild the whole calendar** is run from Setup
+(§42.4). Nothing in §43 or §44 needs anything done to it by hand.

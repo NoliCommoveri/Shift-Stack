@@ -6,11 +6,12 @@
    entirely (§14.4) — there is no preflight handler and no origin allowlist
    because there is no cross-origin request to make.
 
-   The import half is the reason this exists. `fetchCalendar` in the page
-   fails permanently on Google's iCal addresses because they send no CORS
-   headers; CORS is a rule browsers apply to themselves, and nothing here is
-   a browser. The reader that runs against that fetch is ics.js unmodified,
-   the same file the golden fixtures already test.
+   The import half is the reason this exists. Fetching an employer's feed from
+   the page failed permanently on Google's iCal addresses because they send no
+   CORS headers; CORS is a rule browsers apply to themselves, and nothing here
+   is a browser. §43 removed the page's attempt at it altogether, so this is
+   now the only way in for a calendar feed. The reader that runs against the
+   fetch is ics.js unmodified, the same file the golden fixtures already test.
    ========================================================================== */
 
 import feedMod from '../feed.js';
