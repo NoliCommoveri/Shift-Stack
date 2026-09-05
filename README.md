@@ -610,6 +610,11 @@ npm test              # run every module's tests
 npm run test:update   # regenerate golden files, then read them before committing
 ```
 
+`tests/poll.test.js` is the one that runs a whole cron tick — the zone, the
+read, the diff and §14.6's guards, against the golden calendar and with the
+clock passed in. The Worker's own entry point cannot be required by a test, so
+the decision it takes lives in `worker/poll.js` where one can (§38).
+
 `tests/fixtures/README.md` explains how to turn a screenshot into a test case.
 Calendar feeds go in `tests/fixtures/calendar/` as `.ics` alongside their
 expected JSON, and every calendar test pins an output time zone so the answers

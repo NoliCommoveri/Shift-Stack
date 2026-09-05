@@ -183,3 +183,25 @@ test('the Worker is told a time zone at deploy time, as an IANA name', () => {
   assert.ok(!/[+-]\d/.test(zone), `ZONE must be an IANA name, not the offset ${zone}`);
   assert.doesNotThrow(() => new Intl.DateTimeFormat('en-US', { timeZone: zone }));
 });
+
+/* The cron actually goes through the tested path (§38).
+ *
+ * `poll.test.js` runs the whole decision — zone, read, diff, guard — but it
+ * runs `planPoll`, and index.js is free to stop calling it. That is not a
+ * theoretical worry: the decision lived inline in `poll()` until §38, where
+ * nothing could reach it, and three faults shipped through it in two days.
+ * Re-inlining any of it would leave a green suite and an untested cron.
+ */
+test('the cron asks poll.js what to do rather than working it out again', () => {
+  const body = bodyOf('poll');
+  assert.ok(body, 'the cron handler is still called poll');
+  assert.match(body, /planPoll\(\{ text, store, env \}\)/,
+    'poll() must hand the feed text, the store and env to planPoll');
+  // The two halves that need the outside world are the only ones left here.
+  assert.match(body, /fetch\(env\.ICS_URL/);
+  assert.match(body, /env\.DB\.batch\(writes\)/);
+  // And nothing that decides: a parse, a diff or a guard back in this file is
+  // a decision no test can see.
+  for(const gone of ['parseICS(', 'mergeCalendar(', 'guard({'])
+    assert.ok(!body.includes(gone), `${gone} belongs in poll.js, where it is tested`);
+});

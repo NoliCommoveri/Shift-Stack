@@ -4478,3 +4478,63 @@ test reads `wrangler.toml` and fails if `ZONE` is missing, is filed under the
 wrong table, or is an offset rather than an IANA name — the same three ways the
 `keep_vars` line was wrong before §14.9 found it. The browser test now drives
 all three sources through the Setup line.
+
+---
+
+## 38. Built: the cron's decision, where a test can reach it, 5 September 2026
+
+Three faults reached the phone in two days — §35's hour, §36's missing role,
+§37's zone that only travelled by push — and the suite was green through all of
+them. They have one thing in common: every one lived inside `poll()`.
+
+`worker/index.js` cannot be required by a Node test. It is ESM, it imports
+`schema.sql` as text, and every path through it wants a D1 binding. So the
+cron's judgement — which zone, what the feed says, what would change, whether
+§14.6 will allow it — was the one part of this app with no test at all, while
+`parseICS`, `mergeCalendar` and `guard` each had a thorough one. Each module
+answered its own question correctly and nothing checked the sentence they made
+together.
+
+### `worker/poll.js`
+
+The same extraction guards.js, merge.js and feed.js each came out of.
+`planPoll({ text, store, env, at })` is a pure function: feed text in, and out
+comes the zone it used, where that answer came from, what the reader made of
+the text, what would change and the guard's refusal. `index.js` keeps the two
+halves that need the outside world — the fetch and the batch — and asks this
+what to do in between.
+
+`resolver` moved with it, which is where §36's fault was. `feedRow` moved too,
+and that one is not tidiness: the idempotence test has to build its rows the
+way the Worker builds them, and a test that built them differently would be
+testing its own arithmetic.
+
+`at` is passed in. A test whose seven-day window is counted from the real clock
+starts failing in a week for a reason that has nothing to do with the code.
+
+### What it caught, stated as tests
+
+The eleven cases in `tests/poll.test.js` are the September faults, written down
+so they cannot come back quietly:
+
+- **The hour.** The fixture's 00:15Z event lands at 19:15 the evening before,
+  which is what the raw Homebase entry says. The same feed read on
+  `America/Toronto` lands at 20:15 — the shipped bug, pinned rather than
+  described.
+- **The names.** A cron-filed row resolves to `roleId` and `siteId` and carries
+  the address in `place`, not in the label. A row neither table has heard of
+  still files under the text that was read.
+- **The repair.** Two polls with the zone corrected between them: no additions,
+  no removals, every shift replaced in place, ids kept, `seq` up by one. That
+  is the tick that fixes Ray's calendar, asserted rather than hoped about.
+- **The no-op.** Two polls of an unchanged feed: nothing added, nothing
+  replaced, everything unchanged. Cron Triggers do not retry and may
+  double-fire (§14.5).
+- **The refusals.** An empty calendar, a sign-in page, and two jobs with
+  neither ticked each come back as the reason they came back, with the last
+  good feed still standing.
+
+And one assertion in `config.test.js` keeps it honest: `poll()` must call
+`planPoll`, and must not contain a parse, a diff or a guard of its own. The
+decision moving back into a file no test can reach is exactly how this went
+untested for as long as it did.
