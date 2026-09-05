@@ -196,6 +196,81 @@ function viewOK(env, given){
 }
 
 
+/* Who may see the next seven days, and nothing else at all. PROJECT.md §46.
+
+   The kids' phone. It shows when he leaves for work and when he is home, over
+   a window that starts today and runs a week, and it must not show what any of
+   it pays.
+
+   `KIDS_TOKEN` is its credential and it opens exactly one route — `GET /soon`
+   — which is not `/read` and cannot be made into it. That distinction is the
+   whole of §46 in the same way §45's was: hiding the pay tab on a page that
+   holds `VIEW_TOKEN` hides a tab, and the phone it is hidden on can still ask
+   `/read` for every rate, every gross and every shift on file with one line
+   typed into an address bar. A child will not do that. A child's friend with
+   the phone in their hand for an afternoon might, and the answer they would
+   get is what he earns.
+
+   So the narrowing is on this side. `soonOnly` below is what `/soon` answers
+   with, and there is no rate in its output because there is no rate in the
+   shape it builds — not omitted from a template, absent from the object.
+
+   `viewOK` is accepted too, and by the same argument that lets `viewOK` accept
+   the push token: both of those already read everything this returns and more,
+   and a phone that can see the whole schedule being refused a slice of it
+   would be a rule with nothing behind it. An unset `KIDS_TOKEN` opens nothing,
+   because `tokenOK` refuses an empty expected secret (§14.9). */
+function kidsOK(env, given){
+  return viewOK(env, given) || tokenOK(env && env.KIDS_TOKEN, given);
+}
+
+/* Rolling, and starting today rather than on the week's start day. A child
+   asking "is Daddy home tomorrow" is asking about tomorrow, not about a week
+   that began on Sunday and has two days left in it. Seven days is what Ray
+   asked for; it is one number, here, rather than a literal in the page and
+   another in the route. */
+const KIDS_DAYS = 7;
+
+/* The whole of what leaves the building for the kids' phone.
+
+   A whitelist built by construction: the returned object is written out field
+   by field, so a field added to a shift later — a note, a pay code, a rate
+   cached onto the row — is withheld by default rather than leaked by default.
+   `safeSettings` is the same idea one table over, and for the same reason.
+
+   What is deliberately not here: `rate`, `otMult`, `otAfterHrs`, the break
+   rule, `weekStart`, the site address, the role, the source, the shift's id.
+   The times, the day, the job's name and the job's colour are what the page
+   draws, and they are the answer to the question the page exists for.
+
+   Pure, and separate from the route for the reason everything in this file is:
+   the rule about what a child may see should be assertable by a test with no
+   database and no network behind it. */
+const KIDS_HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function soonOnly(shifts, companies, today, days = KIDS_DAYS){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(today || ''))) return [];
+  const last = shiftISO(today, Math.max(1, days) - 1);
+  const named = new Map((companies || []).filter(c => c && c.id).map(c => [c.id, c]));
+
+  return (shifts || [])
+    .filter(s => s && /^\d{4}-\d{2}-\d{2}$/.test(String(s.date))
+              && KIDS_HHMM.test(String(s.start)) && KIDS_HHMM.test(String(s.end)))
+    .filter(s => s.date >= today && s.date <= last)
+    .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start))
+    .map(s => {
+      const co = named.get(s.companyId);
+      return {
+        date:  s.date,
+        start: s.start,
+        end:   s.end,
+        job:   co && co.name ? String(co.name) : '',
+        color: co && co.color ? String(co.color) : ''
+      };
+    });
+}
+
+
 /* The schema file, split into statements the database can be handed one at a
    time. Comments are stripped rather than used to decide what to keep: the
    first version filtered out any chunk that *began* with `--`, and every
@@ -306,4 +381,5 @@ function safeSettings(settings){
 
 module.exports = { guard, splitSQL, alarmFor, feedJob, normalizeTimezone, zoneFor, DEFAULT_ZONE,
                    todayIn, shiftISO, newestStamp, timingSafeEqual, tokenOK, viewOK,
+                   kidsOK, soonOnly, KIDS_DAYS,
                    safeSettings, SETTINGS_KEPT, resetPlan, orphanGroups, RESET_TABLES, countEvents };

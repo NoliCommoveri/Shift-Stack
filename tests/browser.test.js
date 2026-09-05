@@ -1188,3 +1188,121 @@ test('the viewer installs at its own scope and opens from the home screen', asyn
     server.close();
   }
 });
+
+
+/* ==========================================================================
+   The kids' phone. PROJECT.md §46.
+   ========================================================================== */
+
+/* The countdown, the paddings and the overnight case, in a real browser.
+ *
+ * `soonOnly` is unit-tested and is the half that keeps the pay off the phone.
+ * This is the other half: the arithmetic that turns two clock times into the
+ * two moments a child is actually asking about, which lives in `doorTimes`
+ * and cannot be reached from node — it is a page script, in a page with no
+ * modules.
+ *
+ * The case that earns the test is the overnight shift. 19:00 to 07:00 gets
+ * home at 07:30 the *following* morning, and a page that added thirty minutes
+ * to 07:00 on the shift's own date would tell a child their father was home
+ * twelve hours before he was, on a screen built to be believed without being
+ * read carefully.
+ */
+test('the kids’ page counts to the door, not to the shift', async (t) => {
+  const browser = await open();
+  if(!browser) return t.skip('no Playwright browser available');
+
+  try {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    page.on('console', m => {
+      if(m.type() === 'error' && !/ERR_|service worker|Failed to load resource/i.test(m.text()))
+        errors.push(m.text());
+    });
+
+    await page.goto('file://' + path.join(ROOT, 'kids.html'));
+    await page.waitForFunction(() => typeof K === 'object' && K !== null, null, { timeout: 15000 });
+
+    // Nothing but the door until a code works, and the door is one field.
+    const shut = await page.evaluate(() => ({
+      gate: !document.getElementById('tab-gate').hidden,
+      week: document.getElementById('tab-week').hidden,
+      // app.js and view.js are not loaded here and must not be.
+      app: typeof S, viewer: typeof V,
+      // Nor is the arithmetic that prices an hour. This is §46 in one line.
+      pay: typeof weekPay, paid: typeof paidMins, rate: typeof rateFor
+    }));
+    assert.deepEqual(shut, { gate: true, week: true, app: 'undefined', viewer: 'undefined',
+                             pay: 'undefined', paid: 'undefined', rate: 'undefined' });
+
+    // The two paddings, on a shift at a fixed hour, read off the page's own
+    // functions rather than recomputed here.
+    const doors = await page.evaluate(() => {
+      const hm = d => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+      const day = d => d.toISOString().slice(0, 10);
+      const a = doorTimes({ date: '2026-09-09', start: '06:00', end: '14:30' });
+      const b = doorTimes({ date: '2026-09-09', start: '19:00', end: '07:00' });
+      return { aLeave: hm(a.leave), aHome: hm(a.home),
+               bLeave: hm(b.leave), bHome: hm(b.home),
+               bHomeDay: day(new Date(b.home.getTime() - b.home.getTimezoneOffset() * 60000)) };
+    });
+    assert.equal(doors.aLeave, '05:15', '45 minutes before a 06:00 start');
+    assert.equal(doors.aHome, '15:00', '30 minutes after a 14:30 end');
+    assert.equal(doors.bLeave, '18:15');
+    assert.equal(doors.bHome, '07:30');
+    assert.equal(doors.bHomeDay, '2026-09-10', 'an overnight shift gets home the next morning');
+
+    // The banner, in the three states that matter, against a clock this test
+    // controls. `kBannerState` takes `now` for exactly this reason.
+    const said = await page.evaluate(() => {
+      const at = t => new Date(`2026-09-09T${t}:00`);
+      K.today = '2026-09-09';
+      K.shifts = [{ date: '2026-09-09', start: '14:00', end: '22:00', job: 'Trupoint', color: '#2F4B7C' }];
+      const read = now => {
+        const st = kBannerState(now);
+        return { out: st.out, mins: st.when === null ? null : Math.round((st.when - now) / 60000) };
+      };
+      const empty = () => { const keep = K.shifts; K.shifts = []; const s = kBannerState(at('12:00'));
+                            K.shifts = keep; return s.when; };
+      return {
+        // Two hours before he leaves: he is home, and the countdown is to the
+        // door opening outward.
+        before: read(at('11:15')),
+        // Ten minutes after he left, and four hours before the shift ends: the
+        // countdown has already flipped to coming back. This is the state a
+        // page counting to the shift's own times would get wrong.
+        gone: read(at('13:25')),
+        // Working, and the answer is the padded end.
+        working: read(at('20:00')),
+        // Home again, with nothing else in the week.
+        after: read(at('23:00')),
+        none: empty()
+      };
+    });
+    assert.deepEqual(said.before,  { out: false, mins: 120 }, 'two hours until he leaves');
+    assert.deepEqual(said.gone,    { out: true,  mins: 545 }, 'gone at 13:15, home at 22:30');
+    assert.deepEqual(said.working, { out: true,  mins: 150 });
+    assert.deepEqual(said.after,   { out: false, mins: null }, 'nothing left in the week');
+    assert.equal(said.none, null, 'an empty week is a state, not an error');
+
+    // And the week draws seven rows whatever is in it — a day off is answered
+    // by a row that says so, not by the absence of one.
+    const week = await page.evaluate(() => {
+      kShowWeek(); kDraw();
+      return {
+        rows: document.querySelectorAll('#week .day').length,
+        off: document.querySelectorAll('#week .off').length,
+        text: document.getElementById('tab-week').innerText
+      };
+    });
+    assert.equal(week.rows, 7);
+    assert.equal(week.off, 6);
+    // The one assertion worth making about the whole screen: no money on it.
+    assert.ok(!/\$|gross|overtime|rate/i.test(week.text), `money reached the page: ${week.text}`);
+
+    assert.deepEqual(errors, [], 'the kids’ page loaded with no uncaught errors');
+  } finally {
+    await browser.close();
+  }
+});

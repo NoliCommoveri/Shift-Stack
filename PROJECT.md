@@ -5359,3 +5359,198 @@ the fourth.
 - **Editing anything at all.** A shift opens the read-only panel `showFeedShift`
   gives a feed row on the app — there, because a feed row is the employer's;
   here, because every row is somebody else's.
+
+## 46. Built: a third phone, for the kids, 5 September 2026
+
+Ray asked for the viewer again, for the children this time, with two things
+taken out and one thing put in. They must not see what any of it pays, they
+must not see the whole schedule — a rolling seven days from today is enough —
+and the top of the screen should not be a schedule at all. It should be one
+sentence: *Daddy leaves for work in 6 hours*, or *Daddy home from work in 4
+hours*, worked out from the shift's own times with a fixed padding at each end.
+
+He asked whether that was a whole other view. It is, and it is a whole other
+credential and a whole other route, which is the more important half of the
+answer and the reason this is a section rather than a commit.
+
+### 46.1 Why not the viewer with the Pay tab deleted
+
+That build takes an hour: copy `view.html`, drop the Pay tab and the nav, slice
+the week list to seven days, add the banner. It would be wrong in exactly the
+way §45.1 was about to be wrong before it was written down, and the argument
+has not changed since — only what it is protecting.
+
+`VIEW_TOKEN` opens `/read`. `/read` answers with every shift on file and with
+`cfg.companies`, and a company object carries `rate`, `otMult`, `otAfterHrs`,
+the break rule and `weekStart`. So a kids' page built on the view token is a
+phone that has been *sent* his pay and every shift he has ever worked, and is
+declining to draw them. The children will not go looking. A child's phone
+spends afternoons in other people's houses, and what is one line in an address
+bar away from anyone holding it is not "a screen without a Pay tab", it is what
+he earns.
+
+So the narrowing is on the server, as it was in §45, and it goes one step
+further down:
+
+    GET /read      →  viewOK   →  the cfg row and every shift
+    GET /soon      →  kidsOK   →  seven days of times, four fields a shift
+    POST /push     →  PUSH_TOKEN only
+    …
+
+`kidsOK` accepts `VIEW_TOKEN` and `PUSH_TOKEN` as well, by §45's own argument
+about `viewOK`: both already read everything `/soon` returns and a great deal
+more, and refusing them a slice of what they can have whole would be a rule
+with nothing behind it. `KIDS_TOKEN` on its own opens `/soon` and nothing else
+— not `/read`, which is asserted in `config.test.js` by name rather than by
+count.
+
+What `/soon` sends is built field by field in `soonOnly`, in `guards.js`, next
+to the other rules a test can run without a database:
+
+    { date, start, end, job, color }
+
+A whitelist by construction, for `safeSettings`' reason one table over: a field
+added to a shift later — a note, a pay code, a rate cached onto the row — is
+withheld by default rather than leaked by default. There is no `rate` on the
+kids' phone to hide, and `pay.js` is not loaded on it at all. That is the
+difference between a page that does not show something and a page that does not
+have it.
+
+### 46.2 The page is about a door, not about a shift
+
+The employer's times are when he clocks on and off. They are not the times the
+question is about. "When is Daddy home" is a question about the front door, and
+between the two there is a drive at each end — so the page adds them, and says
+the padded times everywhere rather than the shift's own:
+
+    LEAVE_PAD = 45   // minutes before the shift starts, he is out of the door
+    HOME_PAD  = 30   // minutes after it ends, he is back through it
+
+Hard-coded, as asked, and named once each at the top of `kids.js` rather than
+spelled into the sentences, so that changing them is one edit. Anything
+cleverer — a per-job commute, a field on the site table — is another thing to
+get wrong on a screen whose entire value is being right to within a few
+minutes.
+
+That framing is also why the banner has the states it has. It never says "his
+shift starts in ten minutes", because from this side of the front door the
+shift is not an event. There are two events, and they are the door opening
+outward and the door opening inward:
+
+- he is here, and the countdown runs to him leaving;
+- he has gone — which begins forty-five minutes *before* the shift does — and
+  the countdown runs to him coming back;
+- there is nothing in the week, and it says so.
+
+The middle state is the one a page counting to the employer's times would get
+wrong, and it would get it wrong for three quarters of an hour, twice a day,
+while a child watched a countdown to a shift that had already started tell them
+their father was still in the house.
+
+Two smaller cases, both in the browser test because neither can be reached from
+node — `kids.js` is a page script in a page with no modules:
+
+- **Overnight.** 19:00 to 07:00 is home at 07:30 the *following* morning.
+  Adding thirty minutes to 07:00 on the shift's own date says he is home
+  twelve hours before he is. The week list labels that row *next morning*.
+- **A double.** Two shifts in one day file as two rows, and the gap between
+  them can be shorter than the two paddings put together — in which case he
+  never came home, and the banner must not say he did. So "is he out" is asked
+  of every shift in the week rather than of the next one.
+
+### 46.3 How long it says
+
+Precise under three hours, rounded above it. "In 2 hours 15 min" is the range
+where the difference between that and two and a half hours is the difference
+between going out to play and not; "in about nine hours" is the true answer to
+a question asked at bedtime, and "in 8 hours and 47 minutes" is a false
+precision about a man who still has to drive home.
+
+### 46.4 Whose today the week starts on
+
+The window is `[today, today + 6]` and it is closed twice: once in SQL, so the
+rest of the schedule is never read out of D1 at all — `date` is a column and
+§14.3 put an index on it — and once in `soonOnly`, which is the half a test
+without a database can run. Neither is redundant. The SQL is what keeps the
+rest of his year out of the Worker's memory; the pure function is what anything
+can check.
+
+`today` is his, not the Worker's. A Worker runs on UTC, and a child opening
+this after seven in the evening in Chicago is already inside the Worker's
+tomorrow: a window computed on UTC would drop this evening's shift off the
+front of the list and show a day at the far end that has not arrived. So it
+goes through `zoneFor` and `todayIn`, exactly as the cron's own window does
+(§35, §37) — the job's zone if it has one, the deploy-time `ZONE` if not.
+
+### 46.5 What it does not load
+
+`kids.html` loads `app.css` and `kids.js`, and that is the whole list. Not
+`app.js`, not `view.js`, and not `parser.js`, `ics.js`, `patterns.js`,
+`holidays.js`, `sites.js`, `merge.js`, `feed.js` or — the one that matters —
+`pay.js`.
+
+That is a departure from §45, which shares everything precisely so that a week
+drawn on the viewer is the week drawn on the app. The reason it does not apply
+here is that this page draws none of the same things. There is no week list, no
+pay table, no warning band, no dialog; there is a sentence and seven rows. The
+four lines of date arithmetic it needs are four lines. Importing a hundred
+kilobytes of OCR and calendar-writing to get them, onto a phone that shows a
+countdown, would be paying the sharing cost with none of the sharing benefit.
+
+The palette is still shared, for §45.3's reason: three pages drawing from three
+copies of one stylesheet is three schedules that look slightly different inside
+a month.
+
+### 46.6 A third worker, a third scope
+
+`sw.js` holds `/`, `view-sw.js` holds `/view`, `kids-sw.js` holds `/kids`. Each
+sits at the root because a script may only claim a scope at or below its own
+directory, each deletes only caches whose names begin with its own prefix, and
+each has its own IndexedDB — `shiftdeck`, `shiftdeck-view`, `shiftdeck-kids`.
+`config.test.js` asserts all three names are distinct in one place, because the
+failure is silent: two workers sharing a cache prefix delete each other's
+shells on every activation, and the symptom is two apps that reinstall
+themselves from the network on every launch.
+
+`/soon` is never cached by the worker, for §45's reason one page along:
+`kids.js` keeps the last answer in IndexedDB, which is a cache that knows how
+old it is and has a line on the screen for saying so. A second copy in the
+Cache API would be handed back to a `fetch` that believes it reached the
+server, and being confidently out of date is the only failure this page can
+have.
+
+### 46.7 The quiet line
+
+§45's as-of line, with the middle state dropped. The viewer distinguishes fresh
+from stale from cold because the person holding it can go and do something
+about stale. A child cannot, so there are two states: nothing, and — past
+twelve hours, off the same cron — *this has not heard from the schedule in a
+while, so it may be wrong. Ask a grown-up.*
+
+It is there for the same reason it is on the viewer. With no way to add a
+shift, an empty week and a fetch that failed on Tuesday look identical on the
+screen, and the second one is the failure this project exists to prevent.
+
+### 46.8 Handing the code over
+
+`/kids#t=THECODE`, read once and taken straight back out of the address bar,
+which is §45.8 unchanged. It matters slightly more here: this is the phone that
+gets handed around a back seat, and the hash is the half of a link that
+survives being screenshotted. There is a paste field behind it for a code sent
+as text, labelled "Code" rather than "View token", because of who is reading it.
+
+`KIDS_TOKEN` is the fifth secret in the one dashboard panel. `app.js` was left
+alone again — a helper that built the link would put the kids' code on the
+phone with the fewest uses for it.
+
+### 46.9 What was left out
+
+- **The pay tab.** The ask, and the reason for `/soon`.
+- **Everything before today, and everything after next Saturday.** Also the
+  ask. A child looking at a month of a parent's shifts is a different thing
+  from a child looking at the week, and only one of them was wanted.
+- **The site, the address, the role, and which of the two apps a shift came
+  from.** None of it answers the question the page is for, and all of it would
+  have had to be sent to be hidden.
+- **A tap target of any kind.** There is no shift panel here. A row is not a
+  door to anything; it is the answer.

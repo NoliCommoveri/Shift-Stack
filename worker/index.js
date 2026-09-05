@@ -26,7 +26,8 @@ import schemaSQL from './schema.sql';
 const { feedICS } = feedMod;
 const { planPoll, feedRow } = pollMod;
 const { alarmFor, feedJob, zoneFor, newestStamp, tokenOK, splitSQL,
-        safeSettings, resetPlan, orphanGroups, countEvents, viewOK } = guardsMod;
+        safeSettings, resetPlan, orphanGroups, countEvents, viewOK,
+        kidsOK, soonOnly, KIDS_DAYS, todayIn, shiftISO } = guardsMod;
 
 const JSON_HEAD = { 'content-type': 'application/json; charset=utf-8' };
 const nowISO = () => new Date().toISOString();
@@ -295,6 +296,46 @@ async function readAll(env){
   });
 }
 
+/* What the kids' phone gets. PROJECT.md §46.
+
+   `readAll` above hands back the store: every shift on file and the companies
+   with their rates on them. This hands back a week of times and four fields a
+   shift, and it is a separate function rather than a filter applied to that
+   one because the difference between the two is the entire safety property of
+   §46. A `/read` with a parameter would be one forgotten branch away from
+   answering a child's phone with his gross.
+
+   The window is closed twice. Once in SQL, so the rows outside it are never
+   read out of D1 at all — `date` is a column, and `shifts_by_date` is the
+   index §14.3 put on it. Once again in `soonOnly`, which is the half a test
+   without a database can run. Neither is redundant: the SQL is what keeps the
+   rest of the schedule out of the Worker's memory, and the pure function is
+   what anything can check.
+
+   `today` is his day, not the Worker's. A Worker runs on UTC, and a child
+   opening this at seven in the evening in Chicago is five hours into the
+   Worker's tomorrow — a window computed on UTC would drop today's evening
+   shift off the front and show a day at the far end that has not arrived. So
+   it goes through `zoneFor`/`todayIn`, exactly as the cron's own window does
+   (§35, §37): the job's zone if it has one, the deploy-time `ZONE` if not. */
+async function readSoon(env){
+  if(!(await tablesExist(env)))
+    return json({ needsSetup: true, today: null, days: KIDS_DAYS, shifts: [], at: nowISO() });
+
+  const cfg = await readCfg(env) || {};
+  const { zone } = zoneFor(feedJob(cfg.companies || []), env);
+  const today = todayIn(zone);
+  const last = shiftISO(today, KIDS_DAYS - 1);
+
+  const rows = await readShifts(env, 'WHERE date >= ? AND date <= ?', [today, last]);
+  return json({
+    today,
+    days: KIDS_DAYS,
+    shifts: soonOnly(rows, cfg.companies || [], today),
+    at: nowISO()
+  });
+}
+
 /* The poll ring buffer and the current counts, for the app's Setup screen.
    §14.6's two alarms are computed here rather than in the page, so that the
    rule about what counts as "quietly stopped changing" has one home. */
@@ -520,6 +561,16 @@ async function route(req, env){
   if(path === '/read' && req.method === 'GET'){
     if(!viewOK(env, bearer(req))) return new Response('no', { status: 401 });
     return readAll(env);
+  }
+
+  // The kids' one route (§46). A rolling week of start and end times with no
+  // money anywhere in the answer, and the only route a `KIDS_TOKEN` opens —
+  // `/read`, one route above, is not it. What makes the pay tab absent from
+  // that phone is that the figures are not in what it is sent, not that its
+  // page declines to draw them.
+  if(path === '/soon' && req.method === 'GET'){
+    if(!kidsOK(env, bearer(req))) return new Response('no', { status: 401 });
+    return readSoon(env);
   }
 
   // Read-only, and behind the push token like everything else that describes
