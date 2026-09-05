@@ -10,12 +10,10 @@
    the browser reinstall the worker, re-fetch every file in FILES from the
    network, and claim the open page.
 
-   v12 is §39: the colour lives in `ics.js` and `feed.js`, both of them in
-   FILES below, and the file the *page* saves is written by the copies the
-   shell is holding. Left at v11 the exported calendar would come out with no
-   COLOR line on a phone that already has the app — which is §37's failure
-   exactly, and the one this string exists to prevent. */
-const SHELL = 'shiftdeck-shell-v12';
+   v13 is §41: the shell is stored stripped of the redirect flag, and a phone
+   holding v12 is holding the poisoned copy of `/index.html` that broke the
+   installed app. Nothing but a new cache name re-fetches it. */
+const SHELL = 'shiftdeck-shell-v13';
 const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs a 10MB re-download
 /* Every script index.html loads, and nothing it does not. feed.js and merge.js
    were missing from this list from the day §14.7 extracted them: the shell
@@ -27,8 +25,46 @@ const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs
    lists and fails if they disagree. */
 const FILES = ['./', './index.html', './parser.js', './ics.js', './patterns.js', './holidays.js', './sites.js', './pay.js', './feed.js', './merge.js', './app.js', './manifest.webmanifest'];
 
+/* The start URL, absolute, and the only thing a navigation that misses the
+   cache can fall back to. `./` against sw.js's own location is the origin
+   root, which is what the Worker's asset handler serves the app from. */
+const START = new URL('./', self.location.href).href;
+
+/* A response with nothing left of how it was fetched (§41).
+
+   Cloudflare's asset handler redirects `/index.html` to `/`. `fetch` follows
+   that and hands back a perfectly good 200 — with its `redirected` flag set,
+   which the Cache API preserves and which makes the response *illegal* to
+   answer a navigation with: a navigation request has redirect mode "manual",
+   and a service worker answering one with a redirected response produces a
+   network error. Chrome shows it as ERR_FAILED with no explanation on the
+   page and nothing in the log the phone can see.
+
+   That is exactly what an installed PWA does on every launch — it navigates
+   to the start URL — so this was the app opening in the browser and refusing
+   to open from the home screen. Rebuilding the response drops the flag and
+   keeps the bytes and the headers. */
+async function plain(res){
+  return new Response(await res.blob(),
+    { status: 200, statusText: 'OK', headers: res.headers });
+}
+
+/* `addAll` would be shorter and it is what stored the poisoned copy: it caches
+   what `fetch` returns, flag and all. So every file is fetched and rebuilt
+   before it is put. `cache: 'reload'` keeps the browser's own HTTP cache from
+   handing back the previous deploy's file, which is the other way a bumped
+   SHELL ships nothing. */
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(SHELL).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil((async () => {
+    const cache = await caches.open(SHELL);
+    await Promise.all(FILES.map(async f => {
+      const url = new URL(f, self.location.href).href;
+      const res = await fetch(url, { cache: 'reload' });
+      if(!res.ok) throw new Error(`${f} answered ${res.status}`);
+      await cache.put(url, await plain(res));
+    }));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', e => {
@@ -58,13 +94,45 @@ self.addEventListener('fetch', e => {
   }
 
   // App shell: serve from cache, refresh in the background.
-  e.respondWith(
-    caches.match(e.request).then(hit => {
-      const net = fetch(e.request).then(res => {
-        if(res.ok) caches.open(SHELL).then(c => c.put(e.request, res.clone()));
-        return res;
-      }).catch(() => hit);
-      return hit || net;
-    })
-  );
+  e.respondWith(fromShell(e.request));
 });
+
+/* Cache first, network behind it, and two rules that were not here before
+   (§41).
+
+   **Nothing redirected ever answers a navigation.** Stored copies are already
+   stripped by `plain`; a response coming straight off the network on a cache
+   miss is stripped here, because `/index.html` redirects to `/` on this host
+   and a navigation is the one request that cannot be answered with the result.
+
+   **This never resolves to `undefined`.** The old handler returned `hit ||
+   net`, and `net` fell back to `hit` when the fetch failed — so a miss with no
+   network resolved to nothing, and `respondWith(undefined)` is a network
+   error, which is the same blank ERR_FAILED page by a second route. Offline
+   and uncached now falls back to the app shell for a navigation and says so in
+   words for anything else. */
+async function fromShell(request){
+  const cached = await caches.match(request);
+  const network = fetch(request).then(async res => {
+    if(res.ok){
+      const copy = await plain(res.clone());
+      const cache = await caches.open(SHELL);
+      await cache.put(request, copy);
+    }
+    return res;
+  });
+
+  if(cached){ network.catch(() => {}); return cached; }
+
+  try {
+    const res = await network;
+    return (request.mode === 'navigate' && res.redirected) ? plain(res) : res;
+  } catch (err) {
+    if(request.mode === 'navigate'){
+      const shell = await caches.match(START);
+      if(shell) return shell;
+    }
+    return new Response('Shift Deck is offline and this file is not in its cache.',
+      { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+  }
+}

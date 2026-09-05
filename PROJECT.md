@@ -4635,3 +4635,209 @@ setting, or overridden by the subscription's own colour is not something the
 tests here can answer. The next step is one look at the calendar after a sync.
 If the events are all still one colour, the feed-per-job route above is the
 fallback and nothing has to be undone to take it.
+
+---
+
+## 40. Built: the third line between two shifts, 5 September 2026
+
+Ray, from the week on his home screen: he wants a line for **back to back** —
+where one shift ends and the next starts an hour or less later — and the
+short-turnaround band moved down to match, from two-to-eight hours to
+one-to-eight.
+
+So the join between two shifts now has three sentences instead of two, and
+which one is drawn is decided by one number:
+
+| gap | line | where |
+|---|---|---|
+| overlapping | `Warning — shifts overlap.` | list, banner |
+| 0 to 60 minutes | `Back to back — 45 minutes between shifts` | **list only** |
+| 61 to 479 minutes | `Heads up — short turnaround (7 hours off)` | list, banner, alarm |
+| 480 minutes and up | *nothing* | — |
+
+### 40.1 §19 has to be answered again, and the answer is different this time
+
+§19.1 deleted a turnaround warning that fired on any two shifts under an hour
+apart, because that is his ordinary week and a warning that fires on the
+ordinary week teaches him to scroll past the line beside it that means
+something. §25 answered that by keeping the sub-two-hour case silent. This
+feature puts a line back into exactly the band §19 cleared.
+
+The difference is that it is not a warning, and that is a claim with three
+things behind it rather than a preference about wording:
+
+- **It is in the week list and nowhere else.** No banner over the schedule, no
+  `VALARM` in the calendar. §19's warning was loud in a place he could not
+  dismiss; this one is only ever found by a reader already looking at that week.
+- **It is not filled.** The overlap is white on red and the turnaround is white
+  on amber, because both are things to act on. This is grey on paper with a
+  hairline, which is what the app already uses for the words beside a fact.
+- **It states the join and stops**, like the other two. There is no "consider",
+  no "make sure", nothing to disagree with.
+
+What it buys is real, and it is a property of how the list is drawn rather than
+of the shifts: a Trupoint night ending 07:15 and a DSI afternoon starting 08:00
+are two rows, in two different day blocks, under two different dates, with
+different job names — and nothing on the screen says they are one stretch of
+being awake until this does. He knows his own week; what he cannot see at
+scrolling speed is which of two adjacent rows in different blocks are joined.
+
+If it does become wallpaper, §19.1's remedy still applies and applies to this
+first: delete it rather than tune it.
+
+### 40.2 The floor moved because the hour under it was the worst case
+
+§25 set the bottom of the turnaround band at two hours on Ray's own reasoning —
+under two he is not coming home. That was a reason to expect silence to be
+harmless, and it was wrong in the one place it mattered: at 90 minutes he is
+neither coming home nor going straight on. He is sitting in a car park with an
+hour and a half, which is exactly the gap worth knowing about in advance and
+was the only band the app said nothing about at all.
+
+So the floor is an hour now, and nothing is silent under it any more — what was
+silence is the back-to-back line. The check on that claim is §25's own table,
+which changes by one row:
+
+| | shift | rest before it | §25 | now |
+|---|---|---|---|---|
+| 1 | 15:00–23:00 | — | | |
+| 2 | 00:15–04:15 next day | 1h 15m | silent | **short turnaround** |
+| 3 | 20:00–08:00 | 15h 45m | silent | silent |
+| 4 | 15:00–23:00 | 7h | says so | says so |
+
+One extra alarm on the week the feature was raised about, and it is on the gap
+that had the least to say for itself.
+
+### 40.3 One sweep, two predicates, one boundary
+
+`restGaps()` is unchanged except in what it refuses to report. It used to drop a
+zero-minute gap along with the negative ones — "zero is a handover and negative
+is a clash, neither is time off" — and zero is the truest back to back there
+is, so it is in now. Negative stays out: that is not a gap, it is two shifts on
+top of each other, and it has its own warning.
+
+The bands are `isBackToBack()` and `isShortRest()`, and they share the constant
+`BACK_TO_BACK_MINS` — the top of the first is the floor of the second. That is
+the whole reason the number is written once: two predicates with their own
+copies of 60 is how a gap of exactly an hour ends up with two lines or none,
+and `patterns.test.js` now walks every minute from 0 to 600 asserting that
+exactly one of them is true below eight hours and neither above it.
+
+The schedule builds both maps from a single `restGaps` pass, split by band, for
+the same reason: asking twice is two chances to disagree about one number.
+
+### 40.4 What did not change
+
+**The calendar.** No new `VALARM`, no new `DESCRIPTION` line. A buzz as he
+clocks out of one job to walk into the next is §19's warning wearing a
+different hat, and a second alarm for the ordinary week is precisely how the
+one that matters gets muted. The feed did widen by one hour at the bottom,
+because that is the turnaround band moving and the turnaround band has always
+had an alarm: a 90-minute gap now writes `TRIGGER:-PT1H30M`.
+
+**The banner.** Same reason. §25.3 put the rest note on the banner because it
+is actionable on the day; there is nothing to do about a 45-minute gap except
+know it is coming, and the list is where he finds that out.
+
+**The order between the lines.** The overlap still goes first where a shift
+somehow has both. The other two cannot both appear on one shift — the bands
+share a boundary — so the order between them is only the order they are
+written in.
+
+### 40.5 Tested where it can actually be wrong
+
+`patterns.test.js` covers the bands and the sweep. But which sentence lands in
+front of which shift is a rendering decision that exists only in a loaded page,
+and `renderSchedule` reads `S` and builds DOM and is reachable from nowhere
+else — so `browser.test.js` now builds a four-shift week with one join of each
+kind and asserts the three lines come out in the right order with the right
+text, including that a zero gap says "no gap between shifts" rather than
+"0 minutes".
+
+---
+
+## 41. Fixed: the app would not open from the home screen, 5 September 2026
+
+Ray installed the PWA for the first time and the icon opened Chrome's error
+page: *"This site can't be reached — https://shift-deck.star-hs.workers.dev/index.html
+might be temporarily down… ERR_FAILED."* The same URL in a browser tab was
+fine, the Worker was up, and the app it was serving was the app.
+
+### 41.1 The chain
+
+Three ordinary decisions, none of them wrong on its own:
+
+1. **`manifest.webmanifest` started the app at `./index.html`.** A home screen
+   icon launches by *navigating* to the start URL.
+2. **Cloudflare's asset handler redirects `/index.html` to `/`.** That is
+   `html_handling`'s default, `auto-trailing-slash`, and it exists so a page
+   has one canonical URL. Nothing in the repo asked for it and nothing in the
+   repo could see it.
+3. **`sw.js` cached the shell with `cache.addAll(FILES)`,** and `FILES` held
+   `./index.html`. `fetch` follows the redirect and returns a perfectly good
+   200 — with its `redirected` flag set. The Cache API preserves that flag.
+
+And then the rule that turns three fine decisions into a dead app: **a
+navigation request has redirect mode "manual", and a service worker that
+answers one with a redirected response produces a network error.** By
+specification. Chrome renders it as ERR_FAILED with nothing on the page and
+nothing the phone can show him.
+
+So the app worked in a tab, because a tab that is already at `/` is not making
+that navigation, and it failed on every launch from the icon, because that is
+the only thing a launch does.
+
+### 41.2 The second way to make the same blank page
+
+Found while fixing the first. The old fetch handler ended:
+
+```js
+const net = fetch(e.request).then(...).catch(() => hit);
+return hit || net;
+```
+
+On a cache miss with no network, `net` falls back to `hit`, which is
+`undefined` — and `respondWith(undefined)` is a network error too. Same blank
+page, different cause, and it would have been the failure mode of a mistyped
+`FILES` entry offline: the exact condition an installed PWA exists to survive.
+
+### 41.3 The fix
+
+- **Start at `./`.** The canonical URL, the one the host does not redirect.
+- **`"id": "/index.html"` in the manifest**, which is the identity Chrome
+  derived when he installed it. Changing `start_url` without saying so would
+  make this a different app to the browser, and the installed one would go on
+  pointing at the old URL for ever. Ugly, load-bearing, and permanent.
+- **Nothing is cached as fetched.** `install` fetches each file and rebuilds
+  the response before putting it, which drops the redirect flag and keeps the
+  bytes and headers. `addAll` is what stored the poisoned copy and is gone.
+- **Nothing redirected ever answers a navigation**, including a response
+  coming straight off the network on a cache miss.
+- **The handler cannot resolve to `undefined`.** Offline and uncached falls
+  back to the cached shell for a navigation, and to a 503 that says so in
+  words for anything else.
+- **`SHELL` goes to `v13`,** because a phone holding v12 is holding the
+  poisoned copy and only a new cache name re-fetches it (§37's lesson, third
+  time).
+
+### 41.4 The test that would have caught it
+
+Nothing in the suite had ever run a service worker: every browser test loads
+the app over `file://`, where a worker will not register at all. So this one
+starts a local HTTP server that does the two things the host does — serve the
+app at `/`, redirect `/index.html` to `/` — installs the worker, and then
+navigates to the start URL the way a launch does.
+
+Against the previous `sw.js` it fails with `net::ERR_FAILED at /index.html`,
+which is Ray's screenshot reproduced in CI. That is the point of writing it
+rather than trusting the text checks in `config.test.js`, which can only assert
+that the strings that caused this are absent.
+
+### 41.5 What to do on the phone
+
+The fixed worker has to reach the device before it can help, and the broken
+launch is the one thing that cannot fetch it. So: open the site in Chrome
+(not the icon), let it load, and the new worker installs and claims the page.
+The home screen icon works from then on. If it does not, **Setup → Flush cache
+and reload** does the same thing harder, and reinstalling the icon picks up the
+new `start_url` as well.

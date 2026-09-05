@@ -379,9 +379,10 @@ test('generation fills only the dates it is given', () => {
 
 /* ---------- rest between shifts (§25) ----------------------------------- */
 
-/* The four shifts §25 was raised about, as one chain. Three gaps, and only the
-   third is a thing to say: he goes straight back on after the 00:15, sleeps
-   properly before the night, and then has an afternoon of it. */
+/* The four shifts §25 was raised about, as one chain. Three gaps, and §40
+   moved which of them speak: the 1h 15m after the 00:15 was silent when the
+   band started at two hours and is a short turnaround now, he sleeps properly
+   before the night, and then has an afternoon of it. */
 const CHAIN = [
   { id:'a', date:'2026-09-01', start:'15:00', end:'23:00' },
   { id:'b', date:'2026-09-02', start:'00:15', end:'04:15' },
@@ -389,39 +390,68 @@ const CHAIN = [
   { id:'d', date:'2026-09-03', start:'15:00', end:'23:00' }
 ];
 
-test('the real week is measured, and only the afternoon of it is worth saying', () => {
+test('the real week is measured, and each gap lands in its own band', () => {
   const got = T.restGaps(CHAIN);
   assert.deepEqual(got.map(g => [g.a.id, g.b.id, g.mins]),
     [['a','b',75], ['b','c',945], ['c','d',420]]);
-  assert.deepEqual(got.filter(g => T.isShortRest(g.mins)).map(g => g.mins), [420]);
+  // §40 moved the floor to an hour, so the 1h 15m is a turnaround now.
+  assert.deepEqual(got.filter(g => T.isShortRest(g.mins)).map(g => g.mins), [75, 420]);
+  // And nothing in this week is back to back: the shortest join is over an
+  // hour, and the other two are a night and an afternoon.
+  assert.deepEqual(got.filter(g => T.isBackToBack(g.mins)).map(g => g.mins), []);
 });
 
-test('the band is closed at the bottom and open at the top', () => {
-  // Exactly two hours is worth saying; exactly eight is a night's sleep.
-  assert.equal(T.isShortRest(120), true);
-  assert.equal(T.isShortRest(119), false);
+test('the two bands meet at an hour and neither overlaps the other', () => {
+  // Back to back is closed at both ends: no gap at all is the truest case of
+  // it, and exactly an hour is Ray's number.
+  assert.equal(T.isBackToBack(0), true);
+  assert.equal(T.isBackToBack(60), true);
+  assert.equal(T.isBackToBack(61), false);
+  assert.equal(T.isBackToBack(-1), false);
+  assert.equal(T.isBackToBack(null), false);
+  // The turnaround band starts where that one stops and ends where a night's
+  // sleep starts: exactly an hour is back to back, exactly eight is silence.
+  assert.equal(T.isShortRest(60), false);
+  assert.equal(T.isShortRest(61), true);
   assert.equal(T.isShortRest(479), true);
   assert.equal(T.isShortRest(480), false);
   assert.equal(T.isShortRest(null), false);
+  // No number is in both, and no number between them is in neither.
+  for(let m = 0; m <= 600; m++)
+    assert.equal(T.isBackToBack(m) !== T.isShortRest(m), m < 480, `at ${m} minutes`);
 });
 
-test('going straight from one job to the other says nothing at all', () => {
-  // §19.1's case, and the whole reason that warning was deleted. A gap this
-  // size is his ordinary week and the app must stay quiet about it.
+test('going straight from one job to the other is back to back, not a turnaround', () => {
+  // §19.1's case, and the whole reason that warning was deleted. It is still
+  // not a warning — §40 gives it a line that states the join and stops.
   const tight = [{ date:'2026-09-01', start:'07:00', end:'15:00' },
                  { date:'2026-09-01', start:'15:45', end:'23:00' }];
   const [g] = T.restGaps(tight);
   assert.equal(g.mins, 45);
   assert.equal(T.isShortRest(g.mins), false);
+  assert.equal(T.isBackToBack(g.mins), true);
 });
 
-test('a handover is no rest, and an overlap is not rest either', () => {
-  // Zero is the shift ending as the next starts. Negative is §19's clash,
-  // which has its own warning and must not also produce a sleep note.
-  assert.deepEqual(T.restGaps([{ date:'2026-09-01', start:'07:00', end:'15:00' },
-                               { date:'2026-09-01', start:'15:00', end:'23:00' }]), []);
+test('a handover is reported as no gap, and an overlap is not reported at all', () => {
+  // Zero is the shift ending as the next starts, which is the truest back to
+  // back there is, so §40 needs it out of the sweep. Negative is §19's clash,
+  // which has its own warning and must not also produce a gap note.
+  const [g] = T.restGaps([{ date:'2026-09-01', start:'07:00', end:'15:00' },
+                          { date:'2026-09-01', start:'15:00', end:'23:00' }]);
+  assert.equal(g.mins, 0);
+  assert.equal(T.isBackToBack(g.mins), true);
+  assert.equal(T.isShortRest(g.mins), false);
   assert.deepEqual(T.restGaps([{ date:'2026-09-01', start:'19:15', end:'07:15' },
                                { date:'2026-09-02', start:'06:00', end:'14:00' }]), []);
+});
+
+test('back to back is measured across midnight too', () => {
+  // The join this was asked about: a Trupoint night off at 07:15 and a DSI
+  // afternoon on at 08:00, on two different dates.
+  const [g] = T.restGaps([{ id:'night', date:'2026-09-05', start:'19:15', end:'07:15' },
+                          { id:'day',   date:'2026-09-06', start:'08:00', end:'16:00' }]);
+  assert.equal(g.mins, 45);
+  assert.equal(T.isBackToBack(g.mins), true);
 });
 
 test('rest is measured across midnight, not inside a date', () => {

@@ -147,6 +147,26 @@ test('a short rest warns against the whole store, not just the shifts being sent
   assert.ok(!/Heads up/.test(alone));
 });
 
+test('the floor moved to an hour, and a back-to-back join is still silent here', () => {
+  // §40 widened the band the alarm fires on: an hour and a half off used to be
+  // under the floor and is a short turnaround now.
+  const a = shift({ id: 'a', date: '2026-09-04', start: '19:00', end: '07:00' });
+  const b = shift({ id: 'b', date: '2026-09-05', start: '08:30', end: '16:30' });
+  const raw = F.feedICS([b], store({ shifts: [a, b] }), NOW);
+  assert.match(I.unfold(raw), /Only 1h 30m off before this one/);
+  assert.deepEqual(lines(raw).filter(l => l.startsWith('TRIGGER:')), ['TRIGGER:-PT1H30M']);
+
+  // And the band under it stays out of the calendar entirely. §40's line is in
+  // the week list and nowhere else: an alarm as he clocks out of one job to
+  // walk into the next is §19's warning wearing a different hat, and a second
+  // buzz for the ordinary week is how the one that matters gets muted.
+  const c = shift({ id: 'c', date: '2026-09-05', start: '07:30', end: '15:30' });
+  const straight = I.unfold(F.feedICS([c], store({ shifts: [a, c] }), NOW));
+  assert.ok(!/Heads up/.test(straight));
+  assert.ok(!/Back to back/.test(straight));
+  assert.equal((straight.match(/BEGIN:VALARM/g) || []).length, 0);
+});
+
 /* ---------- colour -------------------------------------------------------- */
 
 test("each event carries its job's colour as a CSS3 name", () => {

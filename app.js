@@ -1202,13 +1202,19 @@ function renderSchedule(){
 
   // Worked out over every shift on file, not week by week and not day by day:
   // a clash does not respect either boundary.
-  // The rest note in the week list, on the shift he comes back to. Worked out
+  // The gap notes in the week list, on the shift he comes back to. Worked out
   // over every shift on file for the same reason the clashes are: the shift
   // before a Monday morning is a Sunday night, and the two are in different
   // week blocks.
-  const rests = new Map();
-  restGaps(S.shifts).filter(g => isShortRest(g.mins)).forEach(({ b, mins: m }) => {
-    rests.set(b.id, m);
+  //
+  // One sweep, split by band (§40). Both lines are the same fact about the
+  // same join and only its length decides which is drawn, so asking twice
+  // would be two chances to disagree about one number. A shift lands in one
+  // map or neither and never in both: the two predicates share a boundary.
+  const rests = new Map(), straight = new Map();
+  restGaps(S.shifts).forEach(({ b, mins: m }) => {
+    if(isShortRest(m)) rests.set(b.id, m);
+    else if(isBackToBack(m)) straight.set(b.id, m);
   });
 
   // One line between the two, not one under each (§30). Keyed on whichever of
@@ -1271,10 +1277,10 @@ function renderSchedule(){
           <div class="len">${fmtDur(durMins(s))}</div>`;
         item.onclick = () => editShift(s.id);
 
-        // Both of these go *before* the shift rather than after the day (§29,
-        // §30), because both are about the join between this shift and the one
-        // before it, and that is where the reader is looking. It is also why
-        // neither names the shifts any more: sitting between the two, the
+        // All three of these go *before* the shift rather than after the day
+        // (§29, §30), because each is about the join between this shift and
+        // the one before it, and that is where the reader is looking. It is
+        // also why none of them names the shifts: sitting between the two, the
         // sentence was saying what he could already see.
         //
         // The other side of the pair is often in the day row above — a
@@ -1282,12 +1288,23 @@ function renderSchedule(){
         // this lands at the top of the day, still between the two.
         //
         // The overlap goes first where a shift somehow has both: it is the one
-        // with no recovery.
+        // with no recovery. The other two cannot both appear on one shift, so
+        // the order between them is only the order they are written in.
         if(clashes.has(s.id)) col.appendChild(el('div','gapwarn',
           'Warning \u2014 shifts overlap. Verify schedule in employer apps and adjust.'));
         const rst = rests.get(s.id);
         if(rst) col.appendChild(el('div','restline',
           `Heads up \u2014 short turnaround (${fmtDurWords(rst)} off)`));
+        // The quietest of the three, and drawn quietest (§40). It is not a
+        // warning — going straight from one job to the other is his ordinary
+        // week, and §19 is the record of what happens when the app treats the
+        // ordinary week as a problem. It is here because the week list is read
+        // at scrolling speed and two rows an hour apart in different jobs, one
+        // of them ending on a date the other does not start on, do not look
+        // like one stretch until something says they are.
+        const b2b = straight.get(s.id);
+        if(b2b !== undefined) col.appendChild(el('div','b2bline',
+          `Back to back \u2014 ${b2b ? `${fmtDurWords(b2b)} between shifts` : 'no gap between shifts'}`));
 
         col.appendChild(item);
       });
