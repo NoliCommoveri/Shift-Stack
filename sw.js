@@ -27,7 +27,7 @@
    file list has never heard of app.css. It would work, being the old page
    whole, and it would go on working for as long as the cache stood: a deploy
    that ships nothing, to the one phone that already trusted this worker. */
-const SHELL = 'shiftdeck-shell-v16';
+const SHELL = 'shiftdeck-shell-v17';
 const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs a 10MB re-download
 /* Every script index.html loads, and nothing it does not. feed.js and merge.js
    were missing from this list from the day §14.7 extracted them: the shell
@@ -37,7 +37,7 @@ const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs
    missing collaborator by design — so the app was dead offline, which is the
    one condition it exists to survive. `tests/config.test.js` now reads both
    lists and fails if they disagree. */
-const FILES = ['./', './index.html', './app.css', './parser.js', './ics.js', './patterns.js', './holidays.js', './sites.js', './pay.js', './feed.js', './merge.js', './app.js', './manifest.webmanifest'];
+const FILES = ['./', './index.html', './app.css', './parser.js', './ics.js', './patterns.js', './holidays.js', './sites.js', './pay.js', './feed.js', './merge.js', './when.js', './app.js', './manifest.webmanifest'];
 
 /* The start URL, absolute, and the only thing a navigation that misses the
    cache can fall back to. `./` against sw.js's own location is the origin

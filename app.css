@@ -161,6 +161,25 @@ tr.assumed td:first-child{color:var(--ink)}
 .next .big{font-size:1.25rem;font-weight:600;margin:.1rem 0 .05rem}
 .next .sub{font-size:.87rem;opacity:.8}
 .next .cd{font-family:"IBM Plex Mono",monospace;font-size:.85rem;opacity:.9;margin-top:.35rem}
+/* The line under the countdown: what to do about the shift rather than when it
+   is (§49). Quieter than the line above it and closer to it, because the two
+   are one answer read together and not two facts of equal weight. */
+.next .cd.lead{opacity:.72;margin-top:.1rem}
+
+/* The card on opening (§49). Three lines, centred, and the countdown is the
+   biggest thing on the screen — it is a flag glanced at on the way past, not a
+   description of the shift, which is on the page behind it either way. */
+.whenflag{text-align:center;padding:.7rem 0 .3rem}
+.whenflag .what{font-size:1.3rem;font-weight:500;opacity:.75}
+/* Sans, not the mono the rest of the countdowns are in: "17 hours and 52
+   minutes" is a sentence rather than a figure, and mono at this size wraps it
+   onto two lines on a phone, which is the one thing a glance cannot afford. */
+.whenflag .count{
+  font-weight:600;line-height:1.15;text-wrap:balance;
+  font-size:clamp(1.45rem,6.4vw,1.95rem);margin:.15rem 0 .3rem;
+}
+.whenflag .at{font-family:"IBM Plex Mono",monospace;font-size:1.25rem;color:var(--soft)}
+.rowbtns.whenclose{justify-content:center}
 
 /* import */
 .intake{

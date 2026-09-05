@@ -21,7 +21,7 @@
    Everything else here is sw.js, including the two rules §41 paid for: no
    redirected response is ever stored or served, and the handler never resolves
    to `undefined`. */
-const SHELL = 'shiftdeck-view-shell-v2';
+const SHELL = 'shiftdeck-view-shell-v3';
 
 /* Every file view.html loads. The shared modules are the app's own, by the
    same absolute paths the page asks for — one copy on the origin, cached
@@ -36,7 +36,7 @@ const SHELL = 'shiftdeck-view-shell-v2';
    disagree. */
 const FILES = ['/view', '/app.css', '/parser.js', '/ics.js', '/patterns.js',
                '/holidays.js', '/sites.js', '/pay.js', '/feed.js', '/merge.js',
-               '/view.js', '/view.webmanifest'];
+               '/when.js', '/view.js', '/view.webmanifest'];
 
 /* The start URL, and the only thing a navigation that misses the cache can
    fall back to. */

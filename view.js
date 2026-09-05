@@ -194,13 +194,8 @@ function fmtTime(t){
   const [h, m] = String(t).split(':').map(Number);
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
 }
-function fmtDurWords(m){
-  const h = Math.floor(m / 60), r = m % 60;
-  const bits = [];
-  if(h) bits.push(`${h} hour${h === 1 ? '' : 's'}`);
-  if(r) bits.push(`${r} minute${r === 1 ? '' : 's'}`);
-  return bits.join(' and ') || '0 minutes';
-}
+// `fmtDurWords` is when.js's (§49), because the app says the same sentence and
+// the card on opening says it a third time.
 function fmtDay(d){
   const x = asDate(d);
   return `${DAYNAMES[x.getDay()].slice(0,3)} ${x.getDate()} ${MONTHNAMES[x.getMonth()].slice(0,3)}`;
@@ -316,19 +311,12 @@ const vDrawAsOf = () => vAsOf();
    warning, the short turnaround, the back-to-back note — because those are
    facts about his week and the reason for looking at it on this phone at all.
    §29, §30 and §40 decided how they are drawn; nothing here re-decides it. */
-function vNextShift(){
-  const now = new Date();
-  const cands = V.shifts
-    .map(s => ({ s, at: new Date(`${s.date}T${s.start}:00`) }))
-    .filter(x => x.at.getTime() + durMins(x.s) * 60000 > now.getTime())
-    .sort((a, b) => a.at - b.at);
-  return cands[0] || null;
-}
-
 function vDrawNext(){
   const wrap = $('#nextwrap');
   wrap.innerHTML = '';
-  const n = vNextShift();
+  // Which shift, and both countdowns, are when.js's (§49). This screen and the
+  // app's draw one banner and must not arrive at it separately.
+  const n = whenNext(V.shifts);
   if(!n){
     wrap.appendChild(el('div', 'card soft',
       '<span class="tiny">No upcoming shifts on file.</span>'));
@@ -336,12 +324,9 @@ function vDrawNext(){
   }
   const co = coById(n.s.companyId);
   const d = asDate(n.s.date);
-  const rel = Math.round((n.at - new Date()) / 60000);
-  let cd;
-  if(rel <= 0) cd = 'On shift now';
-  else if(rel < 60) cd = `Starts in ${rel} min`;
-  else if(rel < 1440) cd = `Starts in ${Math.floor(rel / 60)}h ${rel % 60}m`;
-  else cd = `In ${Math.round(rel / 1440)} days`;
+  // The door, at §46's forty-five minutes before the start — or, once he is in
+  // the shift, when it lets him go. Empty more than a day out.
+  const lead = whenLead(n);
 
   const box = el('div', 'next');
   box.innerHTML = `
@@ -350,7 +335,8 @@ function vDrawNext(){
       MONTHNAMES[d.getMonth()].slice(0,3)} &middot; ${esc(fmtTime(n.s.start))}</div>
     <div class="sub">${esc(co ? co.name : 'Unassigned')} &middot; ${
       esc(shiftWhere(n.s))} &middot; ${fmtDur(durMins(n.s))}</div>
-    <div class="cd">${cd}</div>`;
+    <div class="cd">${esc(whenCountdown(n))}</div>
+    ${lead ? `<div class="cd lead">${esc(lead)}</div>` : ''}`;
   wrap.appendChild(box);
 }
 
@@ -732,6 +718,20 @@ $('#tok').onkeydown = e => { if(e.key === 'Enter') $('#unlock').click(); };
   document.addEventListener('visibilitychange', () => {
     if(document.visibilityState === 'visible' && V.token) vPull(true);
   });
+
+  /* The card on opening (§49). An installed PWA switched away from is not
+     closed — the page stays loaded and coming back fires no `load` — so
+     `whenWake` binds the two events that do fire, and returns the same call
+     for this opening. Nothing is shown behind the door: a phone with no token
+     yet has no shifts to count down to. The ten-minute floor lives in
+     `whenPrompt`, keyed per page because both apps share one localStorage. */
+  whenWake(() => (V.token ? V.shifts : []), { key: 'view' })();
+
+  // A shift that starts while the app is open must not leave the banner saying
+  // "Leave in 3 min" for an hour. The app has had this minute timer since it
+  // was built; the viewer had no reason for one until there was a countdown on
+  // the screen that changes what he does.
+  setInterval(vDrawNext, 60000);
 
   /* The viewer's own service worker, at its own scope (§45). `/view-sw.js`
      sits at the root — a script can only claim a scope at or below its own

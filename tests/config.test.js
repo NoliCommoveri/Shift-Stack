@@ -260,6 +260,25 @@ test('the kids’ page cannot price anything, and cannot write', () => {
   assert.match(js, /const HOME_PAD  = 30;/);
 });
 
+/* One number, two names, and the reason for both (§49).
+ *
+ * when.js could not call its lead `LEAVE_PAD` as well: both files are classic
+ * scripts and a page that ever loaded the two would die on the repeated
+ * `const` before it drew anything. So the names differ and the numbers must
+ * not, because what they mean is one fact — how long before a shift he is out
+ * of the door — and a banner that said 45 while the kids' phone said 40 would
+ * be two answers to "when does Daddy leave".
+ */
+test('the door costs the same forty-five minutes on every phone', () => {
+  const num = (file, name) => {
+    const m = new RegExp(`const ${name}\\s*=\\s*(\\d+)`)
+      .exec(fs.readFileSync(path.join(ROOT, file), 'utf8'));
+    assert.ok(m, `${file} must declare ${name}`);
+    return Number(m[1]);
+  };
+  assert.equal(num('when.js', 'LEAVE_LEAD'), num('kids.js', 'LEAVE_PAD'));
+});
+
 /* The kids' shell, and its scope (§41, §45, §46). */
 test('the kids’ worker caches its page and claims only its own scope', () => {
   const html = fs.readFileSync(path.join(ROOT, 'kids.html'), 'utf8');
