@@ -120,25 +120,44 @@ test('a bare offset is not a time zone', () => {
 });
 
 test('a job that never said which zone it is in is told that it did not', () => {
-  // The §14.10 fault, from the side that could have reported it. The zone was
+  // The §35 fault, from the side that could have reported it. The zone was
   // designed as a per-job field and nothing filled it in, so every feed was
-  // read on Eastern wall time; in Central that is every shift an hour late,
-  // and no screen could say so because no screen was told which zone was
-  // used. `defaulted` is what /status puts on the Setup screen.
-  assert.deepEqual(G.zoneFor({ zone: 'America/Chicago' }),
-                   { zone: 'America/Chicago', defaulted: false });
-  assert.deepEqual(G.zoneFor({}), { zone: G.DEFAULT_ZONE, defaulted: true });
-  assert.deepEqual(G.zoneFor(null), { zone: G.DEFAULT_ZONE, defaulted: true });
-  assert.deepEqual(G.zoneFor({ zone: '  ' }), { zone: G.DEFAULT_ZONE, defaulted: true });
+  // read on the fallback; in Central against an Eastern default that is every
+  // shift an hour late, and no screen could say so because no screen was told
+  // which zone was used. `defaulted` is what /status puts on the Setup screen.
+  assert.deepEqual(G.zoneFor({ zone: 'America/Denver' }),
+                   { zone: 'America/Denver', source: 'job', defaulted: false });
+  const fell = { zone: G.DEFAULT_ZONE, source: 'fallback', defaulted: true };
+  assert.deepEqual(G.zoneFor({}), fell);
+  assert.deepEqual(G.zoneFor(null), fell);
+  assert.deepEqual(G.zoneFor({ zone: '  ' }), fell);
   // A rejected answer is a fallback too: the job asked for something and did
   // not get it, which reads on the screen the same way as never asking.
-  assert.deepEqual(G.zoneFor({ zone: 'UTC-6' }), { zone: G.DEFAULT_ZONE, defaulted: true });
-  assert.deepEqual(G.zoneFor({ zone: 'Nowhere/Nothing' }),
-                   { zone: G.DEFAULT_ZONE, defaulted: true });
-  // Surrounding space is not a different zone, and a phone's autocorrect adds
-  // it. Trimmed, and not counted as a fallback.
-  assert.deepEqual(G.zoneFor({ zone: ' America/Chicago ' }),
-                   { zone: 'America/Chicago', defaulted: false });
+  assert.deepEqual(G.zoneFor({ zone: 'UTC-6' }), fell);
+  assert.deepEqual(G.zoneFor({ zone: 'Nowhere/Nothing' }), fell);
+});
+
+test('the Worker can be told a zone that no phone has pushed yet', () => {
+  // §37: the per-job zone only reaches the server on a push, so a server that
+  // has never had one — a fresh deploy, or a phone still serving the old
+  // app.js out of its shell cache — needs an answer that is right on the first
+  // tick. `ZONE` in wrangler.toml is that answer.
+  assert.deepEqual(G.zoneFor({}, { ZONE: 'America/Winnipeg' }),
+                   { zone: 'America/Winnipeg', source: 'env', defaulted: true });
+  // The job still wins: it is the only side that knows where he is standing.
+  assert.deepEqual(G.zoneFor({ zone: 'America/Denver' }, { ZONE: 'America/Winnipeg' }),
+                   { zone: 'America/Denver', source: 'job', defaulted: false });
+  // And an offset in the deploy config is refused exactly as one in the job is.
+  assert.deepEqual(G.zoneFor({}, { ZONE: 'UTC-6' }),
+                   { zone: G.DEFAULT_ZONE, source: 'fallback', defaulted: true });
+  assert.deepEqual(G.zoneFor({}, {}),
+                   { zone: G.DEFAULT_ZONE, source: 'fallback', defaulted: true });
+});
+
+test('the last-resort zone is where the stations are', () => {
+  // Eastern was the leftover this whole fault grew out of: a default lifted
+  // from another project, in an app whose every shift is in Mississippi.
+  assert.equal(G.DEFAULT_ZONE, 'America/Chicago');
 });
 
 test('today is where the shifts are, not where the Worker is', () => {

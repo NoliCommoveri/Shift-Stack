@@ -3337,22 +3337,28 @@ function renderServerZone(st){
   const here = jobZone(co);
   const there = st && st.zone;
 
+  // Where the server's answer came from. `job` is this phone's config, having
+  // arrived; `env` is the zone set on the Worker in wrangler.toml, which is
+  // what covers the gap before a push lands; `fallback` is neither, and is the
+  // state §35 spent a month in.
+  const from = {
+    job: '',
+    env: ' \u2014 the zone set on the Worker, because the job\u2019s own has not reached it',
+    fallback: ' \u2014 its last resort, because nothing has told it otherwise'
+  }[st && st.zoneSource] ?? (st && st.zoneDefaulted ? ' \u2014 its fallback' : '');
+
   if(there && here && there !== here){
     box.hidden = false;
     box.className = 'flag';
-    box.textContent = `The server reads ${co.name}\u2019s calendar in ${there}`
-      + (st.zoneDefaulted ? ' \u2014 its fallback, because the job on the server does not say \u2014'
-                          : '')
-      + `, and this phone reads it in ${here}. Every shift the cron has filed is on the wrong `
-      + 'clock by the difference. Send the config up and the next poll rewrites them; the '
-      + 'calendar picks the corrections up because each rewrite bumps the event\u2019s revision.';
+    box.textContent = `The server reads ${co.name}\u2019s calendar in ${there}${from}, and this `
+      + `phone reads it in ${here}. Every shift the cron has filed is on the wrong clock by the `
+      + 'difference. It corrects itself on the next poll once the server has this phone\u2019s '
+      + 'config \u2014 each rewrite bumps the event\u2019s revision, so the calendar takes it.';
     return;
   }
   if(there){
     box.hidden = false;
-    box.textContent = `Feed times are read in ${there}`
-      + (st.zoneDefaulted ? ', which is the server\u2019s fallback rather than the job\u2019s own answer.'
-                          : ', on both ends.');
+    box.textContent = `Feed times are read in ${there}${from}.`;
     return;
   }
   if(!here){

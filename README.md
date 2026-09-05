@@ -165,7 +165,9 @@ What it needs, once:
 4. **Which job the server polls** — Setup → the job → App and calendar →
    **The server polls this job's calendar**. Tick it on whichever job syncs into
    Google; that is Homebase. One job at a time.
-5. **Its calendar's time zone**, on the same fold. Filled in from the phone
+5. **Its calendar's time zone**, on the same fold. The Worker also carries one
+   of its own — `ZONE` in `wrangler.toml`, `America/Chicago` — which is what it
+   reads the feed on until this job's answer has been pushed up to it. Filled in from the phone
    when the job is made, so this is usually already right — check it anyway.
    The Worker has no locale of its own and falls back to Eastern for a job
    that does not say, and the symptom is every shift from that feed an hour
@@ -607,6 +609,11 @@ the app has no runtime dependencies.
 npm test              # run every module's tests
 npm run test:update   # regenerate golden files, then read them before committing
 ```
+
+`tests/poll.test.js` is the one that runs a whole cron tick — the zone, the
+read, the diff and §14.6's guards, against the golden calendar and with the
+clock passed in. The Worker's own entry point cannot be required by a test, so
+the decision it takes lives in `worker/poll.js` where one can (§38).
 
 `tests/fixtures/README.md` explains how to turn a screenshot into a test case.
 Calendar feeds go in `tests/fixtures/calendar/` as `.ics` alongside their

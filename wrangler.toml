@@ -51,6 +51,16 @@ database_id = "506df86a-3a17-4e57-8a49-0a02c8e9afc4"
 [triggers]
 crons = ["*/15 * * * *"]
 
+# Which clock the cron reads the employer's calendar on, when the job in `cfg`
+# does not say (§35, §37). Not a secret and deliberately in the file: a Worker
+# has no locale of its own, Cron Triggers are UTC-only, and the phone's answer
+# only arrives by a push — so a zone that is only ever pushed is a zone the
+# server does not have on its first tick, or on any tick before a phone running
+# the current app.js manages to send one. The job's own zone still wins.
+[vars]
+ZONE = "America/Chicago"
+
+
 # The schema ships as text and is applied from the app's own Settings screen,
 # which is how both other D1 apps in the account do it — nobody is asked to
 # paste SQL into the D1 console (§14.9).

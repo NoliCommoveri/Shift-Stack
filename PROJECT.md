@@ -4414,3 +4414,127 @@ fixture gains an event in the shape Ray's calendar actually holds, so the whole
 path is a golden test rather than three functions agreeing in isolation.
 `resolveNames` is four cases in sites.test.js, the one the cron was getting
 wrong first among them.
+
+---
+
+## 37. Fixed: §35 shipped and the times did not move, 5 September 2026
+
+The deploy went out and the Schedule came back with the new titles on it —
+"Tru-Point · Training · Headquarters" where the address used to be — and every
+one of them still an hour late. The summary is §36's work and it landed. The
+hour is §35's and it did not.
+
+Which is the useful part of the report, because the two travel together. A
+title only changes when the cron rewrites the row, and the cron writes the
+label and the times in the same rewrite. So the rewrite happened, with the new
+reader, and still produced Eastern wall times: the Worker was running the fixed
+code and had never been told the zone.
+
+### Two routes, and §35 only built one
+
+`co.zone` reaches the Worker in the config the phone pushes. That is the right
+place for it — the phone is the only thing that knows where he is standing —
+but it made the push a precondition for the fix, and two things sit in front of
+a push:
+
+- **The shell cache.** `sw.js` serves the app cache-first with a network
+  refresh behind it, so the load after a deploy runs the *previous* `app.js`
+  and the new one only appears on the load after that. `SHELL` was left at
+  `v10`, so the service worker never reinstalled and never re-fetched anything.
+  The phone was running the code that has no zone field and no `fillZones`,
+  which cannot push what it does not have.
+- **The first tick.** Even on a phone with the new code, the cron may fire
+  before the push lands. A server with no answer needs one that is right
+  anyway.
+
+And the answer it fell back to was `America/Toronto`, lifted from
+Star-homeschool along with `normalizeTimezone` — an Eastern default in an app
+whose every shift, fixture and test is in Hattiesburg.
+
+### What changed
+
+- **`ZONE` in `wrangler.toml`.** A plain var, deployed with the Worker, read by
+  `zoneFor` when the job in `cfg` has not said. It is right on the first tick,
+  before any phone has spoken, and it steps aside the moment a job carries its
+  own zone. `keep_vars = true` protects the secrets in the dashboard; a var in
+  the file is not one of them.
+- **The last resort is Central.** `DEFAULT_ZONE` is `America/Chicago`. A
+  default nobody notices should be the answer for the place the app is used.
+- **`zoneFor` says where its answer came from** — `job`, `env` or `fallback` —
+  and `/status` carries it, so the Setup line reads "the zone set on the
+  Worker, because the job's own has not reached it" rather than leaving him to
+  work out which of the three he is looking at.
+- **`SHELL` is bumped to `v11`**, which is what makes the browser reinstall the
+  service worker, re-fetch every file in `FILES`, and claim the open page. A
+  release that only reaches the phone on the load after next is a release that
+  looks like it did not work — which is exactly how this one looked.
+
+### What is tested
+
+`zoneFor` gets the env case in guards.test.js: told a zone with no job answer
+it uses it and says `env`; told one alongside a job answer the job still wins;
+an offset in the deploy config is refused exactly as one in a job is. A config
+test reads `wrangler.toml` and fails if `ZONE` is missing, is filed under the
+wrong table, or is an offset rather than an IANA name — the same three ways the
+`keep_vars` line was wrong before §14.9 found it. The browser test now drives
+all three sources through the Setup line.
+
+---
+
+## 38. Built: the cron's decision, where a test can reach it, 5 September 2026
+
+Three faults reached the phone in two days — §35's hour, §36's missing role,
+§37's zone that only travelled by push — and the suite was green through all of
+them. They have one thing in common: every one lived inside `poll()`.
+
+`worker/index.js` cannot be required by a Node test. It is ESM, it imports
+`schema.sql` as text, and every path through it wants a D1 binding. So the
+cron's judgement — which zone, what the feed says, what would change, whether
+§14.6 will allow it — was the one part of this app with no test at all, while
+`parseICS`, `mergeCalendar` and `guard` each had a thorough one. Each module
+answered its own question correctly and nothing checked the sentence they made
+together.
+
+### `worker/poll.js`
+
+The same extraction guards.js, merge.js and feed.js each came out of.
+`planPoll({ text, store, env, at })` is a pure function: feed text in, and out
+comes the zone it used, where that answer came from, what the reader made of
+the text, what would change and the guard's refusal. `index.js` keeps the two
+halves that need the outside world — the fetch and the batch — and asks this
+what to do in between.
+
+`resolver` moved with it, which is where §36's fault was. `feedRow` moved too,
+and that one is not tidiness: the idempotence test has to build its rows the
+way the Worker builds them, and a test that built them differently would be
+testing its own arithmetic.
+
+`at` is passed in. A test whose seven-day window is counted from the real clock
+starts failing in a week for a reason that has nothing to do with the code.
+
+### What it caught, stated as tests
+
+The eleven cases in `tests/poll.test.js` are the September faults, written down
+so they cannot come back quietly:
+
+- **The hour.** The fixture's 00:15Z event lands at 19:15 the evening before,
+  which is what the raw Homebase entry says. The same feed read on
+  `America/Toronto` lands at 20:15 — the shipped bug, pinned rather than
+  described.
+- **The names.** A cron-filed row resolves to `roleId` and `siteId` and carries
+  the address in `place`, not in the label. A row neither table has heard of
+  still files under the text that was read.
+- **The repair.** Two polls with the zone corrected between them: no additions,
+  no removals, every shift replaced in place, ids kept, `seq` up by one. That
+  is the tick that fixes Ray's calendar, asserted rather than hoped about.
+- **The no-op.** Two polls of an unchanged feed: nothing added, nothing
+  replaced, everything unchanged. Cron Triggers do not retry and may
+  double-fire (§14.5).
+- **The refusals.** An empty calendar, a sign-in page, and two jobs with
+  neither ticked each come back as the reason they came back, with the last
+  good feed still standing.
+
+And one assertion in `config.test.js` keeps it honest: `poll()` must call
+`planPoll`, and must not contain a parse, a diff or a guard of its own. The
+decision moving back into a file no test can reach is exactly how this went
+untested for as long as it did.

@@ -13,25 +13,19 @@
    the same file the golden fixtures already test.
    ========================================================================== */
 
-import icsMod from '../ics.js';
 import feedMod from '../feed.js';
-import mergeMod from '../merge.js';
-import sitesMod from '../sites.js';
-// For `splitLabel` alone: §17.4's separator is parser.js's to know, and a
-// second copy of that rule here is how the two halves of this app start
-// disagreeing about where a role ends and a place begins.
-import parserMod from '../parser.js';
+// The cron's decision — which zone, what the feed says, what would change, and
+// whether §14.6 will allow it — lives in poll.js so it can be tested without a
+// database or a network (§38). What is left here is the two halves that need
+// the outside world: the fetch, and the writes.
+import pollMod from './poll.js';
 import guardsMod from './guards.js';
 import schemaSQL from './schema.sql';
 
-const { parseICS } = icsMod;
 const { feedICS } = feedMod;
-const { mergeCalendar } = mergeMod;
-const { resolveNames } = sitesMod;
-const { splitLabel } = parserMod;
-const { guard, alarmFor, feedJob, normalizeTimezone, zoneFor, todayIn, shiftISO,
-        newestStamp, tokenOK, splitSQL, safeSettings, resetPlan,
-        orphanGroups, countEvents } = guardsMod;
+const { planPoll, feedRow } = pollMod;
+const { alarmFor, feedJob, zoneFor, newestStamp, tokenOK, splitSQL,
+        safeSettings, resetPlan, orphanGroups, countEvents } = guardsMod;
 
 const JSON_HEAD = { 'content-type': 'application/json; charset=utf-8' };
 const nowISO = () => new Date().toISOString();
@@ -88,10 +82,6 @@ async function poll(env){
   if(!job) return record(env, 'unknown', { ok: 0, reason: 'no job is configured for the feed' });
   if(!env.ICS_URL) return record(env, job.id, { ok: 0, reason: 'the calendar address is not set' });
 
-  const { zone } = zoneFor(job);
-  const today = todayIn(zone);
-  const from = shiftISO(today, -7);
-
   let text = '', ms = 0;
   const t0 = Date.now();
   try {
@@ -103,28 +93,22 @@ async function poll(env){
     return record(env, job.id, { ok: 0, reason: `the feed could not be reached: ${e.message}`, ms: Date.now() - t0 });
   }
 
-  const { rows, report } = parseICS(text, { zone, from, match: job.icsMatch || '' });
-
-  // A calendar written to by one app and nothing else contains shifts and only
-  // shifts, so a row that will not parse is not noise to be skipped quietly —
-  // it is a signal that Homebase has changed its format, or that something
-  // else has started writing there (§14.9). Recorded as its own condition.
-  const unreadable = report.unreadable || 0;
-
-  const mine = store.shifts.filter(s => s.companyId === job.id && s.source === 'feed');
-  const plan = mergeCalendar(mine, rows, report, job.id, { resolve: resolver(store, job.id) });
-
-  const refuse = guard({ report, plan, mine, today });
+  // Everything between the text and the writes, and the only part of the cron
+  // worth arguing with. `unreadable` is a distinct condition rather than noise
+  // to be skipped quietly: a calendar written to by one app and nothing else
+  // contains shifts and only shifts, so a row that will not parse says
+  // Homebase has changed its format (§14.9).
+  const { report, plan, refuse, unreadable } = planPoll({ text, store, env });
   if(refuse) return record(env, job.id, { ok: 0, reason: refuse, events: report.events, unreadable, ms });
 
   const stamp = nowISO();
   const writes = [];
   for(const row of plan.add)
-    writes.push(insert(env, { ...row, id: newId(), source: 'feed', seq: 0 }, stamp));
+    writes.push(insert(env, feedRow(row, newId()), stamp));
   for(const rep of plan.replace)
     // In place, keeping the shift's id, and SEQUENCE goes up so a calendar
     // that already holds the old revision does not ignore the new one (§22).
-    writes.push(insert(env, { ...rep.row, id: rep.id, source: 'feed', seq: (rep.was.seq || 0) + 1 }, stamp));
+    writes.push(insert(env, feedRow(rep.row, rep.id, (rep.was.seq || 0) + 1), stamp));
   for(const s of plan.remove)
     writes.push(env.DB.prepare(`DELETE FROM shifts WHERE id = ? AND source = 'feed'`).bind(s.id));
 
@@ -158,22 +142,6 @@ function insert(env, shift, stamp){
      WHERE shifts.source = 'feed'`
   ).bind(shift.id, shift.companyId, shift.extUid || null, shift.date,
          JSON.stringify(shift), stamp);
-}
-
-/* Standing in for the page's applyNames: a feed row arrives with the text the
-   employer wrote and no ids, and merge.js compares places on the identity the
-   site table gives them. Without this every row would come back changed and
-   the cron would rewrite the whole schedule every fifteen minutes (§14.7). */
-function resolver(store, jobId){
-  const sites = (store.sites || []).filter(s => s.companyId === jobId);
-  const roles = (store.roles || []).filter(r => r.companyId === jobId);
-  // The same reading the page's `applyNames` does, through the same function.
-  // This used to match the whole label against the site table and `row.role`
-  // — a field a feed row does not carry — against the roles, so a label with
-  // a separator in it resolved to neither: no site, no role, the job's rate
-  // instead of the role's (§27), and a text comparison in `whereKey` where an
-  // identity was available.
-  return row => ({ ...row, ...resolveNames(row, sites, roles, splitLabel) });
 }
 
 async function record(env, jobId, p){
@@ -306,7 +274,7 @@ async function status(env){
   // quietly falling back to Eastern — a whole schedule an hour out, with every
   // screen agreeing because every screen read the same number.
   const cfg = await readCfg(env) || {};
-  const { zone, defaulted } = zoneFor(feedJob(cfg.companies || []));
+  const { zone, defaulted, source } = zoneFor(feedJob(cfg.companies || []), env);
 
   const { results: polls } = await env.DB.prepare(
     `SELECT * FROM polls ORDER BY id DESC LIMIT 50`).all();
@@ -319,7 +287,7 @@ async function status(env){
   return json({
     shifts: Object.fromEntries((counts.results || []).map(r => [r.source, r.n])),
     lastGood: good ? good.at : null,
-    zone, zoneDefaulted: defaulted,
+    zone, zoneDefaulted: defaulted, zoneSource: source,
     // §14.6's two alarms, computed in guards.js so that "quietly stopped
     // changing" means one thing here and on the Setup screen. The failure this
     // project exists to catch is not a wrong shift, it is a calendar that has

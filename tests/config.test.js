@@ -163,3 +163,45 @@ test('the service worker caches every script the page loads', () => {
   // seen. Left alone, the fix ships and nothing fetches it.
   assert.match(sw, /const SHELL = 'shiftdeck-shell-v(\d+)'/);
 });
+
+/* The zone the cron reads the feed on, when no phone has pushed one (§37).
+ *
+ * `zoneFor` prefers the job's own answer and falls back to this, so the
+ * failure it prevents is the one §35 shipped with: a Worker whose only route
+ * to a time zone was a push from a phone that was still serving the previous
+ * app.js out of its shell cache, filing every shift an hour out in the
+ * meantime with a healthy poll record either side of it.
+ */
+test('the Worker is told a time zone at deploy time, as an IANA name', () => {
+  const line = /^ZONE\s*=\s*"([^"]+)"\s*$/m.exec(toml.join('\n'));
+  assert.ok(line, 'wrangler.toml must set ZONE');
+  assert.equal(tableOf('ZONE'), '[vars]', 'ZONE is a var, not a secret and not an asset setting');
+  // The same shape test `normalizeTimezone` applies. An offset is wrong for
+  // half the year in any zone that keeps daylight saving, and a deploy config
+  // that sets one is a whole schedule an hour out every summer.
+  const zone = line[1];
+  assert.ok(!/[+-]\d/.test(zone), `ZONE must be an IANA name, not the offset ${zone}`);
+  assert.doesNotThrow(() => new Intl.DateTimeFormat('en-US', { timeZone: zone }));
+});
+
+/* The cron actually goes through the tested path (§38).
+ *
+ * `poll.test.js` runs the whole decision — zone, read, diff, guard — but it
+ * runs `planPoll`, and index.js is free to stop calling it. That is not a
+ * theoretical worry: the decision lived inline in `poll()` until §38, where
+ * nothing could reach it, and three faults shipped through it in two days.
+ * Re-inlining any of it would leave a green suite and an untested cron.
+ */
+test('the cron asks poll.js what to do rather than working it out again', () => {
+  const body = bodyOf('poll');
+  assert.ok(body, 'the cron handler is still called poll');
+  assert.match(body, /planPoll\(\{ text, store, env \}\)/,
+    'poll() must hand the feed text, the store and env to planPoll');
+  // The two halves that need the outside world are the only ones left here.
+  assert.match(body, /fetch\(env\.ICS_URL/);
+  assert.match(body, /env\.DB\.batch\(writes\)/);
+  // And nothing that decides: a parse, a diff or a guard back in this file is
+  // a decision no test can see.
+  for(const gone of ['parseICS(', 'mergeCalendar(', 'guard({'])
+    assert.ok(!body.includes(gone), `${gone} belongs in poll.js, where it is tested`);
+});
