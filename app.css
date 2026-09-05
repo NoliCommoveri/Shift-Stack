@@ -1,4 +1,4 @@
-/* Shift Deck, the whole stylesheet. PROJECT.md §42.
+/* Shift Deck, the whole stylesheet. PROJECT.md §45.
    Lifted out of index.html unchanged when the read-only viewer was built.
    Both pages link it, which is the point: the viewer is the same schedule and
    the same pay tables, drawn the same way. A palette that lived in one page
@@ -37,9 +37,13 @@ nav{
   padding-bottom:env(safe-area-inset-bottom);
 }
 nav div{max-width:46rem;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr)}
+/* Four targets on the one bar that is always on screen, hit with a thumb on
+   a phone held one-handed. .85rem was the body's own small text and read as a
+   caption rather than a control; this is a size up, with the padding to match,
+   which puts each button comfortably over the 44px the platforms ask for. */
 nav button{
-  background:none;border:none;font-family:inherit;font-size:.85rem;
-  color:var(--soft);padding:.85rem .2rem;cursor:pointer;
+  background:none;border:none;font-family:inherit;font-size:.95rem;
+  color:var(--soft);padding:.95rem .2rem;cursor:pointer;
   border-top:2px solid transparent;margin-top:-1px;
 }
 nav button[aria-current="true"]{color:var(--ink);font-weight:600;border-top-color:var(--signal)}
@@ -254,6 +258,15 @@ input[type=file]{display:none}
 /* §25 states a fact about the night, not a fault in the schedule, so it is
    not given the red the clash gets — that red has one job. */
 .horizon.rest{color:var(--signal)}
+/* The one banner that can be acted on from where it sits (§44). Inline after
+   the sentence rather than on its own row: it is the end of that sentence, and
+   a full-width button under a note this quiet would outweigh it. */
+.horizon .doit{
+  background:none;border:1px solid currentColor;color:inherit;font-family:inherit;
+  font-size:.78rem;padding:.15rem .45rem;margin-left:.15rem;border-radius:2px;
+  cursor:pointer;white-space:nowrap;vertical-align:baseline;
+}
+.horizon .doit:hover{background:var(--wash)}
 .kill{background:none;border:none;color:var(--soft);font-size:1.15rem;cursor:pointer;padding:.3rem .45rem;border-radius:2px}
 .kill:hover{color:var(--bad);background:#F3DEDA}
 

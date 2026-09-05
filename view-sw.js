@@ -1,4 +1,4 @@
-/* Shift Deck, read only — the viewer's service worker. PROJECT.md §42.
+/* Shift Deck, read only — the viewer's service worker. PROJECT.md §45.
 
    A second worker on one origin, and the scope is the whole reason it is a
    separate file rather than a branch inside sw.js.

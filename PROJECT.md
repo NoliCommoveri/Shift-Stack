@@ -1,12 +1,23 @@
 # Shift Deck — project state
 
-_Last updated 5 September 2026_ — §42 builds the read-only second phone: `/view`,
-two tabs, and a `VIEW_TOKEN` that opens exactly one route so that the phone
-*cannot* write rather than merely declining to. It needed no new column and no
-new field — the shifts and every pay rate were already in D1 — only a read
-path, a second credential and a page. The stylesheet moved out of index.html so
-both pages draw the same week from one file, and a browser test puts one
-mixed-rate week through both and fails if the grosses disagree. §39 puts each job's colour on its own events,
+_Last updated 5 September 2026_ — §45 builds the read-only second phone:
+`/view`, two tabs, and a `VIEW_TOKEN` that opens exactly one route so that the
+phone *cannot* write rather than merely declining to. It needed no new column
+and no new field — the shifts and every pay rate were already in D1 — only a
+read path, a second credential and a page. The stylesheet moved out of
+index.html so both pages draw the same week from one file, and a browser test
+puts one mixed-rate week through both and fails if the grosses disagree.
+§44 puts a **Confirm all** button in the
+banner that reports a week filled from the rota, because saying "yes, that is
+what I worked" should not cost one dialog per shift.
+§43 reorders the nav bar to Pay before Add and sets it a size up, and takes the
+calendar-file box, **Fetch from a link** and **Paste calendar text** off the Add
+screen — three doors onto a path the Worker's cron has walked on its own since
+§14.
+§42 turns the title round: job, site, role,
+on the calendar and on every screen, because the place is the half worth
+keeping when a line is cut short.
+§39 puts each job's colour on its own events,
 which is the second signal §25 said colour could be and never the only one: the
 title still names the job. It is an experiment with a known worst case — a
 client that does not read RFC 7986's `COLOR` skips the line and shows the
@@ -3247,6 +3258,10 @@ is which side of it is trustworthy — the site half is now the curated spelling
 rather than whatever the reader made of it that day. A shift matching no site
 produces the byte-identical title it produced yesterday.
 
+*(Overtaken in one respect, §42: the two halves changed places, so the same
+title now reads `DSI- De la Montagne | Cook Plant ASO`. The separator, the
+curated spelling and the no-site fallback are all as written here.)*
+
 **And the knock-on §8.1 warned about is now handled rather than noted.**
 Renaming a site, adding an address to one, merging or removing one all change
 the text of events a calendar may already hold. `restamp()` bumps `SEQUENCE`
@@ -4416,6 +4431,10 @@ with the address still on it. The order is §8.1's `${company}- ${role} |
 ${site}`, the same as every other screen and the TrackTik rows; the calendar is
 not the place to invent a second one.
 
+*(§42 reverses the order to `${company}- ${site} | ${role}` — the event reads
+`Tru-Point- F.O.C. | Security Officer`. The sentence above is why that had to
+be one change in one function and not a calendar-only tweak.)*
+
 ### What is tested
 
 `placeName` and `roleFrom` are unit tests naming the real strings — the street
@@ -4850,7 +4869,271 @@ new `start_url` as well.
 
 ---
 
-## 42. Built: a read-only second phone, 5 September 2026
+## 42. Changed: the place leads the title, 5 September 2026
+
+Ray asked for job, site, role — on the calendar and on the dashboard both. It
+was job, role, site.
+
+    before   DSI- Cook Plant ASO | SOUTHERN HENS      Unassigned · Cook Plant ASO · SOUTHERN HENS
+    after    DSI- SOUTHERN HENS | Cook Plant ASO      DSI · SOUTHERN HENS · Cook Plant ASO
+
+### 42.1 Why this way round is the better one anyway
+
+Every place the string is read, it is read left to right and cut off on the
+right. A 05:00 alarm body on a lock screen, the `.sub` line under a schedule
+row, the Where line in the shift dialog, a phone's own calendar list — all of
+them run out of room, and none of them run out of it on the left.
+
+So the question is which half survives a truncation, and the two halves are not
+equal. The site is what he drives to; it is what the address hangs off, what
+`whereKey` files the shift under, and the thing that tells one twelve-hour
+night from another. The role is what he does once he is there, and on a job
+with one role it says nothing at all — Homebase prints `Cook` for every shift
+it publishes. Reading `SOUTHERN HENS · Cook Pl…` he knows where he is going.
+Reading `Cook Plant ASO · SOUTHE…` he knows what he already knew.
+
+It also puts the title in narrowing order after the job name — employer, place,
+task — which is the order the rest of the app already asks for names in.
+
+### 42.2 One function, because §26 made it one function
+
+`whereText()` in sites.js is the only place the two halves are joined. The
+calendar goes through it (`eventTitle` → `feed.js`), and so does every screen
+(`shiftWhere` in app.js), which is exactly what §36 insisted on — *the calendar
+is not the place to invent a second order*. So the swap is one expression, and
+the two ends cannot disagree about it.
+
+The one string that was built by hand rather than through `whereText` was the
+rota editor's *"Runs Mon–Fri, 19:00–07:00 as Cook Plant ASO · SOUTHERN HENS"*,
+which joined the pattern's declared role and site itself. It is flipped to
+match. A generated week is filed under exactly those two records, so the
+sentence describing it has to read the way the rows it produces will.
+
+### 42.3 The input side is untouched, and that is the whole subtlety
+
+The employer prints `role | place` — TrackTik on screen, and Homebase's three
+properties assembled into the same shape by `labelFor` (§36). `splitLabel` in
+parser.js and `readLabel` in sites.js both read that order, and §17.4 is the
+section that made the pipe trustworthy enough to read it by.
+
+None of that moved. This is the output side only: what the app *writes* for a
+person to read, not what it *reads* from an employer. A shift's `label` still
+holds the employer's order, unchanged, and still resolves to the same site and
+the same role as it did yesterday. The test added to sites.test.js pins the two
+orders against each other in one case, so a later reader that flattens them
+back together fails rather than silently swapping a role for a place.
+
+The fallbacks are unchanged for the same reason they exist: a shift with no
+site reads as its raw label, a matched role with no site speaks alone, and a
+site with no role is just the site. There is no order to reverse in any of
+those, and a shift that matched neither table produces the byte-identical
+title it produced before either table existed.
+
+### 42.4 What this does to events already on the phone
+
+§8.1's warning, restated by §26.7: changing `SUMMARY` at all rewrites every
+event.
+
+- **Subscription mode (§14) handles itself.** The Worker rebuilds the whole
+  feed on each poll from `feedICS`, so the next fetch carries the new titles
+  and nothing has to be tracked.
+- **Manual-import mode does not.** A shift already marked `sent` has an event
+  on the phone with the old title and no reason to be sent again. `restamp()`
+  is the mechanism — bump `SEQUENCE`, clear `sent` — but it fires on renaming
+  a site or a role, not on a change to the code that formats them, and there
+  is no `S.version` to hang a one-time migration off (§7, §26.9 chose that
+  deliberately). So those events keep the old title until the shift is edited.
+
+The answer there is the control that already exists: **Rebuild the whole
+calendar** in Setup, which exports every shift again rather than the unsent
+ones. It re-exports at the same `SEQUENCE`, which is why its own dialog says to
+clear the shift calendar first — so the honest instruction for this change is
+clear the calendar, then rebuild. Not automated here: a title reading the old
+way round until the next rebuild is a cosmetic lag, and a migration that
+restamped every shift on load would be a schema-shaped answer to a formatting
+change (§7).
+
+### 42.5 What is tested
+
+The two title assertions in sites.test.js swap sides, and a new case states the
+rule outright: the label goes in as `role | place` and the title comes out as
+`place | role`, with the single-half cases asserted alongside so the fallbacks
+cannot drift with it. `feed.js` and `ics.js` needed no changes — the writer
+takes the title from `eventTitle` and the reader never sees one.
+
+---
+
+## 43. Changed: the nav bar, and three doors that led nowhere, 5 September 2026
+
+Two small things Ray asked for in one breath, both about the Add screen and the
+bar under it.
+
+### 43.1 Pay before Add
+
+The bar is `Schedule · Pay · Add · Setup` where it was `Schedule · Add · Pay ·
+Setup`. It is a `repeat(4,1fr)` grid, so the order is the order the buttons are
+written in and nothing else moved; `b.dataset.tab` is what the click handler
+reads, so no wiring knows or cares which slot a button sits in.
+
+The order it should have been in from the start. Adding shifts is the thing he
+does once a fortnight when a rota lands; checking what a week paid is the thing
+he does on the way home. The two tabs he opens most are now the two ends of the
+bar, which are also the two easiest to hit with a thumb.
+
+### 43.2 A size up
+
+`nav button` goes from `.85rem` to `.95rem`, padding `.85rem` to `.95rem` with
+it. `.85rem` was the body's own small-text size, which is why it read as a
+caption rather than as a control — the only four controls on screen at all
+times were set in the type reserved for asides.
+
+The padding moves with the size deliberately: it is what puts each button over
+the ~44px both platforms ask of a touch target, on a phone held one-handed in a
+car park at 05:00. Nothing else in the bar changed, and it is the only rule in
+the file that had to.
+
+### 43.3 The calendar-file pathways are gone
+
+Off the Add screen: the *"Add a calendar file"* drop box, the `#icspick` input
+behind it, **Fetch from a link**, **Paste calendar text**, and the `<details>`
+explaining how to get an .ics out of Homebase and Google Calendar. `fetchCalendar`
+went with the button that was its only caller.
+
+Three doors onto one path, and the path is one Ray has never walked. **Fetch
+from a link** could not work and was documented as not working in its own help
+text: Google's iCal addresses send no CORS headers, the browser refuses to hand
+the page the response, and the function spent its whole life printing an
+apology for a failure it could not distinguish from being offline. §14 is what
+replaced it — the Worker fetches `env.ICS_URL` server-side on a cron, where
+CORS is not a rule that applies, and nothing has to be tapped at all.
+
+What is left on the screen is what he actually does: screenshots, the rota, one
+by hand.
+
+### 43.4 What was kept, and why it is not on the screen
+
+`handleFiles` still splits its input by extension and sends an `.ics` to
+`readCalendarText`, so a calendar file dropped on the **screenshot** box is
+still read exactly as it was. `readCalendarFiles`, `readCalendarText` and
+`ics.js` are all untouched — the Worker's importer is the same reader, and the
+golden fixtures still test it.
+
+That is the right shape for a path nobody uses: a fallback with no promise on
+the screen. It costs nothing to keep, it is the only way back in if the Worker
+is down, and it does not spend a line of the Add screen advertising itself.
+
+`S.settings.icsUrl` was written only by `fetchCalendar` and is now written
+nowhere. It stays in `SETTINGS_PRIVATE` regardless: a store restored
+from an older backup can still be carrying one, and a secret calendar address
+is not a thing to start writing into an export file on the technicality that
+nothing sets it any more.
+
+---
+
+## 44. Built: a week from the rota, confirmed from its banner, 5 September 2026
+
+> *filled from the rota to Fri 12 Sep — 5 shifts, none confirmed yet.
+> A screenshot of that week confirms them.* **[ Confirm all 5 ]**
+
+Ray: *"opening each to save is silly."* It was.
+
+### 44.1 The friction, and what it cost
+
+`isProposed(s)` is `s.source === 'pattern'`, and the only thing that had ever
+cleared it was line 2603 — `if(isProposed(s)) s.source = 'manual'` — on the way
+*out of the edit dialog*. So a rota that filled a week wrote five proposals and
+confirming them meant opening five dialogs and pressing Save five times, to
+answer one question the banner above had already asked him.
+
+That is not merely tedious, it is self-defeating: the app has a *second* banner
+whose whole job is to complain that shifts in the last fortnight came from the
+rota and were never confirmed. The friction in the first banner is what
+produces the state the second one exists to report. A week goes unconfirmed
+because saying so cost five dialogs, and then the app tells him off for it.
+
+### 44.2 `confirmProposals`, and the two lines that are not obvious
+
+```js
+going.forEach(s => { s.source = 'manual'; });
+restamp(s => ids.has(s.id));
+```
+
+The first line is the whole feature. The second is the part inherited from the
+edit dialog's own reasoning, and it is easy to leave out:
+
+`feedICS` marks a proposal's event *"(from the rota)"*. Confirming therefore
+changes the `SUMMARY` of an event a phone may already be holding, and §22 is
+blunt about what happens to a rewrite at an equal `SEQUENCE` — a calendar is
+free to ignore it. `restamp()` bumps the sequence and clears `sent`, which is
+what makes it a *newer* revision rather than a suggestion (§26.7). A shift that
+was never sent has nothing to revise and `restamp` leaves it alone.
+
+Times, records and pay are untouched. Confirming says the assumption was
+right; it does not claim to know anything the rota did not.
+
+### 44.3 The predicate, not the company
+
+The button carries a `pred` built from the exact ids the sentence counted:
+
+```js
+const ids = new Set(proposed.map(s => s.id));
+act: { label: `Confirm all ${proposed.length}`, pred: s => ids.has(s.id) }
+```
+
+Not "every proposal for this job". The two banners on one job select different
+shifts — one looks ahead, one looks back fourteen days — and a button that
+confirmed by company would have the forward banner silently confirming last
+fortnight's as well. Confirming the set the sentence just described is the
+only behaviour a person reading it can predict.
+
+### 44.4 The second banner asks first
+
+The past-fortnight note gets the same button and a `confirm()` in front of it.
+The difference is not squeamishness about a click: the forward banner is about
+a week still ahead, which the next screenshot corrects for free. The backward
+one is about nights that have already been worked or not, where confirming is
+a statement about money that has been earned — the hours stop being counted as
+assumptions in `weekTotals`, and the pay screen stops hedging them.
+
+### 44.5 Inline, and only where there is something to press
+
+`.horizon .doit` is a bordered button in `currentColor` at `.78rem`, appended
+after the sentence rather than given its own row. It inherits the banner's
+colour, so it is quiet in the fed banner and carries the warning colour in the
+other, with no rule of its own for either.
+
+A full-width button under a note set this quietly would outweigh the note. And
+a note with no `act` gets no button — most of them describe a state there is
+nothing to press about, and the ones that do are the point of §44.
+
+### 44.6 What is tested
+
+In `browser.test.js`, because the button does not exist outside a loaded page —
+`renderHorizon` builds it out of `S`, and a unit test could reach
+`confirmProposals` and prove none of what matters. The bugs worth catching are
+a banner that says four and confirms three, and one that confirms them and goes
+on saying four.
+
+So the test seeds two proposals and one already-manual shift, asserts the label
+reads `Confirm all 2`, clicks it, and then asserts all three ways it could be
+wrong: every source is `manual`, only the proposal that had been `sent` went up
+a `SEQUENCE`, and the banner redrew without the button — which is the assertion
+that the state the sentence described is actually gone.
+
+### 44.7 The shell, for all three of these
+
+`SHELL` goes to `v14` (§37's lesson, fourth time). §42, §43 and §44 are four
+things Ray asked for and will go looking for on the phone, and a release
+someone is waiting to see is the definition of one that has to arrive on the
+next load rather than the one after. `RUNTIME` is untouched, as always — it
+carries the OCR engine and the fonts, and bumping it costs a 10MB re-download
+to deliver a reordered nav bar.
+
+The one thing still owed is from §42 and is on the phone rather than in the
+repo: shifts already marked `sent` keep the old role-first title until the
+calendar is cleared and **Rebuild the whole calendar** is run from Setup
+(§42.4). Nothing in §43 or §44 needs anything done to it by hand.
+## 45. Built: a read-only second phone, 5 September 2026
 
 Ray asked whether there could be a read-only version on a second phone, with
 just the shifts and pay tabs and no add or settings, so that he can see his
@@ -4866,7 +5149,7 @@ object — the rate, `otMult`, `otAfterHrs`, the break rule, `weekStart` — and
 nothing from `S.settings` at all. So this section adds no write, no column and
 no field. What it adds is a read path, a second credential and a second page.
 
-### 42.1 Why a page and not a flag
+### 45.1 Why a page and not a flag
 
 The obvious build is a query parameter: `?view=1`, hide the Add and Setup tabs,
 done in an afternoon. It is worth naming why that is the wrong answer, because
@@ -4910,7 +5193,7 @@ that exactly one route accepts the view token, that it is a GET, that `/push`,
 neither `raw` nor `polls` — the employer's calendar text and the cron's log are
 not his week and have no business on a second phone.
 
-### 42.2 Why `/read` rather than `/shifts`
+### 45.2 Why `/read` rather than `/shifts`
 
 `/shifts` exists and answers with `WHERE source = 'feed'`. That filter is
 right for the app: the phone asking already holds the manual and pattern rows,
@@ -4925,7 +5208,7 @@ already the narrowed row `safeSettings` wrote in §14.3 — the push token and t
 employer's secret calendar address were never in it — so there was nothing
 further to strip.
 
-### 42.3 The stylesheet moved out
+### 45.3 The stylesheet moved out
 
 `index.html` carried its styles inline. Two pages drawing the same week from
 one stylesheet is correct; two pages drawing the same week from two copies of
@@ -4934,13 +5217,22 @@ within a month, and on a schedule a difference in how something is drawn reads
 as a difference in the shifts.
 
 So the whole `<style>` block became `app.css`, unchanged, and both pages link
-it. `SHELL` goes to `v14`: a phone holding v13 has a shell whose `index.html`
-still carries its styles inline and whose file list has never heard of
+it. `SHELL` goes to `v15`: a phone holding an older shell has an `index.html`
+that still carries its styles inline and a file list that has never heard of
 `app.css`. It would work — it is the old page, whole — and it would go on
 working for as long as the cache stood, which is §41's lesson for the fourth
 time.
 
-### 42.4 Two service workers on one origin
+`v15` rather than a second `v14`, and that distinction is the merge with
+§42–§44 rather than a detail. This branch and that one both bumped to `v14`
+independently; had both shipped under the one name, a phone that took §43's
+`v14` would already hold a shell it considered current, would never re-fetch,
+and would never learn that `app.css` exists — the deploy would reach every
+phone except the one that had been keeping up. A cache name is a claim that
+what is behind it is what is being served, and two different sets of files
+cannot both make it.
+
+### 45.4 Two service workers on one origin
 
 The viewer needs its own offline shell, and that is the fiddly part.
 
@@ -4972,7 +5264,7 @@ from it, which is a cache that knows how old it is and says so on the screen; a
 second copy in the Cache API would be an older answer with nothing to say it
 was one, handed back to a `fetch` that believes it reached the server.
 
-### 42.5 Its own IndexedDB, and what that is worth later
+### 45.5 Its own IndexedDB, and what that is worth later
 
 `shiftdeck-view`, not `shiftdeck`. The viewer is served from the app's origin,
 so a shared database name would be two writers over one `'state'` key — the
@@ -4993,7 +5285,7 @@ already carrying. Per-device endpoints are an upside rather than a cost: two
 phones would be separately addressable, so a shift change could go to both and
 a "you are on in two hours" to only one.
 
-### 42.6 The as-of line
+### 45.6 The as-of line
 
 The one thing this screen has that the app does not need, and the reason it
 needs it is the reason the whole project exists.
@@ -5018,7 +5310,7 @@ It refreshes on launch, on `visibilitychange`, and on a button. No timer: a
 phone in a pocket polling a Worker every minute is a battery cost for an answer
 nobody is reading.
 
-### 42.7 What is shared, and the test that keeps it shared
+### 45.7 What is shared, and the test that keeps it shared
 
 `view.html` loads the same eight scripts `index.html` does, minus `app.js`.
 Every one of them is pure — dates, ICS, the site and role tables, the pay
@@ -5043,7 +5335,7 @@ loads with no uncaught errors, that `weekPay`, `whereText`, `durMins`,
 `clashPairs` and `restGaps` all resolved, that `S` is *not* defined, that the
 nav has exactly two buttons, and that neither tab contains a single `<input>`.
 
-### 42.8 Handing the token over
+### 45.8 Handing the token over
 
 The token is minted in the Cloudflare dashboard and has to reach a phone that
 is not the one it was minted on. So it travels as a link: `/view#t=THETOKEN`,
@@ -5057,7 +5349,7 @@ be a convenience, and it would put the view token on the husband's phone, which
 has no use for it. Four secrets already live in one dashboard panel; this is
 the fourth.
 
-### 42.9 What was left out
+### 45.9 What was left out
 
 - **The launcher buttons.** They open TrackTik and Homebase by Android package
   name. Those apps are not on the second phone, and would not be his account

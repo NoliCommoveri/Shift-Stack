@@ -168,7 +168,7 @@ function tokenOK(secret, given){
   return timingSafeEqual(secret, given);
 }
 
-/* Who may read the schedule without being able to change it. PROJECT.md §42.
+/* Who may read the schedule without being able to change it. PROJECT.md §45.
 
    `VIEW_TOKEN` is the read-only viewer's credential and the only one it ever
    holds. It opens exactly one route — `GET /read` — and nothing else: not

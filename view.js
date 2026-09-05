@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Shift Deck, read only. PROJECT.md §42.
+   Shift Deck, read only. PROJECT.md §45.
 
    A second phone that shows his week and what it pays, and can do nothing
    else. Two tabs — Schedule and Pay — and no Add, no Setup, no export, no
@@ -244,7 +244,7 @@ function weekTotals(shifts, co){
   }), co);
 }
 
-/* ---------- the as-of line (§42) -----------------------------------------
+/* ---------- the as-of line (§45) -----------------------------------------
    The one thing this screen has that the app does not need.
 
    On the app, a week with nothing in it is a week he has not imported, and
@@ -733,7 +733,7 @@ $('#tok').onkeydown = e => { if(e.key === 'Enter') $('#unlock').click(); };
     if(document.visibilityState === 'visible' && V.token) vPull(true);
   });
 
-  /* The viewer's own service worker, at its own scope (§42). `/view-sw.js`
+  /* The viewer's own service worker, at its own scope (§45). `/view-sw.js`
      sits at the root — a script can only claim a scope at or below its own
      directory, and `/view` is not below `/view/` — and is registered for
      `/view` alone. The app's worker keeps `/`, this one takes `/view*`, the

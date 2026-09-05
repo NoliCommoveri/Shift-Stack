@@ -803,7 +803,7 @@ function host(){
     // with.
     if(p === '/index.html'){ res.writeHead(307, { location: '/' }); return res.end(); }
     // The same rule one level down, which is what the viewer is served by
-    // (§42): `view.html` answers at `/view`, and the URL carrying the
+    // (§45): `view.html` answers at `/view`, and the URL carrying the
     // extension is the one that redirects.
     if(p === '/view.html'){ res.writeHead(307, { location: '/view' }); return res.end(); }
     const file = path.join(ROOT, p === '/' ? 'index.html' : p === '/view' ? 'view.html' : p);
@@ -861,9 +861,69 @@ test('the installed app opens at a URL the host redirects', async (t) => {
   }
 });
 
+/* §44, page-only for the reason §14.7's checkbox was: the button does not
+ * exist outside a loaded page. `renderHorizon` builds it out of `S`, and what
+ * it does — clear `source`, restamp, redraw — is three things that have to
+ * happen together. A unit test could reach `confirmProposals` and would prove
+ * none of that: the bug worth catching here is a banner that says four shifts
+ * and confirms three, or one that confirms them and goes on saying four.
+ */
+test('a week filled from the rota is confirmed from its own banner', async (t) => {
+  const browser = await open();
+  if(!browser) return t.skip('no Playwright browser available');
+
+  try {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto('file://' + path.join(ROOT, 'index.html'));
+    await page.waitForFunction(() => typeof S === 'object' && S !== null, null, { timeout: 15000 });
+
+    const before = await page.evaluate(() => {
+      const day = n => shiftDays(todayISO(), n);
+      S.companies = [{ id: 'c1', name: 'DSI', color: '#333' }];
+      S.sites = []; S.roles = [];
+      S.shifts = [
+        // Sent already, so its event on the phone reads "(from the rota)".
+        { id: 'p1', companyId: 'c1', date: day(2), start: '19:00', end: '07:00',
+          label: 'Cook', source: 'pattern', sent: true, seq: 0 },
+        { id: 'p2', companyId: 'c1', date: day(3), start: '19:00', end: '07:00',
+          label: 'Cook', source: 'pattern' },
+        { id: 'm1', companyId: 'c1', date: day(4), start: '19:00', end: '07:00',
+          label: 'Cook', source: 'manual' }
+      ];
+      renderSchedule();
+      const b = document.querySelector('#horizon .doit');
+      return { label: b ? b.textContent : null };
+    });
+    // Two proposals, one already-confirmed shift that is none of its business.
+    assert.equal(before.label, 'Confirm all 2');
+
+    const after = await page.evaluate(() => {
+      document.querySelector('#horizon .doit').click();
+      return {
+        sources: S.shifts.map(s => s.source),
+        seqs: S.shifts.map(s => s.seq || 0),
+        sent: S.shifts.map(s => !!s.sent),
+        button: !!document.querySelector('#horizon .doit')
+      };
+    });
+    assert.deepEqual(after.sources, ['manual', 'manual', 'manual']);
+    // The one the calendar holds goes up a revision, because its title just
+    // lost "(from the rota)" and §22 says a calendar may ignore an equal
+    // SEQUENCE. The one never sent has nothing to revise.
+    assert.deepEqual(after.seqs, [1, 0, 0]);
+    assert.deepEqual(after.sent, [false, false, false]);
+    assert.equal(after.button, false, 'the banner it acted on redrew without it');
+
+    assert.deepEqual(errors, [], 'the page loaded with no uncaught errors');
+  } finally {
+    await browser.close();
+  }
+});
 
 /* ==========================================================================
-   The read-only viewer. PROJECT.md §42.
+   The read-only viewer. PROJECT.md §45.
    ========================================================================== */
 
 /* Seven scripts in one shared global scope again, and this page adds an eighth
@@ -1065,7 +1125,7 @@ test('the viewer draws the week, the warnings and the pay tables', async (t) => 
   }
 });
 
-/* The viewer installs, claims its own scope, and launches (§41, §42).
+/* The viewer installs, claims its own scope, and launches (§41, §45).
  *
  * Two workers on one origin is the part of this that is easy to get subtly
  * wrong and impossible to notice by reading: a scope that is a hair too wide

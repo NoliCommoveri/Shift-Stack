@@ -65,7 +65,7 @@ test('.assetsignore keeps the repo off the public site', () => {
   for(const must of ['.git', 'node_modules', 'worker', 'tests', 'wrangler.toml', 'PROJECT.md'])
     assert.ok(ignore.includes(must), `.assetsignore must exclude ${must}`);
   // And the app itself must still be served.
-  // The viewer's four files and the stylesheet both pages link (§42). A page
+  // The viewer's four files and the stylesheet both pages link (§45). A page
   // excluded here is a 404 on the second phone with nothing to say why.
   for(const served of ['index.html', 'app.js', 'app.css', 'feed.js', 'merge.js', 'sw.js',
                        'view.html', 'view.js', 'view-sw.js', 'view.webmanifest'])
@@ -117,7 +117,7 @@ test('no endpoint answers with the schedule before checking a token', () => {
 
   const guarded = r => {
     if(/tokenOK\(env\.PUSH_TOKEN, bearer\(req\)\)/.test(r.body)) return true;
-    // The read-only viewer's route (§42). A different secret, and a narrower
+    // The read-only viewer's route (§45). A different secret, and a narrower
     // one: `viewOK` is asserted below to open nothing that writes.
     if(/viewOK\(env, bearer\(req\)\)/.test(r.body)) return true;
     // Dispatched instead: follow it and look in the handler.
@@ -141,7 +141,7 @@ test('no endpoint answers with the schedule before checking a token', () => {
   assert.match(bodyOf('feed'), /status: 404/);
 });
 
-/* The read-only half is read-only on the server (§42).
+/* The read-only half is read-only on the server (§45).
  *
  * The viewer hides its Add and Setup tabs by not having them, which is worth
  * nothing on its own: a phone holding a token and a `curl` are the same thing
@@ -177,7 +177,7 @@ test('the view token opens exactly one route, and that route only reads', () => 
   assert.ok(!/FROM raw|FROM polls/.test(read), '/read answers with the store, not the log');
 });
 
-/* One stylesheet, two pages (§42).
+/* One stylesheet, two pages (§45).
  *
  * The viewer draws the same weeks and the same pay tables as the app, so it
  * links the same CSS. A copy would have been two schedules that looked
@@ -200,7 +200,7 @@ test('both pages link the one stylesheet, and both workers cache it', () => {
   }
 });
 
-/* The viewer's own shell (§42).
+/* The viewer's own shell (§45).
  *
  * The same assertion the app gets, for the same reason: a file missing from
  * the list is not slow offline, it is absent, and `feed.js` throws on a
@@ -227,7 +227,7 @@ test('the viewer\u2019s service worker caches every script its page loads', () =
 });
 
 /* The viewer opens from the home screen, and does not take the app's scope
- * with it (§41, §42).
+ * with it (§41, §45).
  */
 test('the viewer starts at a URL the host does not redirect, in its own scope', () => {
   const m = JSON.parse(fs.readFileSync(path.join(ROOT, 'view.webmanifest'), 'utf8'));
@@ -262,7 +262,7 @@ test('the viewer starts at a URL the host does not redirect, in its own scope', 
 });
 
 /* The viewer holds no credential that can write, and asks for nothing that
- * could (§42). The page half of the rule the Worker enforces above.
+ * could (§45). The page half of the rule the Worker enforces above.
  */
 test('the viewer cannot write, and never sees the push token', () => {
   const js = fs.readFileSync(path.join(ROOT, 'view.js'), 'utf8');

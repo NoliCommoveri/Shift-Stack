@@ -149,10 +149,12 @@ test('with no site, a shift reads as the label, unchanged', () => {
 });
 
 test('with a site, the curated spelling replaces the read one', () => {
-  // The label still holds the OCR damage; nothing on screen does.
+  // The label still holds the OCR damage; nothing on screen does. The label
+  // also still reads role-first, because that is the order the employer
+  // printed it in — what comes out reads place-first, which is the point.
   const sh = { label: 'Cook Plant ASO | S0UTHERN HEN5', role: 'Cook Plant ASO' };
-  assert.equal(T.eventTitle('DSI', sh, HENS()), 'DSI- Cook Plant ASO | SOUTHERN HENS');
-  assert.equal(T.whereText(sh, HENS(), ' · '), 'Cook Plant ASO · SOUTHERN HENS');
+  assert.equal(T.eventTitle('DSI', sh, HENS()), 'DSI- SOUTHERN HENS | Cook Plant ASO');
+  assert.equal(T.whereText(sh, HENS(), ' · '), 'SOUTHERN HENS · Cook Plant ASO');
 });
 
 test('a role with no place named beside it leaves the site to speak alone', () => {
@@ -296,9 +298,23 @@ test('a matched role names a shift that has no place beside it', () => {
 test('with a site and a role, the curated spelling of each is what reads', () => {
   const sh = { label: 'Cook Plant ASO | SOUTHERN HENS', role: 'Cook Plant AS0' };
   const out = T.whereText(sh, HENS(), ' · ', role('r1', 'Cook Plant ASO'));
-  assert.equal(out, 'Cook Plant ASO · SOUTHERN HENS');
+  assert.equal(out, 'SOUTHERN HENS · Cook Plant ASO');
   assert.equal(T.eventTitle('DSI', sh, HENS(), role('r1', 'Cook Plant ASO')),
-               'DSI- Cook Plant ASO | SOUTHERN HENS');
+               'DSI- SOUTHERN HENS | Cook Plant ASO');
+});
+
+test('the place leads and the role follows, whatever order the label came in', () => {
+  // The employer prints "role | place" and parser.js still reads it that way;
+  // this is the other end, where the string is scanned rather than parsed. A
+  // schedule row and a phone alert both cut off at the right, so the half that
+  // says which site he is driving to goes first (app.js shiftWhere, feed.js).
+  const sh = { label: 'Cook Plant ASO | SOUTHERN HENS', role: 'Cook Plant ASO' };
+  assert.equal(T.whereText(sh, HENS(), ' · '), 'SOUTHERN HENS · Cook Plant ASO');
+  assert.equal(T.eventTitle('DSI', sh, HENS()), 'DSI- SOUTHERN HENS | Cook Plant ASO');
+  // Either half alone is unchanged: there is no order to swap.
+  assert.equal(T.whereText({ label: 'x', role: '' }, HENS(), ' · '), 'SOUTHERN HENS');
+  assert.equal(T.whereText({ label: 'C00k', role: 'C00k' }, null, ' · ',
+                           role('r1', 'Cook')), 'Cook');
 });
 
 test('a title with no records at all is byte-identical to before either table', () => {

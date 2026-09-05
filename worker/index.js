@@ -6,11 +6,12 @@
    entirely (§14.4) — there is no preflight handler and no origin allowlist
    because there is no cross-origin request to make.
 
-   The import half is the reason this exists. `fetchCalendar` in the page
-   fails permanently on Google's iCal addresses because they send no CORS
-   headers; CORS is a rule browsers apply to themselves, and nothing here is
-   a browser. The reader that runs against that fetch is ics.js unmodified,
-   the same file the golden fixtures already test.
+   The import half is the reason this exists. Fetching an employer's feed from
+   the page failed permanently on Google's iCal addresses because they send no
+   CORS headers; CORS is a rule browsers apply to themselves, and nothing here
+   is a browser. §43 removed the page's attempt at it altogether, so this is
+   now the only way in for a calendar feed. The reader that runs against the
+   fetch is ics.js unmodified, the same file the golden fixtures already test.
    ========================================================================== */
 
 import feedMod from '../feed.js';
@@ -259,7 +260,7 @@ async function feedShifts(env){
 }
 
 /* Everything a screen needs to draw his week, and nothing that could change it
-   (§42).
+   (§45).
 
    Deliberately not `/shifts`, which answers with the cron's half alone. That
    filter exists because the phone asking already holds the manual and pattern
@@ -512,7 +513,7 @@ async function route(req, env){
     return feedShifts(env);
   }
 
-  // The read-only viewer's one route (§42). The only place `viewOK` is used,
+  // The read-only viewer's one route (§45). The only place `viewOK` is used,
   // and the only route a `VIEW_TOKEN` opens: everything above and below this
   // either writes or describes the machinery, and the second phone gets
   // neither. GET, so there is not even a verb here that could change anything.

@@ -389,7 +389,7 @@ test('the feed’s events are counted off the rendered file', () => {
 });
 
 
-/* Who the read-only viewer's token lets in. PROJECT.md §42.
+/* Who the read-only viewer's token lets in. PROJECT.md §45.
  *
  * This is the whole of what makes the second phone read only. Not the missing
  * tabs — a phone holding a token and a `curl` are the same thing to a Worker —
