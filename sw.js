@@ -12,8 +12,14 @@
 
    v13 is §41: the shell is stored stripped of the redirect flag, and a phone
    holding v12 is holding the poisoned copy of `/index.html` that broke the
-   installed app. Nothing but a new cache name re-fetches it. */
-const SHELL = 'shiftdeck-shell-v13';
+   installed app. Nothing but a new cache name re-fetches it.
+
+   v14 is §42–§44, which are all things Ray asked for and will go looking for:
+   the title reads job, site, role; the nav bar is reordered and bigger; the
+   calendar-file pathways are off the Add screen; and a week filled from the
+   rota can be confirmed from its own banner. A release he is waiting to see is
+   the definition of one that has to reach the phone promptly. */
+const SHELL = 'shiftdeck-shell-v14';
 const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs a 10MB re-download
 /* Every script index.html loads, and nothing it does not. feed.js and merge.js
    were missing from this list from the day §14.7 extracted them: the shell

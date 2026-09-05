@@ -50,9 +50,13 @@ nav{
   padding-bottom:env(safe-area-inset-bottom);
 }
 nav div{max-width:46rem;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr)}
+/* Four targets on the one bar that is always on screen, hit with a thumb on
+   a phone held one-handed. .85rem was the body's own small text and read as a
+   caption rather than a control; this is a size up, with the padding to match,
+   which puts each button comfortably over the 44px the platforms ask for. */
 nav button{
-  background:none;border:none;font-family:inherit;font-size:.85rem;
-  color:var(--soft);padding:.85rem .2rem;cursor:pointer;
+  background:none;border:none;font-family:inherit;font-size:.95rem;
+  color:var(--soft);padding:.95rem .2rem;cursor:pointer;
   border-top:2px solid transparent;margin-top:-1px;
 }
 nav button[aria-current="true"]{color:var(--ink);font-weight:600;border-top-color:var(--signal)}
@@ -267,6 +271,15 @@ input[type=file]{display:none}
 /* §25 states a fact about the night, not a fault in the schedule, so it is
    not given the red the clash gets — that red has one job. */
 .horizon.rest{color:var(--signal)}
+/* The one banner that can be acted on from where it sits (§44). Inline after
+   the sentence rather than on its own row: it is the end of that sentence, and
+   a full-width button under a note this quiet would outweigh it. */
+.horizon .doit{
+  background:none;border:1px solid currentColor;color:inherit;font-family:inherit;
+  font-size:.78rem;padding:.15rem .45rem;margin-left:.15rem;border-radius:2px;
+  cursor:pointer;white-space:nowrap;vertical-align:baseline;
+}
+.horizon .doit:hover{background:var(--wash)}
 .kill{background:none;border:none;color:var(--soft);font-size:1.15rem;cursor:pointer;padding:.3rem .45rem;border-radius:2px}
 .kill:hover{color:var(--bad);background:#F3DEDA}
 
@@ -337,35 +350,6 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
     <small>Tap here or drag images in. Several at a time is fine.</small>
   </div>
   <input type="file" id="picker" accept="image/*" multiple>
-
-  <div class="intake" id="icsintake" tabindex="0" role="button" style="margin-top:.7rem">
-    <p>Add a calendar file</p>
-    <small>An .ics from an employer's calendar sync. Better than a screenshot —
-      the times are the employer's own numbers.</small>
-  </div>
-  <input type="file" id="icspick" accept=".ics,text/calendar" multiple>
-  <div class="rowbtns">
-    <button class="ghost" id="icslink">Fetch from a link</button>
-    <button class="ghost" id="icspaste">Paste calendar text</button>
-  </div>
-
-  <details>
-    <summary>Where the calendar file comes from</summary>
-    <div class="tiny soft" style="margin-top:.5rem">
-      <p style="margin:.4rem 0"><b>Homebase</b> — in the app, Settings &rarr;
-        Calendar Sync. Turn Enable on, tick the locations, pick the Google
-        account, then Sync now. The shifts land in that Google calendar.</p>
-      <p style="margin:.4rem 0">To get them in here, open Google Calendar in a
-        browser &rarr; Settings &rarr; the calendar Homebase writes to &rarr;
-        <i>Secret address in iCal format</i>. Open that link in Chrome to save
-        the .ics, then add the file above. Or paste the link into
-        <i>Fetch from a link</i> &mdash; that only works if Google lets this
-        page read it, which it usually does not.</p>
-      <p style="margin:.4rem 0">Homebase syncs into a whole Google account, so
-        dentist appointments and birthdays arrive with the shifts. The filter
-        on the job in Setup is what keeps them out.</p>
-    </div>
-  </details>
 
   <div class="prog" id="prog">
     <div class="bar"><i id="barfill"></i></div>
@@ -505,8 +489,8 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
 <nav>
   <div>
     <button data-tab="schedule" aria-current="true">Schedule</button>
-    <button data-tab="import">Add</button>
     <button data-tab="pay">Pay</button>
+    <button data-tab="import">Add</button>
     <button data-tab="setup">Setup</button>
   </div>
 </nav>
