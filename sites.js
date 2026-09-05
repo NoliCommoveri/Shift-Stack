@@ -273,16 +273,29 @@ function roleText(shift, role){
 
    The separator is the employer's own (§17.4) for the calendar and a middot on
    screen, because the pipe reads as punctuation in a sentence and as structure
-   in a title. */
+   in a title.
+
+   Place first, role second. The employer prints it the other way round and this
+   read that order back out for a while, but the two strings are not for the same
+   job: the label is what a screen said, and this is what a person scans. A phone
+   notification and a schedule row both cut off at the right, and the place is the
+   half that identifies the night — which site he is driving to — while the role
+   is what he does once he is there. Reading `SOUTHERN HENS · Cook Plant ASO`, the
+   part that survives a truncation is the part worth keeping. It also puts the
+   calendar title in narrowing order after the job name: job, site, role.
+
+   The input side is untouched and must stay that way — `splitLabel` in parser.js
+   and `readLabel` above still read the employer's `role | place`, because that is
+   what the employer prints. This is the output side only. */
 function whereText(shift, site, sep, role){
   const s = shift || {};
   const r = roleText(s, role);
-  if(site) return r ? `${r}${sep || ' | '}${site.name}` : site.name;
+  if(site) return r ? `${site.name}${sep || ' | '}${r}` : site.name;
   if(role && r) return r;
   return String(s.label || '').trim() || 'Shift';
 }
 
-/* §8.1's title convention, `${company}- ${role} ${site}`, with the separator
+/* §8.1's title convention, now `${company}- ${site} ${role}`, with the separator
    §17.4 put between the last two. A shift that matched neither table produces
    the byte-identical title it produced before this file existed. */
 function eventTitle(companyName, shift, site, role){

@@ -876,9 +876,15 @@ function horizonNotes(){
     // a schedule, it is just an assumed one — and it names the way out of it.
     if(proposed.length){
       const to = proposed.reduce((a, s) => s.date > a ? s.date : a, '');
-      out.push({ text: head(`filled from the rota to ${fmtDay(to)} — ` +
+      const ids = new Set(proposed.map(s => s.id));
+      out.push({ text: head(`filled from the rota to ${fmtDay(to)} \u2014 ` +
         `${proposed.length} shift${proposed.length===1?'':'s'}, none confirmed yet. ` +
-        'A screenshot of that week confirms them.'), fed: true });
+        'A screenshot of that week confirms them.'), fed: true,
+        // A screenshot is the better confirmation and stays the sentence. This
+        // is the other answer: he knows the rota held, and saying so should not
+        // cost one dialog per shift (§44).
+        act: { label: `Confirm ${proposed.length===1 ? 'it' : `all ${proposed.length}`}`,
+               pred: s => ids.has(s.id) } });
     }
 
     // The alarm below is about running out of schedule altogether, so it is
@@ -907,10 +913,20 @@ function horizonNotes(){
     // fills a week, which is §19.1's mistake exactly.
     const stale = S.shifts.filter(s => s.companyId === co.id && isProposed(s) &&
                                        s.date < today && s.date >= shiftDays(today, -14));
-    if(stale.length)
+    if(stale.length){
+      const ids = new Set(stale.map(s => s.id));
       out.push({ text: head(`${stale.length} shift${stale.length===1?'':'s'} in the last fortnight ` +
         `came from the rota and ${stale.length===1?'was':'were'} never confirmed against a screenshot. ` +
-        'The hours and the pay for those are assumptions.'), fed: false });
+        'The hours and the pay for those are assumptions.'), fed: false,
+        // Same button, and it asks first. These are nights that have already
+        // been worked or not: confirming them is a statement about money that
+        // has been earned, where the one above is a statement about a week
+        // still ahead that can be corrected by the next screenshot.
+        act: { label: `Confirm ${stale.length===1 ? 'it' : `all ${stale.length}`}`,
+               pred: s => ids.has(s.id),
+               ask: `Confirm ${stale.length} shift${stale.length===1?'':'s'} that came from the rota? ` +
+                    'The hours and the pay stop being counted as assumptions.' } });
+    }
   });
   return out;
 }
@@ -1115,6 +1131,31 @@ function restNotes(){
     });
 }
 
+/* Confirming a rota shift without opening it (§44).
+
+   Filling a week from the rota writes four or five proposals, and the only way
+   to say "yes, that is what I worked" was to open each one and press Save —
+   `isProposed(s)` is cleared on the way out of the edit dialog. Five dialogs to
+   answer one question the banner had already asked is exactly the friction
+   that leaves a week unconfirmed for a fortnight, which is the state the second
+   note here exists to complain about.
+
+   `source` is the whole of it, and everything else follows the edit dialog's
+   own reasoning: `feedICS` marks a proposal's event "(from the rota)", so
+   confirming changes the title of an event the calendar may already hold, and
+   `restamp` is what makes that a *newer* revision rather than one a calendar is
+   free to ignore (§22, §26.7). Times, records and pay are untouched — this
+   says only that the assumption was right. */
+function confirmProposals(pred){
+  const going = S.shifts.filter(s => isProposed(s) && pred(s));
+  if(!going.length) return 0;
+  const ids = new Set(going.map(s => s.id));
+  going.forEach(s => { s.source = 'manual'; });
+  restamp(s => ids.has(s.id));
+  save(); renderAll();
+  return going.length;
+}
+
 function renderHorizon(){
   const wrap = $('#horizon');
   if(!wrap) return;
@@ -1146,6 +1187,19 @@ function renderHorizon(){
   notes.forEach(n => {
     const p = el('p', 'flag horizon' + (n.fed ? ' fed' : ''));
     p.textContent = n.text;
+    // The way out of the state the sentence just described, next to the
+    // sentence. A note with nothing to press stays a note.
+    if(n.act){
+      const b = el('button', 'doit');
+      b.type = 'button';
+      b.textContent = n.act.label;
+      b.onclick = () => {
+        if(n.act.ask && !confirm(n.act.ask)) return;
+        confirmProposals(n.act.pred);
+      };
+      p.appendChild(document.createTextNode(' '));
+      p.appendChild(b);
+    }
     wrap.appendChild(p);
   });
 }
@@ -1622,7 +1676,10 @@ function renderPatterns(co, host, sugHost){
       // the field that has to say it is doing that (§27).
       const role = roleById(pat.roleId), site = siteById(pat.siteId);
       const rate = rateFor({}, role, co);
-      const named = [role && role.name, site && site.name].filter(Boolean).join(' \u00b7 ');
+      // Site then role, the order every other screen and the calendar title use
+      // (whereText in sites.js). A generated week is filed under exactly this,
+      // so the sentence that describes it has to read the way the rows will.
+      const named = [site && site.name, role && role.name].filter(Boolean).join(' \u00b7 ');
       const money = role && role.rate != null ? `, at $${(+role.rate).toFixed(2)} an hour`
                   : rate != null ? `, at the job\u2019s $${rate.toFixed(2)}` : '';
       what.textContent =
@@ -3040,29 +3097,16 @@ async function readCalendarFiles(files){
   }
 }
 
-/* Fetching the feed directly would remove the saving step altogether, and for
-   a feed that allows it this is the whole win. Most do not: Google's iCal
-   addresses send no CORS headers, so the browser refuses to hand this page the
-   response. That failure is indistinguishable from being offline, so say what
-   is actually likely rather than guessing at a cause. */
-async function fetchCalendar(url){
-  const clean = String(url).trim().replace(/^webcal:/i, 'https:');
-  if(!/^https?:\/\//i.test(clean)){ alert('That does not look like a link.'); return; }
-  const txt = $('#progtext');
-  $('#prog').classList.add('on');
-  txt.textContent = 'Fetching the calendar…';
-  try{
-    const res = await fetch(clean, { redirect: 'follow' });
-    if(!res.ok) throw new Error(String(res.status));
-    const body = await res.text();
-    S.settings.icsUrl = clean; save();
-    readCalendarText(body, clean);
-  }catch(e){
-    txt.textContent = 'That link could not be read from here. Most calendar feeds — ' +
-      "Google's included — refuse to hand their contents to a web page. " +
-      'Open the link in Chrome to save the .ics, then add the file above.';
-  }
-}
+/* `fetchCalendar` stood here and went with the button that called it (§43).
+   It fetched an employer's feed straight from the page, which Google's iCal
+   addresses refuse — no CORS headers — so it spent most of its life printing
+   an apology. The Worker does the same job from a place the refusal does not
+   apply: server-side, on a cron, against `env.ICS_URL`.
+
+   `S.settings.icsUrl` was written only there and is now written nowhere. It
+   stays in `SETTINGS_PRIVATE` regardless: a store restored from an older
+   backup can still be carrying one, and a secret calendar address is not
+   something to start putting in a file again on a technicality. */
 
 function flagText(p){
   const say = f => {
@@ -3780,23 +3824,17 @@ $('#intake').onclick = () => $('#picker').click();
 $('#intake').onkeydown = e => { if(e.key==='Enter'||e.key===' '){ e.preventDefault(); $('#picker').click(); } };
 $('#picker').onchange = () => { handleFiles($('#picker').files); $('#picker').value = ''; };
 
-$('#icsintake').onclick = () => $('#icspick').click();
-$('#icsintake').onkeydown = e => { if(e.key==='Enter'||e.key===' '){ e.preventDefault(); $('#icspick').click(); } };
-$('#icspick').onchange = () => { handleFiles($('#icspick').files); $('#icspick').value = ''; };
-['dragenter','dragover'].forEach(ev => $('#icsintake').addEventListener(ev, e => {
-  e.preventDefault(); $('#icsintake').classList.add('hot'); }));
-['dragleave','drop'].forEach(ev => $('#icsintake').addEventListener(ev, e => {
-  e.preventDefault(); $('#icsintake').classList.remove('hot'); }));
-$('#icsintake').addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+/* The .ics intake box, "Fetch from a link" and "Paste calendar text" were all
+   here and are gone (§43). Three doors onto one path Ray has never walked: the
+   employer's calendar reaches this app through the Worker's cron, which polls
+   `env.ICS_URL` on a schedule and needs nothing tapped. What is left on this
+   screen is what he actually does — screenshots, the rota, one by hand.
 
-$('#icslink').onclick = () => {
-  const url = prompt('Link to the calendar feed', S.settings.icsUrl || '');
-  if(url) fetchCalendar(url);
-};
-$('#icspaste').onclick = async () => {
-  const text = prompt('Paste the calendar text, starting at BEGIN:VCALENDAR');
-  if(text && text.trim()) readCalendarText(text, 'pasted text');
-};
+   `handleFiles` still routes an .ics to `readCalendarText`, so a calendar file
+   dropped on the screenshot box is still read. That is a fallback with no
+   promise on the screen, which is the right shape for a path nobody uses: it
+   costs nothing to keep and it is the only way back in if the Worker is down.
+*/
 ['dragenter','dragover'].forEach(ev => $('#intake').addEventListener(ev, e => {
   e.preventDefault(); $('#intake').classList.add('hot'); }));
 ['dragleave','drop'].forEach(ev => $('#intake').addEventListener(ev, e => {

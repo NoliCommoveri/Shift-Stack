@@ -1,6 +1,9 @@
 # Shift Deck — project state
 
-_Last updated 5 September 2026_ — §39 puts each job's colour on its own events,
+_Last updated 5 September 2026_ — §42 turns the title round: job, site, role,
+on the calendar and on every screen, because the place is the half worth
+keeping when a line is cut short.
+§39 puts each job's colour on its own events,
 which is the second signal §25 said colour could be and never the only one: the
 title still names the job. It is an experiment with a known worst case — a
 client that does not read RFC 7986's `COLOR` skips the line and shows the
@@ -3241,6 +3244,10 @@ is which side of it is trustworthy — the site half is now the curated spelling
 rather than whatever the reader made of it that day. A shift matching no site
 produces the byte-identical title it produced yesterday.
 
+*(Overtaken in one respect, §42: the two halves changed places, so the same
+title now reads `DSI- De la Montagne | Cook Plant ASO`. The separator, the
+curated spelling and the no-site fallback are all as written here.)*
+
 **And the knock-on §8.1 warned about is now handled rather than noted.**
 Renaming a site, adding an address to one, merging or removing one all change
 the text of events a calendar may already hold. `restamp()` bumps `SEQUENCE`
@@ -4410,6 +4417,10 @@ with the address still on it. The order is §8.1's `${company}- ${role} |
 ${site}`, the same as every other screen and the TrackTik rows; the calendar is
 not the place to invent a second one.
 
+*(§42 reverses the order to `${company}- ${site} | ${role}` — the event reads
+`Tru-Point- F.O.C. | Security Officer`. The sentence above is why that had to
+be one change in one function and not a calendar-only tweak.)*
+
 ### What is tested
 
 `placeName` and `roleFrom` are unit tests naming the real strings — the street
@@ -4841,3 +4852,97 @@ launch is the one thing that cannot fetch it. So: open the site in Chrome
 The home screen icon works from then on. If it does not, **Setup → Flush cache
 and reload** does the same thing harder, and reinstalling the icon picks up the
 new `start_url` as well.
+
+---
+
+## 42. Changed: the place leads the title, 5 September 2026
+
+Ray asked for job, site, role — on the calendar and on the dashboard both. It
+was job, role, site.
+
+    before   DSI- Cook Plant ASO | SOUTHERN HENS      Unassigned · Cook Plant ASO · SOUTHERN HENS
+    after    DSI- SOUTHERN HENS | Cook Plant ASO      DSI · SOUTHERN HENS · Cook Plant ASO
+
+### 42.1 Why this way round is the better one anyway
+
+Every place the string is read, it is read left to right and cut off on the
+right. A 05:00 alarm body on a lock screen, the `.sub` line under a schedule
+row, the Where line in the shift dialog, a phone's own calendar list — all of
+them run out of room, and none of them run out of it on the left.
+
+So the question is which half survives a truncation, and the two halves are not
+equal. The site is what he drives to; it is what the address hangs off, what
+`whereKey` files the shift under, and the thing that tells one twelve-hour
+night from another. The role is what he does once he is there, and on a job
+with one role it says nothing at all — Homebase prints `Cook` for every shift
+it publishes. Reading `SOUTHERN HENS · Cook Pl…` he knows where he is going.
+Reading `Cook Plant ASO · SOUTHE…` he knows what he already knew.
+
+It also puts the title in narrowing order after the job name — employer, place,
+task — which is the order the rest of the app already asks for names in.
+
+### 42.2 One function, because §26 made it one function
+
+`whereText()` in sites.js is the only place the two halves are joined. The
+calendar goes through it (`eventTitle` → `feed.js`), and so does every screen
+(`shiftWhere` in app.js), which is exactly what §36 insisted on — *the calendar
+is not the place to invent a second order*. So the swap is one expression, and
+the two ends cannot disagree about it.
+
+The one string that was built by hand rather than through `whereText` was the
+rota editor's *"Runs Mon–Fri, 19:00–07:00 as Cook Plant ASO · SOUTHERN HENS"*,
+which joined the pattern's declared role and site itself. It is flipped to
+match. A generated week is filed under exactly those two records, so the
+sentence describing it has to read the way the rows it produces will.
+
+### 42.3 The input side is untouched, and that is the whole subtlety
+
+The employer prints `role | place` — TrackTik on screen, and Homebase's three
+properties assembled into the same shape by `labelFor` (§36). `splitLabel` in
+parser.js and `readLabel` in sites.js both read that order, and §17.4 is the
+section that made the pipe trustworthy enough to read it by.
+
+None of that moved. This is the output side only: what the app *writes* for a
+person to read, not what it *reads* from an employer. A shift's `label` still
+holds the employer's order, unchanged, and still resolves to the same site and
+the same role as it did yesterday. The test added to sites.test.js pins the two
+orders against each other in one case, so a later reader that flattens them
+back together fails rather than silently swapping a role for a place.
+
+The fallbacks are unchanged for the same reason they exist: a shift with no
+site reads as its raw label, a matched role with no site speaks alone, and a
+site with no role is just the site. There is no order to reverse in any of
+those, and a shift that matched neither table produces the byte-identical
+title it produced before either table existed.
+
+### 42.4 What this does to events already on the phone
+
+§8.1's warning, restated by §26.7: changing `SUMMARY` at all rewrites every
+event.
+
+- **Subscription mode (§14) handles itself.** The Worker rebuilds the whole
+  feed on each poll from `feedICS`, so the next fetch carries the new titles
+  and nothing has to be tracked.
+- **Manual-import mode does not.** A shift already marked `sent` has an event
+  on the phone with the old title and no reason to be sent again. `restamp()`
+  is the mechanism — bump `SEQUENCE`, clear `sent` — but it fires on renaming
+  a site or a role, not on a change to the code that formats them, and there
+  is no `S.version` to hang a one-time migration off (§7, §26.9 chose that
+  deliberately). So those events keep the old title until the shift is edited.
+
+The answer there is the control that already exists: **Rebuild the whole
+calendar** in Setup, which exports every shift again rather than the unsent
+ones. It re-exports at the same `SEQUENCE`, which is why its own dialog says to
+clear the shift calendar first — so the honest instruction for this change is
+clear the calendar, then rebuild. Not automated here: a title reading the old
+way round until the next rebuild is a cosmetic lag, and a migration that
+restamped every shift on load would be a schema-shaped answer to a formatting
+change (§7).
+
+### 42.5 What is tested
+
+The two title assertions in sites.test.js swap sides, and a new case states the
+rule outright: the label goes in as `role | place` and the title comes out as
+`place | role`, with the single-half cases asserted alongside so the fallbacks
+cannot drift with it. `feed.js` and `ics.js` needed no changes — the writer
+takes the title from `eventTitle` and the reader never sees one.
