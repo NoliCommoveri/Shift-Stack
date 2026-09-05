@@ -8,8 +8,14 @@
    like it had not worked: the cron had the fix, the phone was still running
    the code that never sends a time zone. Changing this string is what makes
    the browser reinstall the worker, re-fetch every file in FILES from the
-   network, and claim the open page. */
-const SHELL = 'shiftdeck-shell-v11';
+   network, and claim the open page.
+
+   v12 is §39: the colour lives in `ics.js` and `feed.js`, both of them in
+   FILES below, and the file the *page* saves is written by the copies the
+   shell is holding. Left at v11 the exported calendar would come out with no
+   COLOR line on a phone that already has the app — which is §37's failure
+   exactly, and the one this string exists to prevent. */
+const SHELL = 'shiftdeck-shell-v12';
 const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs a 10MB re-download
 /* Every script index.html loads, and nothing it does not. feed.js and merge.js
    were missing from this list from the day §14.7 extracted them: the shell

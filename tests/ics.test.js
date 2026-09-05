@@ -325,6 +325,68 @@ test('what it writes reads back as a cancellation', () => {
   assert.equal(report.cancelledRows[0].date, '2026-09-07');
 });
 
+/* ---------- colour ------------------------------------------------------- */
+
+test('a hex the CSS3 list actually has comes back by name', () => {
+  assert.equal(I.icsColor('#ff0000'), 'red');
+  assert.equal(I.icsColor('#000080'), 'navy');
+  assert.equal(I.icsColor('4682B4'), 'steelblue');     // no leading #
+  assert.equal(I.icsColor('#0F0'), 'lime');            // three digits
+});
+
+test('anything that is not a colour gets no name, so no property is written', () => {
+  // The caller writes the line only if this returns something. A COLOR with a
+  // hex in it, or with nothing in it, is a value RFC 7986 does not allow.
+  for(const junk of ['', null, undefined, 'rebeccapurple', '#12345', 'steelblue', '#nothex'])
+    assert.equal(I.icsColor(junk), '', `${JSON.stringify(junk)} should name no colour`);
+});
+
+test('the Setup palette gives five jobs five different colours', () => {
+  // The point of the whole property. Two jobs that come out the same name are
+  // two jobs the calendar cannot tell apart, which is the state before this
+  // existed — and it is what nearest-in-RGB actually did to this palette: the
+  // navy and the plum both answered darkslateblue.
+  const palette = ['#2F4B7C', '#B0631A', '#2F6B4F', '#7A3B69', '#8A2E2E'];
+  const names = palette.map(I.icsColor);
+  assert.ok(names.every(Boolean), 'every palette entry names a colour');
+  assert.equal(new Set(names).size, palette.length, `collided: ${names.join(', ')}`);
+});
+
+test('the name is one a client can look up, not one this file invented', () => {
+  // ICSx\u2075 matches the value against its own CSS3 table and drops what it
+  // cannot find, silently. A typo in the table here would be invisible.
+  const css3 = new Set(['aliceblue','antiquewhite','aqua','aquamarine','azure','beige','bisque',
+    'black','blanchedalmond','blue','blueviolet','brown','burlywood','cadetblue','chartreuse',
+    'chocolate','coral','cornflowerblue','cornsilk','crimson','darkblue','darkcyan','darkgoldenrod',
+    'darkgray','darkgreen','darkkhaki','darkmagenta','darkolivegreen','darkorange','darkorchid',
+    'darkred','darksalmon','darkseagreen','darkslateblue','darkslategray','darkturquoise',
+    'darkviolet','deeppink','deepskyblue','dimgray','dodgerblue','firebrick','floralwhite',
+    'forestgreen','fuchsia','gainsboro','ghostwhite','gold','goldenrod','gray','green',
+    'greenyellow','honeydew','hotpink','indianred','indigo','ivory','khaki','lavender',
+    'lavenderblush','lawngreen','lemonchiffon','lightblue','lightcoral','lightcyan',
+    'lightgoldenrodyellow','lightgray','lightgreen','lightpink','lightsalmon','lightseagreen',
+    'lightskyblue','lightslategray','lightsteelblue','lightyellow','lime','limegreen','linen',
+    'maroon','mediumaquamarine','mediumblue','mediumorchid','mediumpurple','mediumseagreen',
+    'mediumslateblue','mediumspringgreen','mediumturquoise','mediumvioletred','midnightblue',
+    'mintcream','mistyrose','moccasin','navajowhite','navy','oldlace','olive','olivedrab',
+    'orange','orangered','orchid','palegoldenrod','palegreen','paleturquoise','palevioletred',
+    'papayawhip','peachpuff','peru','pink','plum','powderblue','purple','red','rosybrown',
+    'royalblue','saddlebrown','salmon','sandybrown','seagreen','seashell','sienna','silver',
+    'skyblue','slateblue','slategray','snow','springgreen','steelblue','tan','teal','thistle',
+    'tomato','turquoise','violet','wheat','white','whitesmoke','yellow','yellowgreen']);
+  // Every entry in the table has to be in that set, and the way to reach them
+  // all is to ask for each one exactly.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'ics.js'), 'utf8');
+  const table = /const CSS3_NAMES = \{([\s\S]*?)\n\};/.exec(src);
+  assert.ok(table, 'the colour table is still where this test looks for it');
+  const entries = [...table[1].matchAll(/([a-z]+):0x([0-9a-f]{6})/g)];
+  assert.equal(entries.length, 138, 'the CSS3 list, minus the duplicate spellings');
+  for(const [, name, hex] of entries){
+    assert.ok(css3.has(name), `${name} is not a CSS3 colour keyword`);
+    assert.equal(I.icsColor('#' + hex), name, `${name} does not answer to its own hex`);
+  }
+});
+
 /* ---------- golden fixtures ---------------------------------------------- */
 
 const feeds = fs.existsSync(FIX)

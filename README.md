@@ -67,6 +67,15 @@ afterwards; if it is still there, delete it in the calendar by hand. This is
 the mode's known cost, and the reason subscription is the recommended one —
 there the feed is rebuilt whole and a deleted shift simply is not in it.
 
+Each event also carries the colour of the job it belongs to — the one on the
+dot in Setup and on the tick in the Schedule — as an RFC 7986 `COLOR` line.
+Whether it shows depends on the app reading the feed: ICSx⁵ passes it through
+to Android's calendar and the Google Calendar app draws it, while most other
+clients ignore the property and colour the whole subscription one shade, which
+is what they did before. Nothing is lost either way; the job's name is still at
+the front of every title. If the events all come through one colour, subscribe
+once per job instead and colour each subscription in ICSx⁵.
+
 Alarm lead times are set in Setup, in hours before each shift.
 
 One alarm is not a lead time. When two shifts leave him between two and eight
