@@ -125,16 +125,9 @@ function fmtTime(t){
 }
 /* `durMins` and `fmtDur` come from feed.js, which needs both to write the
    calendar file and is loaded before this one. */
-/* The same gap, in words. "6h 45m" is right in a column of figures beside the
-   shift lengths it has to be compared against, and wrong inside a sentence,
-   where it reads as a code rather than as an amount of sleep. */
-function fmtDurWords(m){
-  const h = Math.floor(m/60), r = m%60;
-  const bits = [];
-  if(h) bits.push(`${h} hour${h === 1 ? '' : 's'}`);
-  if(r) bits.push(`${r} minute${r === 1 ? '' : 's'}`);
-  return bits.join(' and ') || '0 minutes';
-}
+/* `fmtDurWords` — the same gap in words — is when.js's now (§49), along with
+   the whole of the countdown arithmetic, because the viewer says it too and
+   the card on opening says it a third time. */
 /* ---------- which clock a shift is on (§14.10) --------------------------
    A shift is a wall time somewhere, and "somewhere" is where he is standing.
    On this phone that is free — `parseICS` with no zone reads a feed into the
@@ -779,38 +772,34 @@ function bindClock(inp, set, opts = {}){
   return { read, settle: () => inp.onblur() };
 }
 
-/* -- next shift banner -- */
-function nextShift(){
-  const now = new Date();
-  const cands = S.shifts
-    .map(s => ({ s, at: new Date(`${s.date}T${s.start}:00`) }))
-    .filter(x => x.at.getTime() + durMins(x.s)*60000 > now.getTime())
-    .sort((a,b) => a.at - b.at);
-  return cands[0] || null;
-}
+/* -- next shift banner --
+   Which shift, and both countdowns, come from when.js (§49): the viewer draws
+   this same banner and the card on opening reads the same minute, and three
+   copies of one subtraction is three chances to disagree about one shift. What
+   is left here is the drawing. */
 function renderNext(){
   const wrap = $('#nextwrap');
   wrap.innerHTML = '';
-  const n = nextShift();
+  const n = whenNext(S.shifts);
   if(!n){
     wrap.appendChild(el('div','card soft','<span class="tiny">No upcoming shifts on file.</span>'));
     return;
   }
   const co = coById(n.s.companyId);
   const d = asDate(n.s.date);
-  const rel = Math.round((n.at - new Date())/60000);
-  let cd;
-  if(rel <= 0) cd = 'On shift now';
-  else if(rel < 60) cd = `Starts in ${rel} min`;
-  else if(rel < 1440) cd = `Starts in ${Math.floor(rel/60)}h ${rel%60}m`;
-  else cd = `In ${Math.round(rel/1440)} days`;
+  // The second line is what to do about it: the door, at §46's forty-five
+  // minutes before the start, or — once he is in the shift — when it lets him
+  // go. Empty for a shift more than a day out, where there is nothing to leave
+  // for yet and the line above already says how long that is.
+  const lead = whenLead(n);
 
   const box = el('div','next');
   box.innerHTML = `
     <div class="lbl">NEXT SHIFT</div>
     <div class="big">${DAYNAMES[d.getDay()]} ${d.getDate()} ${MONTHNAMES[d.getMonth()].slice(0,3)} &middot; ${esc(fmtTime(n.s.start))}</div>
     <div class="sub">${esc(co ? co.name : 'Unassigned')} &middot; ${esc(shiftWhere(n.s))} &middot; ${fmtDur(durMins(n.s))}</div>
-    <div class="cd">${cd}</div>`;
+    <div class="cd">${esc(whenCountdown(n))}</div>
+    ${lead ? `<div class="cd lead">${esc(lead)}</div>` : ''}`;
   wrap.appendChild(box);
 }
 
@@ -4376,4 +4365,18 @@ $('#flushcache').onclick = async () => {
     // to catch up on whatever it could not send.
     autoPush();
   });
+
+  // The card on opening (§49). `whenWake` binds the openings — coming back to
+  // a page that was never unloaded, and a page the system killed and restored
+  // — and returns the same call to make for this one, which is an opening too.
+  // Its own ten-minute floor is what keeps a glance at a message from becoming
+  // a card, so both routes can fire freely.
+  const openCard = whenWake(() => S.shifts, {
+    key: 'app',
+    describe: s => {
+      const co = coById(s.companyId);
+      return `${co ? co.name : 'Unassigned'} \u00b7 ${shiftWhere(s)} \u00b7 ${fmtDur(durMins(s))}`;
+    }
+  });
+  openCard();
 })();

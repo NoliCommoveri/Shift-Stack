@@ -5669,3 +5669,101 @@ is a new label on the same app, not a new app.
 `view-sw.js` caches both the page and the manifest, so an installed phone keeps
 the old name until the shell name changes. §47 already took it to `v2` and
 neither change has deployed, so the one bump carries both.
+
+## 49. Built: what to do about the shift, not just when it is, 5 September 2026
+
+The banner said `Starts in 17h 53m`. True, and not the number he sets an alarm
+by: the shift starts at 19:15 and he is out of the door at 18:30, and the
+subtraction was being done in his head every time the screen was looked at.
+So the banner grew a second line, and it says the thing there is to do:
+
+```
+NEXT SHIFT
+Sat 5 Sep · 19:15
+Tru-Point · F.O.C. · Security Officer · 12h
+Starts in 17h 53m
+Leave in 17h 8m
+```
+
+Forty-five minutes, which is `LEAVE_PAD` in kids.js (§46) and the same fact:
+what the door costs. Inside that forty-five minutes it stops counting and says
+**Leave now** — a countdown that runs to zero and then counts up again has to
+be read to be understood, at the one moment there is nothing spare to read
+with. More than a day out it says nothing: *Leave in 2 days* under *In 3 days*
+is one wait rounded twice, disagreeing with itself, and neither rounding is a
+thing to do today.
+
+During a shift both lines change job. The top one already said **On shift
+now**, and the second one now says **Off in 10h 15m**, which on a twelve-hour
+night is the only figure on the screen anybody wants.
+
+### 49.1 The card on opening
+
+An installed PWA that is switched away from is not closed. The page stays
+loaded in the background, and coming back to it fires no `load`, no
+`DOMContentLoaded` and nothing else a first run would hang off — which is why
+this could not be done where it would first be looked for. What it does fire
+is `visibilitychange`, and, when the system froze or killed the page and put it
+back, `pageshow` with `persisted`. `whenWake` binds both and lets the floor
+below sort out the double; deciding which of the two *counts* as the opening is
+a question with no answer and no need of one.
+
+The card is the same banner in the dialog, saying one sentence:
+
+- off shift — **Work in 17 hours and 53 minutes**
+- on shift — **Off in 10 hours and 15 minutes**
+
+Ten minutes' quiet between showings (`WHEN_QUIET`), because switching out to
+read a message and coming straight back is not an opening, and a card that
+greets every one of those is a card that gets dismissed unread — which is the
+same as not having one, except it is also in the way.
+
+The floor is in `localStorage` rather than a variable, and that is the whole
+point of it: the case it exists for is the one where there is no variable left,
+because Android stopped the app in the background and rebuilt it on the next
+tap. To this code that is indistinguishable from a first run, and it is the
+most common way the app gets opened.
+
+Both pages sit on one origin and so share one `localStorage`, so the key is per
+page — `when-prompt-app`, `when-prompt-view`. Two apps writing one *last shown*
+would each suppress the other's card, and the bug report for that is "it only
+shows sometimes".
+
+### 49.2 One file, because the answer has to be one answer
+
+`when.js` is new, and loads on both pages between `merge.js` and the page's own
+script. What moved into it is every subtraction either screen does about the
+clock: which shift is next, how long until it starts, until he leaves, until it
+ends, and the wording of all of it.
+
+There were about to be four copies — two banners and a card on each phone —
+and the way that fails is not a crash. It is the banner saying *Starts in 3h
+2m* while the card behind it says *Work in 3 hours and 4 minutes*, about one
+shift, on one screen, because two of the four rounded a different way. §31 is
+the standing reminder that the silent version of a bug is the expensive one.
+
+The file is pure and takes the clock as an argument, so `tests/when.test.js`
+can ask it about midnight, about a shift already running, and about the minute
+before the door without waiting for any of them. `fmtDurWords` moved in too —
+it had been copied into app.js and view.js — and `whenPrompt`, the one function
+that draws, takes its subtitle from the caller, because the two pages read a
+company off different stores.
+
+The lead could not also be called `LEAVE_PAD`: both files are classic scripts,
+and a page that ever loaded when.js and kids.js together would die on the
+repeated `const` before drawing anything. So it is `LEAVE_LEAD`, and
+`config.test.js` asserts the two numbers agree — which is the half that
+matters, since what they mean is one fact.
+
+### 49.3 Shipping it
+
+A new file in the shell is a file the installed phones do not have, and §41's
+rule is that `install` only re-runs under a cache name it has not seen. So
+`when.js` goes into both `FILES` lists and `SHELL` goes to `v17` in `sw.js` and
+`v3` in `view-sw.js`. Without the bump the deploy is a page that loads a script
+the worker answers with a 404 from its own cache, on both phones, and the first
+thing it would break is the banner.
+
+The viewer also gets a minute timer, which it had never needed: it drew the
+countdown once on load and left it. A number that only changes what he does —
+*Leave in 3 min* — cannot be an hour stale on the screen it is read from.

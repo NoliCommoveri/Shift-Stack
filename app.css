@@ -161,6 +161,14 @@ tr.assumed td:first-child{color:var(--ink)}
 .next .big{font-size:1.25rem;font-weight:600;margin:.1rem 0 .05rem}
 .next .sub{font-size:.87rem;opacity:.8}
 .next .cd{font-family:"IBM Plex Mono",monospace;font-size:.85rem;opacity:.9;margin-top:.35rem}
+/* The line under the countdown: what to do about the shift rather than when it
+   is (§49). Quieter than the line above it and closer to it, because the two
+   are one answer read together and not two facts of equal weight. */
+.next .cd.lead{opacity:.72;margin-top:.1rem}
+
+/* The card on opening (§49) is the same banner, inside the dialog, so it drops
+   the margin the banner carries to separate itself from the week below it. */
+#dlgbody .next{margin-bottom:.9rem}
 
 /* import */
 .intake{
