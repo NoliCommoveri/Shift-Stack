@@ -426,3 +426,101 @@ test('the view token reads, and an unset one opens nothing', () => {
   // And an empty string as a secret is not a password of length zero.
   assert.equal(G.viewOK({ VIEW_TOKEN: '', PUSH_TOKEN: '' }, ''), false);
 });
+
+
+/* Who the kids' token lets in, and what it lets them see. PROJECT.md §46.
+ *
+ * The same argument one step further down. §45's viewer cannot write because
+ * `VIEW_TOKEN` opens no route that writes; the kids' phone cannot see the pay
+ * because `KIDS_TOKEN` opens no route that sends any. A page with the pay tab
+ * deleted would not be that: it would be a phone holding `VIEW_TOKEN`, one
+ * address bar away from every rate and every gross on file.
+ *
+ * So the two halves are asserted here — who gets in, and what comes out — and
+ * config.test.js asserts that `/soon` is where they are wired.
+ */
+test('the kids’ token opens the week, and an unset one opens nothing', () => {
+  const env = { PUSH_TOKEN: 'push-tok', VIEW_TOKEN: 'view-tok', KIDS_TOKEN: 'kids-tok' };
+
+  assert.equal(G.kidsOK(env, 'kids-tok'), true);
+  // Both of the tokens above it. Neither is a hole: each already reads
+  // everything this route returns and a great deal more.
+  assert.equal(G.kidsOK(env, 'view-tok'), true);
+  assert.equal(G.kidsOK(env, 'push-tok'), true);
+
+  // And the other direction, which is the one that matters: the kids' token is
+  // not a view token. `/read` must not answer it.
+  assert.equal(G.viewOK(env, 'kids-tok'), false);
+  assert.equal(G.tokenOK(env.PUSH_TOKEN, 'kids-tok'), false);
+
+  // The near misses `tokenOK` is written for.
+  assert.equal(G.kidsOK(env, 'kids-tok '), false);
+  assert.equal(G.kidsOK(env, 'Kids-Tok'), false);
+  assert.equal(G.kidsOK(env, 'kids-to'), false);
+  assert.equal(G.kidsOK(env, ''), false);
+
+  // Unset fails closed, which is the state of every Worker for the one deploy
+  // between adding a secret and it taking effect (§14.9).
+  assert.equal(G.kidsOK({}, 'kids-tok'), false);
+  assert.equal(G.kidsOK(undefined, 'kids-tok'), false);
+  assert.equal(G.kidsOK({ KIDS_TOKEN: '', VIEW_TOKEN: '', PUSH_TOKEN: '' }, ''), false);
+});
+
+/* What leaves the building. The list of keys is the test: a shift that reached
+ * the kids' phone with a `rate` on it would be §46 failing at the only thing
+ * it does.
+ */
+test('the kids’ week carries times and no money at all', () => {
+  const companies = [
+    { id: 'c1', name: 'Trupoint', color: '#2F4B7C', rate: 21.5, otMult: 1.5,
+      otAfterHrs: 40, weekStart: 0, breakMins: 30 },
+    { id: 'c2', name: 'Homebase', color: '#7C5B2F', rate: 18 }
+  ];
+  const shifts = [
+    { id: 's1', companyId: 'c1', source: 'feed', date: '2026-09-05', start: '19:00',
+      end: '07:00', siteId: 'site-1', roleId: 'role-1', rate: 33, note: 'private' },
+    { id: 's2', companyId: 'c2', source: 'manual', date: '2026-09-11', start: '08:00', end: '12:00' },
+    { id: 's3', companyId: 'c1', source: 'manual', date: '2026-09-04', start: '08:00', end: '12:00' },
+    { id: 's4', companyId: 'c1', source: 'manual', date: '2026-09-12', start: '08:00', end: '12:00' }
+  ];
+
+  const out = G.soonOnly(shifts, companies, '2026-09-05');
+
+  // Four fields, named. Not "no rate in it" — that would pass for a shift that
+  // carried the site address and the role instead.
+  for(const row of out)
+    assert.deepEqual(Object.keys(row).sort(), ['color', 'date', 'end', 'job', 'start']);
+
+  // The window: today through today+6, inclusive at both ends. The 4th is
+  // yesterday and the 12th is the eighth day.
+  assert.deepEqual(out.map(s => s.date), ['2026-09-05', '2026-09-11']);
+  assert.deepEqual(out[0], { date: '2026-09-05', start: '19:00', end: '07:00',
+                             job: 'Trupoint', color: '#2F4B7C' });
+
+  // Said again as a string search, because the failure this guards against is
+  // a field added to the shape later by someone reading the shifts rather than
+  // this test.
+  assert.ok(!/33|21\.5|"rate"|otMult|site-1|role-1|private/.test(JSON.stringify(out)));
+
+  // Sorted, because the page draws them in the order they arrive within a day.
+  const many = G.soonOnly([
+    { companyId: 'c1', date: '2026-09-06', start: '17:00', end: '21:00' },
+    { companyId: 'c1', date: '2026-09-06', start: '06:00', end: '14:00' }
+  ], companies, '2026-09-05');
+  assert.deepEqual(many.map(s => s.start), ['06:00', '17:00']);
+
+  // A job that has been deleted leaves its shifts behind: the row still has to
+  // draw, with no name and the neutral colour the page falls back to.
+  assert.deepEqual(G.soonOnly([{ companyId: 'gone', date: '2026-09-05',
+                                 start: '09:00', end: '17:00' }], companies, '2026-09-05'),
+                   [{ date: '2026-09-05', start: '09:00', end: '17:00', job: '', color: '' }]);
+
+  // Rubbish in is dropped rather than drawn. A shift with no times is a row
+  // that would read as "leaves NaN".
+  assert.deepEqual(G.soonOnly([{ companyId: 'c1', date: '2026-09-05', start: '9am', end: '5pm' },
+                               { companyId: 'c1', date: 'soon', start: '09:00', end: '17:00' },
+                               { companyId: 'c1', date: '2026-09-05', start: '25:00', end: '17:00' },
+                               null], companies, '2026-09-05'), []);
+  assert.deepEqual(G.soonOnly(shifts, companies, 'not-a-date'), []);
+  assert.deepEqual(G.soonOnly(null, null, '2026-09-05'), []);
+});

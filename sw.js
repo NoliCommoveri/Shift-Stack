@@ -27,7 +27,7 @@
    file list has never heard of app.css. It would work, being the old page
    whole, and it would go on working for as long as the cache stood: a deploy
    that ships nothing, to the one phone that already trusted this worker. */
-const SHELL = 'shiftdeck-shell-v15';
+const SHELL = 'shiftdeck-shell-v16';
 const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs a 10MB re-download
 /* Every script index.html loads, and nothing it does not. feed.js and merge.js
    were missing from this list from the day §14.7 extracted them: the shell

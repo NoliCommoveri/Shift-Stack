@@ -68,7 +68,8 @@ test('.assetsignore keeps the repo off the public site', () => {
   // The viewer's four files and the stylesheet both pages link (§45). A page
   // excluded here is a 404 on the second phone with nothing to say why.
   for(const served of ['index.html', 'app.js', 'app.css', 'feed.js', 'merge.js', 'sw.js',
-                       'view.html', 'view.js', 'view-sw.js', 'view.webmanifest'])
+                       'view.html', 'view.js', 'view-sw.js', 'view.webmanifest',
+                       'kids.html', 'kids.js', 'kids-sw.js', 'kids.webmanifest'])
     assert.ok(!ignore.includes(served), `${served} must not be excluded`);
 });
 
@@ -120,6 +121,9 @@ test('no endpoint answers with the schedule before checking a token', () => {
     // The read-only viewer's route (§45). A different secret, and a narrower
     // one: `viewOK` is asserted below to open nothing that writes.
     if(/viewOK\(env, bearer\(req\)\)/.test(r.body)) return true;
+    // The kids' route (§46). Narrower again, and asserted below to answer with
+    // a week of times and nothing that could be read as money.
+    if(/kidsOK\(env, bearer\(req\)\)/.test(r.body)) return true;
     // Dispatched instead: follow it and look in the handler.
     const call = /return\s+([A-Za-z_$][\w$]*)\s*\(/.exec(r.body);
     return !!call && /tokenOK\(env\.PUSH_TOKEN, bearer\(req\)\)/.test(bodyOf(call[1]));
@@ -175,6 +179,177 @@ test('the view token opens exactly one route, and that route only reads', () => 
   const read = bodyOf('readAll');
   assert.ok(read, 'readAll exists');
   assert.ok(!/FROM raw|FROM polls/.test(read), '/read answers with the store, not the log');
+});
+
+/* The kids' half sees a week and no money (§46).
+ *
+ * §45's test above is the model and the reason: hiding a tab is worth nothing,
+ * because a phone holding a token and a `curl` are the same thing to a Worker.
+ * A kids' page built on `VIEW_TOKEN` would be one address bar away from
+ * `/read`, which answers with every shift on file and every company with its
+ * rate, its multiplier and its threshold sitting on it. So what is asserted
+ * here is the wiring: which route the kids' token opens, that it is the only
+ * one, and that the route hands back `soonOnly` rather than the store.
+ */
+test('the kids’ token opens exactly one route, and that route sends no money', () => {
+  assert.ok(require('../worker/guards.js').kidsOK, 'kidsOK is a guard, not a route detail');
+
+  const uses = [...worker.matchAll(/path === '(\/[a-z]+)' && req\.method === '([A-Z]+)'\)\{\s*\n\s*if\(!kidsOK/g)];
+  assert.equal(uses.length, 1, 'exactly one route accepts the kids’ token');
+  assert.deepEqual([uses[0][1], uses[0][2]], ['/soon', 'GET']);
+
+  // And it is not `/read`. That is the whole of §46: the two tokens open two
+  // different answers, rather than one answer drawn two ways.
+  for(const path of ['/push', '/reset', '/migrate', '/read', '/status', '/trace', '/shifts']){
+    const at = worker.indexOf(`path === '${path}'`);
+    assert.ok(at > 0, `${path} is still a route`);
+    assert.ok(!/kidsOK/.test(worker.slice(at, at + 400)),
+      `${path} must not accept the kids’ token`);
+  }
+
+  // What `/soon` answers with. Every shift it sends goes through `soonOnly`,
+  // which builds its output field by field and has its own unit test; the
+  // handler must not be assembling a second, looser shape beside it.
+  const soon = bodyOf('readSoon');
+  assert.ok(soon, 'readSoon exists');
+  assert.match(soon, /soonOnly\(/, '/soon shapes its answer with soonOnly');
+  // Named, rather than pattern-matched at the return: the failure to catch is
+  // a handler that grew a second field, and every one of these is a field it
+  // could plausibly grow. `cfg` is read here — the job names and colours come
+  // off it — and must go no further than `soonOnly`'s second argument.
+  for(const gone of ['readStore', 'sites', 'roles', 'settings', 'rate', 'raw', 'polls'])
+    assert.ok(!new RegExp(`\\b${gone}\\b`).test(soon),
+      `/soon must not so much as mention ${gone}`);
+  // The window is closed in SQL as well, so the rest of the schedule is never
+  // read out of D1 at all.
+  assert.match(soon, /readShifts\(env, 'WHERE date >= \? AND date <= \?'/);
+  // And the day it is closed around is his, not the Worker's: a Worker runs on
+  // UTC and a child opening this in the evening in Chicago is already inside
+  // the Worker's tomorrow (§35, §37).
+  assert.match(soon, /zoneFor\(/);
+  assert.match(soon, /todayIn\(zone\)/);
+});
+
+/* The kids' page holds no arithmetic that could price an hour (§46.1).
+ *
+ * The server half is above. This is the page half, and it is not decoration:
+ * `pay.js` not being loaded is what makes "there is no pay on this phone" a
+ * fact about the bytes rather than a promise about the markup.
+ */
+test('the kids’ page cannot price anything, and cannot write', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'kids.html'), 'utf8');
+  const js = fs.readFileSync(path.join(ROOT, 'kids.js'), 'utf8');
+
+  const scripts = [...html.matchAll(/<script\s+src="([^"]+)"/g)].map(m => m[1]);
+  assert.deepEqual(scripts, ['kids.js'],
+    'the kids’ page loads its own script and nothing else');
+  for(const gone of ['pay.js', 'app.js', 'view.js', 'ics.js', 'parser.js'])
+    assert.ok(!scripts.includes(gone), `the kids’ page must not load ${gone}`);
+
+  assert.ok(!/method:\s*'POST'/i.test(js), 'the kids’ page makes no POST');
+  for(const route of ['/push', '/reset', '/migrate', '/status', '/trace', '/read'])
+    assert.ok(!js.includes(`'${route}'`), `the kids’ page must not call ${route}`);
+  assert.ok(js.includes("fetch('/soon'"), 'the kids’ page reads /soon');
+
+  // Its own database, for §45's reason one page along: three stores on one
+  // origin, and a shared name is two writers over one 'state' key.
+  assert.match(js, /const KIDS_DB = 'shiftdeck-kids'/);
+
+  // The two paddings, named once each and not spelled into the sentences.
+  assert.match(js, /const LEAVE_PAD = 45;/);
+  assert.match(js, /const HOME_PAD  = 30;/);
+});
+
+/* The kids' shell, and its scope (§41, §45, §46). */
+test('the kids’ worker caches its page and claims only its own scope', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'kids.html'), 'utf8');
+  const sw = fs.readFileSync(path.join(ROOT, 'kids-sw.js'), 'utf8');
+  const shell = (/const FILES = \[([^\]]+)\]/.exec(sw) || [, ''])[1]
+    .split(',').map(x => x.trim().replace(/^'|'$/g, ''));
+  const cached = f => shell.includes(f) || shell.includes('/' + f) || shell.includes('./' + f);
+
+  for(const f of [...[...html.matchAll(/<script\s+src="([^"]+)"/g)].map(m => m[1]),
+                  '/kids', 'app.css', 'kids.webmanifest'])
+    assert.ok(cached(f), `kids-sw.js must cache ${f}, or the page is dead offline`);
+
+  const m = JSON.parse(fs.readFileSync(path.join(ROOT, 'kids.webmanifest'), 'utf8'));
+  assert.ok(!/\.html$/.test(m.start_url), `start_url must not redirect: ${m.start_url}`);
+  assert.equal(m.start_url, '/kids');
+  assert.equal(m.scope, '/kids');
+  assert.ok(shell.includes(m.start_url), 'the start URL must be in the shell cache');
+
+  // Three workers on one origin now. Each deletes only its own caches, and
+  // each claims only its own scope, or two of the three reinstall themselves
+  // from the network on every launch.
+  const nameOf = t => (/const SHELL = '([^']+)'/.exec(t) || [, ''])[1];
+  const names = ['sw.js', 'view-sw.js', 'kids-sw.js']
+    .map(f => nameOf(fs.readFileSync(path.join(ROOT, f), 'utf8')));
+  assert.equal(new Set(names).size, 3, 'three workers, three cache names');
+  assert.ok(nameOf(sw).startsWith('shiftdeck-kids-'));
+  assert.match(sw, /k\.startsWith\('shiftdeck-kids-'\)/,
+    'the kids’ worker must only ever delete its own caches');
+  assert.match(fs.readFileSync(path.join(ROOT, 'kids.js'), 'utf8'),
+    /register\('\/kids-sw\.js', \{ scope: '\/kids' \}\)/);
+
+  // Its own identity, or installing it would replace one of the other two on a
+  // phone that has them.
+  const ids = ['manifest.webmanifest', 'view.webmanifest', 'kids.webmanifest']
+    .map(f => JSON.parse(fs.readFileSync(path.join(ROOT, f), 'utf8')).id);
+  assert.equal(new Set(ids).size, 3, 'three apps, three identities');
+
+});
+
+/* Three apps, three drawings, and two files each (§47).
+ *
+ * The app and the viewer shared `icon-192.png` until §47, so on a phone
+ * holding both the only thing telling them apart was the word under an
+ * identical picture — which is not how a home screen is read. Each now has its
+ * own artwork, and each declares two purposes across two files rather than one
+ * file claiming both.
+ *
+ * `purpose: "any maskable"` on a single file is a claim that one picture is
+ * correct under two treatments, and it is not: Android crops a maskable icon
+ * to the circle inscribed in its square, so a full-bleed drawing loses its
+ * corners, and a pre-inset drawing used as `any` sits in a box of margin next
+ * to icons that do not. Whichever of the two is wrong is wrong silently, which
+ * is why it is asserted here rather than looked at.
+ */
+test('each of the three apps has its own icon, at both purposes', () => {
+  const apps = [['manifest.webmanifest', 'index.html', 'app'],
+                ['view.webmanifest', 'view.html', 'view'],
+                ['kids.webmanifest', 'kids.html', 'kids']];
+
+  const seen = new Map();
+  for(const [manifest, page, who] of apps){
+    const m = JSON.parse(fs.readFileSync(path.join(ROOT, manifest), 'utf8'));
+    const html = fs.readFileSync(path.join(ROOT, page), 'utf8');
+
+    for(const i of m.icons){
+      assert.ok(fs.existsSync(path.join(ROOT, i.src)),
+        `${manifest} names ${i.src}, which is not in the repo`);
+      assert.ok(!/\s/.test(i.purpose),
+        `${i.src} claims "${i.purpose}"; one file cannot be correct for both`);
+      // Shared with another app is the failure this test exists for.
+      assert.ok(!seen.has(i.src),
+        `${i.src} is ${who}'s and ${seen.get(i.src)}'s; they need telling apart`);
+      seen.set(i.src, who);
+    }
+
+    const purposes = m.icons.map(i => i.purpose);
+    assert.ok(purposes.includes('any'), `${manifest} needs an uncropped icon`);
+    assert.ok(purposes.includes('maskable'), `${manifest} needs one for Android's mask`);
+
+    // iOS reads the tag and not the manifest, so the two have to agree.
+    const tag = /<link rel="apple-touch-icon" href="([^"]+)">/.exec(html);
+    assert.ok(tag, `${page} has no apple-touch-icon`);
+    assert.ok(m.icons.some(i => i.src === tag[1]),
+      `${page} points iOS at ${tag[1]}, which ${manifest} does not name`);
+  }
+
+  // And the pair that used to be shared is gone rather than left lying around
+  // for something to point back at.
+  for(const old of ['icon-192.png', 'icon-512.png'])
+    assert.ok(!fs.existsSync(path.join(ROOT, old)), `${old} is nobody's now`);
 });
 
 /* One stylesheet, two pages (§45).

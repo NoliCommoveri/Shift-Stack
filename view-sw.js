@@ -21,7 +21,7 @@
    Everything else here is sw.js, including the two rules §41 paid for: no
    redirected response is ever stored or served, and the handler never resolves
    to `undefined`. */
-const SHELL = 'shiftdeck-view-shell-v1';
+const SHELL = 'shiftdeck-view-shell-v2';
 
 /* Every file view.html loads. The shared modules are the app's own, by the
    same absolute paths the page asks for — one copy on the origin, cached

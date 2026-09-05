@@ -26,6 +26,14 @@ the icon works again. **Setup → Flush cache and reload** is the bigger hammer.
 
 Pay rates, roles and site names are entered in the app, not stored in the repo.
 
+The three apps have three icons — a badge for the app, a wallet for the read-only
+viewer, and a briefcase for the kids' one — so a phone carrying more than one
+tells them apart by the picture rather than by the word underneath. Each ships
+two: the drawing as it is, and the drawing inset for Android's circular mask.
+Changing an icon needs the shell version bumped in `sw.js` or `view-sw.js`, or
+an installed phone keeps the manifest it already has; and Android may not redraw
+a launcher icon for an installed PWA until it is removed and added again.
+
 ## First run
 
 1. **Setup** → add both jobs. Set the colour, hourly rate, and which day the
@@ -174,8 +182,9 @@ What it needs, once:
 
 1. **The secrets, in the Cloudflare dashboard** — `PUSH_TOKEN` (what the phone
    authenticates with), `FEED_TOKEN` (what sits in the URL ICSx⁵ subscribes
-   to), `ICS_URL` (the secret address of the staging calendar), and
-   `VIEW_TOKEN` if a second phone is going to read it (below). They are
+   to), `ICS_URL` (the secret address of the staging calendar), `VIEW_TOKEN`
+   if a second phone is going to read it, and `KIDS_TOKEN` if the children get
+   the seven-day one (both below). They are
    not in the repo, and `keep_vars = true` in `wrangler.toml` is what stops
    each build deleting them.
 2. **The database** — Setup → Server → **Set up the database**. Every statement
@@ -248,14 +257,14 @@ it. Nothing in `view.js` writes and nothing it holds could.
 
 Setting it up, once:
 
-1. **`VIEW_TOKEN`, in the Cloudflare dashboard**, alongside the other three.
+1. **`VIEW_TOKEN`, in the Cloudflare dashboard**, alongside the others.
    Any long random string. A deploy has to happen *after* it is added before it
    takes effect, which is true of all of them (§14.9).
 2. **On the second phone**, open `https://…/view`, paste the token, press
    *Show me the week*. Or send yourself `https://…/view#t=THETOKEN` and follow
    it — the token is taken out of the address bar the moment it is read.
 3. **Menu → Add to Home screen**, same as the app. It installs as its own
-   thing, called *His shifts*, with its own icon, its own offline cache and its
+   thing, called *Hustle*, with its own icon, its own offline cache and its
    own storage.
 
 Open it at `https://…/view` and not `https://…/view.html`: the host redirects
@@ -288,6 +297,54 @@ polling every minute is a battery cost for an answer nobody is reading.
 
 **Offline** it draws the last answer it got, from its own IndexedDB, and says
 how old it is. It caches its shell exactly as the app does.
+
+### A third phone, for the kids
+
+`/kids` answers one question, in letters big enough to read from across the
+kitchen:
+
+    DADDY LEAVES FOR WORK
+    in about 5 hours
+    at 09:25
+
+and under it, seven days starting today — one row a day, including the days off,
+because "is he home on Saturday" is answered by a row that says he is and not by
+the absence of one.
+
+**The times are the door, not the shift.** Forty-five minutes are taken off
+every start and thirty are added to every end, so the page says when he leaves
+the house and when he is back through it rather than when he clocks on and off.
+Both numbers are hard-coded, at the top of `kids.js`, one line each. An
+overnight shift gets home the next morning and the row says so.
+
+**It cannot see the pay, and cannot see the rest of the schedule** — not because
+the tabs are missing, but because none of it is sent. `KIDS_TOKEN` opens one
+route, `GET /soon`, and `/soon` answers with four fields a shift — the day, the
+two times, the job's name and its colour — inside a seven-day window it closes
+in SQL. `/read`, which is what the viewer above uses and which carries every
+rate and every shift on file, refuses the kids' token outright. `pay.js` is not
+loaded on that phone at all.
+
+Setting it up is the viewer's three steps with a different secret and a
+different address:
+
+1. **`KIDS_TOKEN`, in the Cloudflare dashboard**, alongside the other four, and
+   a deploy after it (§14.9).
+2. **On the child's phone**, follow `https://…/kids#t=THECODE` — the code comes
+   out of the address bar the moment it is read — or open `https://…/kids` and
+   paste it into the one field.
+3. **Menu → Add to Home screen.** It installs as *Daddy's week*, with its own
+   cache and its own storage, and it does not disturb either of the other two
+   if they are on the same phone.
+
+`https://…/kids`, not `https://…/kids.html`, for §41's reason.
+
+**When it does not know**, it says so. Past twelve hours with no answer from the
+server it turns red and reads *this has not heard from the schedule in a while,
+so it may be wrong. Ask a grown-up.* Under that it says nothing at all, because
+a child cannot act on "checked four minutes ago" and should not be asked to read
+it. There is a **Check again** button, and it checks on its own whenever the
+page is opened or come back to.
 
 ## Bringing in an employer's calendar sync
 
