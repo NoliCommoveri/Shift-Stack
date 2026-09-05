@@ -165,7 +165,9 @@ What it needs, once:
 4. **Which job the server polls** — Setup → the job → App and calendar →
    **The server polls this job's calendar**. Tick it on whichever job syncs into
    Google; that is Homebase. One job at a time.
-5. **Its calendar's time zone**, on the same fold. Filled in from the phone
+5. **Its calendar's time zone**, on the same fold. The Worker also carries one
+   of its own — `ZONE` in `wrangler.toml`, `America/Chicago` — which is what it
+   reads the feed on until this job's answer has been pushed up to it. Filled in from the phone
    when the job is made, so this is usually already right — check it anyway.
    The Worker has no locale of its own and falls back to Eastern for a job
    that does not say, and the symptom is every shift from that feed an hour

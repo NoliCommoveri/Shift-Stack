@@ -4414,3 +4414,67 @@ fixture gains an event in the shape Ray's calendar actually holds, so the whole
 path is a golden test rather than three functions agreeing in isolation.
 `resolveNames` is four cases in sites.test.js, the one the cron was getting
 wrong first among them.
+
+---
+
+## 37. Fixed: §35 shipped and the times did not move, 5 September 2026
+
+The deploy went out and the Schedule came back with the new titles on it —
+"Tru-Point · Training · Headquarters" where the address used to be — and every
+one of them still an hour late. The summary is §36's work and it landed. The
+hour is §35's and it did not.
+
+Which is the useful part of the report, because the two travel together. A
+title only changes when the cron rewrites the row, and the cron writes the
+label and the times in the same rewrite. So the rewrite happened, with the new
+reader, and still produced Eastern wall times: the Worker was running the fixed
+code and had never been told the zone.
+
+### Two routes, and §35 only built one
+
+`co.zone` reaches the Worker in the config the phone pushes. That is the right
+place for it — the phone is the only thing that knows where he is standing —
+but it made the push a precondition for the fix, and two things sit in front of
+a push:
+
+- **The shell cache.** `sw.js` serves the app cache-first with a network
+  refresh behind it, so the load after a deploy runs the *previous* `app.js`
+  and the new one only appears on the load after that. `SHELL` was left at
+  `v10`, so the service worker never reinstalled and never re-fetched anything.
+  The phone was running the code that has no zone field and no `fillZones`,
+  which cannot push what it does not have.
+- **The first tick.** Even on a phone with the new code, the cron may fire
+  before the push lands. A server with no answer needs one that is right
+  anyway.
+
+And the answer it fell back to was `America/Toronto`, lifted from
+Star-homeschool along with `normalizeTimezone` — an Eastern default in an app
+whose every shift, fixture and test is in Hattiesburg.
+
+### What changed
+
+- **`ZONE` in `wrangler.toml`.** A plain var, deployed with the Worker, read by
+  `zoneFor` when the job in `cfg` has not said. It is right on the first tick,
+  before any phone has spoken, and it steps aside the moment a job carries its
+  own zone. `keep_vars = true` protects the secrets in the dashboard; a var in
+  the file is not one of them.
+- **The last resort is Central.** `DEFAULT_ZONE` is `America/Chicago`. A
+  default nobody notices should be the answer for the place the app is used.
+- **`zoneFor` says where its answer came from** — `job`, `env` or `fallback` —
+  and `/status` carries it, so the Setup line reads "the zone set on the
+  Worker, because the job's own has not reached it" rather than leaving him to
+  work out which of the three he is looking at.
+- **`SHELL` is bumped to `v11`**, which is what makes the browser reinstall the
+  service worker, re-fetch every file in `FILES`, and claim the open page. A
+  release that only reaches the phone on the load after next is a release that
+  looks like it did not work — which is exactly how this one looked.
+
+### What is tested
+
+`zoneFor` gets the env case in guards.test.js: told a zone with no job answer
+it uses it and says `env`; told one alongside a job answer the job still wins;
+an offset in the deploy config is refused exactly as one in a job is. A config
+test reads `wrangler.toml` and fails if `ZONE` is missing, is filed under the
+wrong table, or is an offset rather than an IANA name — the same three ways the
+`keep_vars` line was wrong before §14.9 found it. The browser test now drives
+all three sources through the Setup line.

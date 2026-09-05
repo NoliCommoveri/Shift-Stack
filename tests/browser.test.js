@@ -240,29 +240,42 @@ test('a job is born in the phone\u2019s own time zone, and a server on another s
 
     // The line the whole fix hangs on: the server says which clock it reads
     // the feed on, and disagreeing with this phone is loud.
-    const clash = await page.evaluate(() => {
-      S.companies[0].zone = 'America/Chicago';
-      S.companies[0].icsFeed = true;
-      renderServer({ shifts: {}, polls: [], zone: 'America/Toronto', zoneDefaulted: true });
+    const zoneLine = st => page.evaluate(s => {
+      renderServer(s);
       const z = document.getElementById('srvzone');
       return { hidden: z.hidden, cls: z.className, text: z.textContent };
+    }, st);
+
+    await page.evaluate(() => {
+      S.companies[0].zone = 'America/Chicago';
+      S.companies[0].icsFeed = true;
     });
+
+    const clash = await zoneLine({ shifts: {}, polls: [], zone: 'America/Toronto',
+                                   zoneDefaulted: true, zoneSource: 'fallback' });
     assert.equal(clash.hidden, false);
     assert.equal(clash.cls, 'flag');
     assert.match(clash.text, /America\/Toronto/);
     assert.match(clash.text, /America\/Chicago/);
-    assert.match(clash.text, /does not say/);
+    assert.match(clash.text, /last resort/);
 
-    // Agreeing is quiet, and still says which zone, because "an hour out" is
-    // not a thing anybody notices without a number to check it against.
-    const agreed = await page.evaluate(() => {
-      renderServer({ shifts: {}, polls: [], zone: 'America/Chicago', zoneDefaulted: false });
-      const z = document.getElementById('srvzone');
-      return { hidden: z.hidden, cls: z.className, text: z.textContent };
-    });
+    // Told at deploy time and agreeing with the phone: quiet, and it still
+    // says where the answer came from, because "the job has not pushed one
+    // yet" is a thing worth knowing before the job's zone is changed.
+    const told = await zoneLine({ shifts: {}, polls: [], zone: 'America/Chicago',
+                                  zoneDefaulted: true, zoneSource: 'env' });
+    assert.equal(told.hidden, false);
+    assert.equal(told.cls, 'tiny soft');
+    assert.match(told.text, /set on the Worker/);
+
+    // Agreeing outright is quiet too, and still says which zone, because "an
+    // hour out" is not a thing anybody notices without a number to check
+    // against.
+    const agreed = await zoneLine({ shifts: {}, polls: [], zone: 'America/Chicago',
+                                    zoneDefaulted: false, zoneSource: 'job' });
     assert.equal(agreed.hidden, false);
     assert.equal(agreed.cls, 'tiny soft');
-    assert.match(agreed.text, /read in America\/Chicago/);
+    assert.match(agreed.text, /read in America\/Chicago\.$/);
 
     assert.deepEqual(errors, [], 'the page loaded with no uncaught errors');
   } finally {

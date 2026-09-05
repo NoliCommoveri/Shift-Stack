@@ -88,7 +88,7 @@ async function poll(env){
   if(!job) return record(env, 'unknown', { ok: 0, reason: 'no job is configured for the feed' });
   if(!env.ICS_URL) return record(env, job.id, { ok: 0, reason: 'the calendar address is not set' });
 
-  const { zone } = zoneFor(job);
+  const { zone } = zoneFor(job, env);
   const today = todayIn(zone);
   const from = shiftISO(today, -7);
 
@@ -306,7 +306,7 @@ async function status(env){
   // quietly falling back to Eastern — a whole schedule an hour out, with every
   // screen agreeing because every screen read the same number.
   const cfg = await readCfg(env) || {};
-  const { zone, defaulted } = zoneFor(feedJob(cfg.companies || []));
+  const { zone, defaulted, source } = zoneFor(feedJob(cfg.companies || []), env);
 
   const { results: polls } = await env.DB.prepare(
     `SELECT * FROM polls ORDER BY id DESC LIMIT 50`).all();
@@ -319,7 +319,7 @@ async function status(env){
   return json({
     shifts: Object.fromEntries((counts.results || []).map(r => [r.source, r.n])),
     lastGood: good ? good.at : null,
-    zone, zoneDefaulted: defaulted,
+    zone, zoneDefaulted: defaulted, zoneSource: source,
     // §14.6's two alarms, computed in guards.js so that "quietly stopped
     // changing" means one thing here and on the Setup screen. The failure this
     // project exists to catch is not a wrong shift, it is a calendar that has

@@ -1,7 +1,15 @@
 /* Shift Deck service worker.
    App shell is cached so it opens offline. The OCR engine is cached on first
    use, which is why the second import is much faster than the first. */
-const SHELL = 'shiftdeck-shell-v10';
+/* Bumped with every release that has to reach the phone promptly. The fetch
+   handler below is cache-first with a network refresh behind it, so an
+   unchanged service worker serves the *old* app.js on the load after a deploy
+   and the new one only on the load after that. §35 shipped that way and looked
+   like it had not worked: the cron had the fix, the phone was still running
+   the code that never sends a time zone. Changing this string is what makes
+   the browser reinstall the worker, re-fetch every file in FILES from the
+   network, and claim the open page. */
+const SHELL = 'shiftdeck-shell-v11';
 const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs a 10MB re-download
 /* Every script index.html loads, and nothing it does not. feed.js and merge.js
    were missing from this list from the day §14.7 extracted them: the shell

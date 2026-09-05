@@ -163,3 +163,23 @@ test('the service worker caches every script the page loads', () => {
   // seen. Left alone, the fix ships and nothing fetches it.
   assert.match(sw, /const SHELL = 'shiftdeck-shell-v(\d+)'/);
 });
+
+/* The zone the cron reads the feed on, when no phone has pushed one (§37).
+ *
+ * `zoneFor` prefers the job's own answer and falls back to this, so the
+ * failure it prevents is the one §35 shipped with: a Worker whose only route
+ * to a time zone was a push from a phone that was still serving the previous
+ * app.js out of its shell cache, filing every shift an hour out in the
+ * meantime with a healthy poll record either side of it.
+ */
+test('the Worker is told a time zone at deploy time, as an IANA name', () => {
+  const line = /^ZONE\s*=\s*"([^"]+)"\s*$/m.exec(toml.join('\n'));
+  assert.ok(line, 'wrangler.toml must set ZONE');
+  assert.equal(tableOf('ZONE'), '[vars]', 'ZONE is a var, not a secret and not an asset setting');
+  // The same shape test `normalizeTimezone` applies. An offset is wrong for
+  // half the year in any zone that keeps daylight saving, and a deploy config
+  // that sets one is a whole schedule an hour out every summer.
+  const zone = line[1];
+  assert.ok(!/[+-]\d/.test(zone), `ZONE must be an IANA name, not the offset ${zone}`);
+  assert.doesNotThrow(() => new Intl.DateTimeFormat('en-US', { timeZone: zone }));
+});

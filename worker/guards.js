@@ -79,7 +79,13 @@ function feedJob(companies){
    would take `-05:00` and be wrong every summer. Testing for a `/` instead
    was the other way to get this wrong, and it threw out `UTC`, which is a
    real zone and the one the Worker itself runs in. */
-const DEFAULT_ZONE = 'America/Toronto';
+/* The last resort, and it is Central because that is where the stations are.
+   It used to be `America/Toronto`, lifted with `normalizeTimezone` from
+   Star-homeschool, and §35 is what that cost: an Eastern default in an app
+   whose every shift, fixture and test is in Hattiesburg meant a fallback that
+   was wrong by an hour rather than wrong by nothing. A default nobody notices
+   should be the answer for the place the app is actually used. */
+const DEFAULT_ZONE = 'America/Chicago';
 function normalizeTimezone(z){
   const s = String(z || '').trim();
   if(!s) return DEFAULT_ZONE;
@@ -102,10 +108,20 @@ function normalizeTimezone(z){
 
    True for a zone that was rejected as well as for one that was never given:
    a job that says `UTC+5` did not get what it asked for either. */
-function zoneFor(job){
-  const said = String((job && job.zone) || '').trim();
-  const zone = normalizeTimezone(said);
-  return { zone, defaulted: zone !== said };
+function zoneFor(job, env){
+  const asked = z => { const s = String(z || '').trim();
+                       return s && normalizeTimezone(s) === s ? s : ''; };
+  const said = asked(job && job.zone);
+  if(said) return { zone: said, source: 'job', defaulted: false };
+  // Set on the Worker itself, in wrangler.toml. The phone's answer is the
+  // better one — it is the only thing that knows where he is standing — but it
+  // arrives by a push, and §35 shipped with the push as the *only* route: the
+  // cron went on filing an hour out until a phone running the new app.js
+  // managed to send its config up. A deploy-time zone is right the moment the
+  // Worker starts, and gets out of the way as soon as a job says otherwise.
+  const told = asked(env && env.ZONE);
+  if(told) return { zone: told, source: 'env', defaulted: true };
+  return { zone: DEFAULT_ZONE, source: 'fallback', defaulted: true };
 }
 
 /* Today where the shifts are, not where the Worker is. en-CA formats as
