@@ -165,8 +165,15 @@ What it needs, once:
 4. **Which job the server polls** — Setup → the job → App and calendar →
    **The server polls this job's calendar**. Tick it on whichever job syncs into
    Google; that is Homebase. One job at a time.
+5. **Its calendar's time zone**, on the same fold. Filled in from the phone
+   when the job is made, so this is usually already right — check it anyway.
+   The Worker has no locale of its own and falls back to Eastern for a job
+   that does not say, and the symptom is every shift from that feed an hour
+   out with every screen agreeing (§35). Setup prints the zone the server
+   actually used under **Server**, and says so in red when it is not this
+   phone's.
 
-Miss the last one and the Worker fetches nothing at all — it has no job to file
+Miss the fourth one and the Worker fetches nothing at all — it has no job to file
 the shifts against, and it refuses every fifteen minutes rather than guessing.
 Setup says so under Server as soon as a token is set.
 

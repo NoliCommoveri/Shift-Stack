@@ -92,6 +92,17 @@ test('the hour either side of a daylight-saving change is right', () => {
   assert.equal(new Date(after).toISOString(),  '2026-11-01T09:30:00.000Z');  // CST, -6
 });
 
+test('the same feed read on the wrong zone is a shift an hour out', () => {
+  // §14.10, stated as the symptom rather than as the arithmetic. Homebase
+  // publishes UTC; the Worker fell back to America/Toronto for any job that
+  // had not been told its zone, and nothing in the app had ever set one. A
+  // 17:00 start in Hattiesburg came out of the cron as 18:00 and every screen
+  // agreed with it.
+  const t = I.parseDT('20260904T220000Z', {});
+  assert.equal(I.resolve(t, 'America/Chicago').parts.h, 17);
+  assert.equal(I.resolve(t, 'America/Toronto').parts.h, 18);
+});
+
 test('an unrecognised zone is taken at face value and says so', () => {
   const t = I.parseDT('20260903T061500', { TZID: 'Central Standard Time' });
   const r = I.resolve(t, ZONE);
@@ -102,13 +113,53 @@ test('an unrecognised zone is taken at face value and says so', () => {
 /* ---------- labels ------------------------------------------------------- */
 
 test('the role and the station both survive into the label', () => {
+  // The pipe and not a dash: §17.4's separator is what `splitLabel` trusts and
+  // what the site and role tables split on. Joined with anything else the whole
+  // label arrives at both tables as one string and matches neither.
   assert.equal(I.labelFor('Security Officer', 'Headquarters, 401 Main St, Hattiesburg MS'),
-               'Security Officer - Headquarters');
+               'Security Officer | Headquarters');
   // The employer's badge on the front says nothing the job picker has not.
-  assert.equal(I.labelFor('Homebase: Cook', 'F.O.C.'), 'Cook - F.O.C.');
+  assert.equal(I.labelFor('Homebase: Cook', 'F.O.C.'), 'Cook | F.O.C.');
   // No repeating the place when the title already carries it.
   assert.equal(I.labelFor('Moselle Station', 'Moselle Station'), 'Moselle Station');
   assert.equal(I.labelFor('', 'Benndale Station'), 'Benndale Station');
+});
+
+test('a street line is an address, not the name of a place', () => {
+  // What Ray's calendar actually holds: Homebase puts the station in SUMMARY
+  // and the street in LOCATION, and the reader was putting the street in the
+  // title — "Tru-Point- F.O.C. - 3492 Hwy 42", with the address said twice and
+  // the role not said at all. The address is already on the event, tappable.
+  assert.equal(I.placeName('3492 Hwy 42\nHattiesburg, MS 39402'), '');
+  assert.equal(I.placeName('Headquarters, 401 Main St, Hattiesburg MS'), 'Headquarters');
+  assert.equal(I.placeName('Purvis Gen Station'), 'Purvis Gen Station');
+});
+
+test('the role comes out of the description, and only when it is one', () => {
+  // Homebase's own sync writes the job title here and nothing else.
+  assert.equal(I.roleFrom('Security Officer'), 'Security Officer');
+  assert.equal(I.roleFrom('Site Supervisor\nsome other line'), 'Site Supervisor');
+  // Everything else a feed puts in a description is not a role. Refusing them
+  // leaves the row exactly as it read before, which is the safe direction: a
+  // wrong role is filed against a rate (§27), a missing one is a row he names.
+  assert.equal(I.roleFrom('Shift published by Homebase.'), '');
+  assert.equal(I.roleFrom('12h scheduled'), '');
+  assert.equal(I.roleFrom('Only 6h 45m off before this one.'), '');
+  assert.equal(I.roleFrom('<b>Details</b>'), '');
+  assert.equal(I.roleFrom(''), '');
+});
+
+test('Homebase\u2019s three fields come out as role, place and address', () => {
+  // The whole of the second half of §36, in one event: the station in SUMMARY
+  // behind a badge, the street in LOCATION, the role in DESCRIPTION.
+  assert.equal(I.labelFor('Shift: F.O.C.', '3492 Hwy 42\nHattiesburg, MS 39402',
+                          'Security Officer'),
+               'Security Officer | F.O.C.');
+  // A description that is a role and a location that is a place: the title is
+  // then the same role twice, and is dropped rather than repeated.
+  assert.equal(I.labelFor('Homebase: Security Officer', 'Purvis Gen Station',
+                          'Security Officer'),
+               'Security Officer | Purvis Gen Station');
 });
 
 test('a repeating occurrence keeps an identity of its own', () => {

@@ -390,6 +390,10 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
 <section id="tab-setup" hidden>
   <h1>Setup</h1>
   <div id="colist"></div>
+  <!-- Suggestions for every job's time-zone box, filled by renderSetup. A
+       datalist and not a select: the list is what saves typing, not what is
+       allowed, and a phone in a city it forgot must still be able to say so. -->
+  <datalist id="zonelist"></datalist>
   <div class="rowbtns"><button class="ghost" id="addco">Add a job</button></div>
 
   <h2 style="margin-top:1.8rem">Reminders</h2>
@@ -426,6 +430,10 @@ dialog::backdrop{background:rgba(34,40,43,.45)}
   </div>
   <p class="tiny soft" id="srvnote" style="margin-top:.5rem"></p>
   <p class="flag" id="srvalarm" style="margin-top:.35rem" hidden></p>
+  <!-- Which clock the cron reads the employer's calendar on (§14.10). Its own
+       line rather than a clause in the note above: a wrong zone is every shift
+       an hour out, and it is the one fault every other screen agrees with. -->
+  <p class="tiny soft" id="srvzone" style="margin-top:.35rem" hidden></p>
   <div id="srvtracebox" class="tiny soft" style="margin-top:.5rem"></div>
   <div id="srvpolls" class="tiny soft" style="margin-top:.5rem"></div>
 

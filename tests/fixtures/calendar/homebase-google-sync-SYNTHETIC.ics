@@ -102,4 +102,19 @@ SUMMARY:Security Officer at the very long site name that goes on past sevent
  y five octets and therefore gets folded by the writer
 LOCATION:Benndale Station
 END:VEVENT
+BEGIN:VEVENT
+DTSTART:20260906T001500Z
+DTEND:20260906T121500Z
+DTSTAMP:20260904T231500Z
+UID:homebase-4471909-20260905@homebase.io
+SUMMARY:Shift: F.O.C.
+LOCATION:3492 Hwy 42\nHattiesburg\, MS 39402
+DESCRIPTION:Security Officer
+STATUS:CONFIRMED
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:Reminder
+TRIGGER:-PT1H
+END:VALARM
+END:VEVENT
 END:VCALENDAR
