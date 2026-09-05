@@ -264,7 +264,7 @@ Setting it up, once:
    *Show me the week*. Or send yourself `https://…/view#t=THETOKEN` and follow
    it — the token is taken out of the address bar the moment it is read.
 3. **Menu → Add to Home screen**, same as the app. It installs as its own
-   thing, called *His shifts*, with its own icon, its own offline cache and its
+   thing, called *Hustle*, with its own icon, its own offline cache and its
    own storage.
 
 Open it at `https://…/view` and not `https://…/view.html`: the host redirects

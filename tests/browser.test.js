@@ -1164,7 +1164,7 @@ test('the viewer installs at its own scope and opens from the home screen', asyn
     const res = await page.goto(base + '/view');
     assert.ok(res.ok(), `the start URL answered ${res && res.status()}`);
     await page.waitForFunction(() => typeof V === 'object' && V !== null, null, { timeout: 15000 });
-    assert.equal(await page.title(), 'His shifts');
+    assert.equal(await page.title(), 'Hustle');
 
     // And the URL that redirects, which is the one §41 was about.
     const viaRedirect = await page.goto(base + '/view.html');

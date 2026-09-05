@@ -5648,3 +5648,24 @@ That gets the *file* to the phone. Whether Android redraws the launcher icon
 for an already-installed PWA is the platform's business and not this repo's; if
 it does not, removing it from the home screen and adding it again is the
 answer. Both are cosmetic, and neither touches the schedule.
+
+## 48. Changed: the viewer is called Hustle, 5 September 2026
+
+*His shifts* was a description rather than a name. It named the app after whose
+schedule it showed, which reads as a label on someone else's business — and it
+is the string under the icon in the app drawer, which is where a name gets read
+most often and where a description reads worst.
+
+*Hustle* replaces it in the three places the name actually appears: the
+manifest's `name` and `short_name`, the `<title>`, and the `<h1>` on the door —
+the only heading the page has, since the two tabs head themselves *Schedule*
+and *Pay*.
+
+`id` stays `/view`, deliberately. It is the identity Chrome gave the app when
+it was installed, and changing it makes this a different app while leaving the
+installed one pointing at the old one — §41's trap, one field along. A rename
+is a new label on the same app, not a new app.
+
+`view-sw.js` caches both the page and the manifest, so an installed phone keeps
+the old name until the shell name changes. §47 already took it to `v2` and
+neither change has deployed, so the one bump carries both.
