@@ -342,20 +342,17 @@ const shiftAddress = s => addressFor(s, siteById(s.siteId));
 
 /* Splitting a label into the two things it might be naming.
 
-   Two of them, because matching and suggesting want different answers to the
-   same ambiguity. `labelCandidates` is for the menus: the whole string is
-   offered to both lists, because a label with no separator in it could be
-   naming either and a menu is a question, not an answer. `labelParts` has to
-   choose one, so it asks the tables — `readLabel` in sites.js is the rule, and
-   this is the half that knows which job's records to ask about. */
+   `labelCandidates` is for the menus: the whole string is offered to both
+   lists, because a label with no separator in it could be naming either and a
+   menu is a question, not an answer. Resolving one has to choose, so it asks
+   the tables instead — that is `resolveNames` in sites.js, which `applyNames`
+   below and the Worker's cron both call, and it is the rule rather than a
+   second reading of it. */
 function labelCandidates(label){
   const { role, site } = splitLabel(label);
   return site ? { role: role.trim(), site: site.trim() }
               : { role: role.trim(), site: role.trim() };
 }
-
-const labelParts = (label, companyId) =>
-  readLabel(label, sitesFor(companyId), rolesFor(companyId), splitLabel);
 
 /* Resolve a review row against both tables. Runs before the row is compared
    with anything on file, because "same shift" is an identity question once the
@@ -369,12 +366,15 @@ const labelParts = (label, companyId) =>
    the alternative is a row that files under nothing because one word of it was
    unfamiliar. */
 function applyNames(p){
-  const parts = labelParts(p.label, p.companyId);
-  p.siteRaw = parts.siteRaw;
-  p.roleRaw = parts.roleRaw;
+  // `resolveNames` is sites.js's, and the Worker's cron calls the same one
+  // against the same two tables — a feed row filed by the server and the same
+  // row imported here must not resolve differently (§36).
+  const named = resolveNames(p, sitesFor(p.companyId), rolesFor(p.companyId), splitLabel);
+  p.siteRaw = named.siteRaw;
+  p.roleRaw = named.roleRaw;
   // `role` is the text that was read, kept for the same reason `label` is: it
   // is what the shift reads as when its role record is later deleted.
-  p.role = parts.roleRaw;
+  p.role = named.roleRaw;
 
   // A site and a role both belong to one job, so changing the job on a review
   // row unsets them and the row is matched again against the new job's tables.
@@ -385,16 +385,14 @@ function applyNames(p){
   if(heldRole && heldRole.companyId !== p.companyId){ p.roleId = null; p.roleHow = ''; }
 
   if(!p.siteId){
-    const m = matchName(p.siteRaw, sitesFor(p.companyId));
-    p.siteId = m.rec ? m.rec.id : null;
-    p.siteHow = m.how;
+    p.siteId = named.siteId;
+    p.siteHow = named.siteHow;
   }else if(!p.siteHow){
     p.siteHow = 'kept';               // arrived resolved; nothing was read
   }
   if(!p.roleId){
-    const m = matchName(p.roleRaw, rolesFor(p.companyId));
-    p.roleId = m.rec ? m.rec.id : null;
-    p.roleHow = m.how;
+    p.roleId = named.roleId;
+    p.roleHow = named.roleHow;
   }else if(!p.roleHow){
     p.roleHow = 'kept';
   }

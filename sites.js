@@ -144,6 +144,38 @@ function readLabel(label, sites, roles, split){
   return roleWins ? { roleRaw: one, siteRaw: '' } : { roleRaw: '', siteRaw: one };
 }
 
+/* Both halves of a label, resolved against both tables — the whole of what a
+   shift row learns from its own text, in one function because two callers ask
+   it and they must not answer differently.
+
+   The Worker was the one that did. `applyNames` in the page went through
+   `readLabel`, so it saw the boundary §17.4 preserves and asked each table
+   about its own half; the cron matched the *whole label* against the sites and
+   `row.role` — a field a feed row does not have — against the roles. On a
+   TrackTik line that meant "Cook Plant ASO | SOUTHERN HENS" was offered to the
+   site table entire and matched nothing, and once ics.js started writing the
+   same separator for Homebase's three fields it meant "Security Officer |
+   F.O.C." resolved to no site and no role either. A shift with no role is paid
+   at the job's rate rather than the role's (§27), titled with raw text, and
+   compared on text rather than identity (`whereKey`) — three wrong answers
+   from one missing split.
+
+   `split` is passed in for the reason `readLabel` takes it: the separator is
+   parser.js's, and this file does not read text. */
+function resolveNames(row, sites, roles, split){
+  const parts = readLabel((row && row.label) || '', sites, roles, split);
+  const s = matchName(parts.siteRaw, sites);
+  const r = matchName(parts.roleRaw, roles);
+  return {
+    siteRaw: parts.siteRaw, roleRaw: parts.roleRaw,
+    siteId: s.rec ? s.rec.id : null, siteHow: s.how,
+    roleId: r.rec ? r.rec.id : null, roleHow: r.how,
+    // A matched role names the shift better than the text that was read, and
+    // is what every screen and every event title uses from here.
+    role: r.rec ? String(r.rec.name || '').trim() : parts.roleRaw
+  };
+}
+
 /* Records the spelling as meaning this site. Returns whether it was new, so a
    caller can say what it did. Mutates, because a site record is a stored thing
    and pretending otherwise here would only move the copying somewhere else. */
@@ -311,6 +343,6 @@ if(typeof module !== 'undefined' && module.exports){
                      spellings, matchName, addAlias, dropAlias,
                      newSite, newRole, rateFor,
                      mergeRecords, mergeSites, mergeRoles,
-                     readLabel, roleText, whereText, eventTitle, addressFor, whereKey,
+                     readLabel, resolveNames, roleText, whereText, eventTitle, addressFor, whereKey,
                      suggestNames };
 }

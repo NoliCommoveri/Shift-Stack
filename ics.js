@@ -215,20 +215,77 @@ const dayISO = p => icsISO(p.y, p.mo, p.d);
    job picker has not already said, so it comes off. */
 const TITLE_BADGE = /^\s*(?:homebase|tracktik|shift|work|schedule)\s*[:\-–]\s*/i;
 
-function labelFor(summary, location){
+/* An address is a street line and a town and a postcode; only the first piece
+   of it can name a place, and it only names one when it is a name. Homebase
+   writes a street line — "3492 Hwy 42" — and a street number on the front of a
+   shift title says nothing the tappable LOCATION on the event does not already
+   say, while pushing the thing that does name the shift off the end. A leading
+   digit is the whole test: "Headquarters, 401 Main St" starts with the place
+   and "3492 Hwy 42, Hattiesburg" starts with the street. */
+function placeName(location){
+  const first = clean(String(location || '').split(/[\n,]/)[0]);
+  return /^\d/.test(first) ? '' : first;
+}
+
+/* The role, out of DESCRIPTION. Homebase's own sync writes the station into
+   SUMMARY and the job title down here, which is the other half of the
+   role-and-place split §8.1 wants and the half this reader used to throw away:
+   "Security Officer" sat in the description while the street number went into
+   the title.
+
+   A description is free text, though, and most feeds put a sentence in it —
+   the fixture's own "Shift published by Homebase.", Google's HTML, our own
+   "12h scheduled". So this accepts a job title and nothing else: the first
+   line, four words at most, every word starting with a capital, no digits and
+   no sentence punctuation. Anything less certain is dropped and the row reads
+   exactly as it did before this function existed, which is the right way round
+   — a wrong role is filed against a rate (§27), and a missing one is a row he
+   labels himself. */
+function roleFrom(description){
+  const first = String(description || '').split('\n').map(x => x.trim()).filter(Boolean)[0];
+  const s = clean(first, 40);
+  if(!s || s.length > 40) return '';
+  const words = s.split(' ');
+  if(words.length > 4) return '';
+  if(!words.every(w => /^[A-Z][A-Za-z.'\/&-]*$/.test(w))) return '';
+  return s;
+}
+
+/* The two halves of a label, in the order §17.4 fixed and with the separator
+   it fixed: role, pipe, place. The pipe is not decoration — `splitLabel` in
+   parser.js trusts it and `readLabel` in sites.js splits on it, so a label
+   joined with anything else arrives at the site and role tables as one string
+   and matches neither. This reader knows the boundary is real, because the two
+   halves came out of two different properties of the event, so it says so.
+
+   Which property is which is the part that varies. Homebase writes the station
+   into SUMMARY, the address into LOCATION and the role into DESCRIPTION;
+   Google's own export and TrackTik write the role into SUMMARY and the place
+   into LOCATION. So the place is taken from LOCATION when it is a name, the
+   role from DESCRIPTION when it is plainly one, and the title fills whichever
+   half is still empty. */
+function labelFor(summary, location, description){
   const title = clean(String(summary || '').replace(TITLE_BADGE, ''));
-  // An address is a street line and a town and a postcode; only the first
-  // piece of it names the place, and that is what belongs on a shift row.
-  const place = clean(String(location || '').split(/[\n,]/)[0]);
-  const flat = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-  if(!place) return title;
-  if(!title) return place;
-  if(flat(title).includes(flat(place)) || flat(place).includes(flat(title))) return title;
-  // Both, but the place is the half worth keeping: it is what he navigates to
-  // and what the site table matches on, so a long title gives way to it
-  // rather than pushing it off the end.
-  const room = 60 - place.length - 3;
-  return `${room < title.length ? title.slice(0, Math.max(0, room)).trim() : title} - ${place}`;
+  const place = placeName(location);
+  const role  = roleFrom(description);
+  const flat = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const same = (a, b) => !!a && !!b && (flat(a).includes(flat(b)) || flat(b).includes(flat(a)));
+
+  let left = role;                    // what he is doing
+  let right = place;                  // where he is doing it
+  // The title is whichever half nothing else filled. Never both, and never a
+  // repeat of the half it already agrees with — "Moselle Station" beside
+  // "Moselle Station" is one place, not a role at one.
+  if(!right && !same(title, left)) right = title;
+  else if(!left && !same(title, right)) left = title;
+
+  if(!left) return right || '';
+  if(!right || same(left, right)) return left;
+  // The place is the half worth keeping whole: it is what he navigates to and
+  // what the site table matches on, so a long role gives way to it rather than
+  // pushing it off the end.
+  const room = 60 - right.length - 3;
+  return `${room < left.length ? left.slice(0, Math.max(0, room)).trim() : left} | ${right}`;
 }
 
 /* ---------- the reader ---------------------------------------------------
@@ -309,7 +366,7 @@ function buildRow(ev, ctx){
   if(dtstart.dateOnly){ report.allDay++; return null; }
 
   const location = unescapeText(p.LOCATION);
-  const label = labelFor(unescapeText(p.SUMMARY), location);
+  const label = labelFor(unescapeText(p.SUMMARY), location, unescapeText(p.DESCRIPTION));
   // The whole address is kept beside the shortened label. Homebase writes a
   // real street address here, and an address on a calendar event is a tappable
   // link to a map on the phone — which is §8.1's best argument for the site
@@ -507,6 +564,6 @@ function buildCancelICS(dead, opts = {}){
 if(typeof module !== 'undefined' && module.exports){
   module.exports = { ICS_FLAG, clean, unfold, splitOutsideQuotes, contentLine, unescapeText,
                      parseDT, zoneOffset, wallToUTC, partsIn, knownZone, resolve,
-                     parseDuration, labelFor, eventUID, parseICS,
+                     parseDuration, labelFor, placeName, roleFrom, eventUID, parseICS,
                      shiftUID, icsEscape, icsFold, icsStamp, icsLocal, buildCancelICS };
 }

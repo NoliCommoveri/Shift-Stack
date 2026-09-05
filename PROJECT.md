@@ -4336,3 +4336,81 @@ job made in a Playwright context pinned to `America/Chicago` is born in Central,
 that `fillZones` repairs a store written before the field, that typing an offset
 gets a sentence instead of silence, and that a `/status` reply naming Toronto
 turns the line red while one naming Chicago leaves it grey.
+
+---
+
+## 36. Fixed: the role was in the calendar and not in the app, 4 September 2026
+
+The event Homebase publishes and the event this app publishes, side by side:
+
+    Homebase Raw            Shift: F.O.C.
+                            Sat 5 Sep 19:15 → Sun 6 Sep 07:15
+                            3492 Hwy 42, Hattiesburg, MS 39402
+                            Security Officer
+
+    Work Schedule           Tru-Point- F.O.C. - 3492 Hwy 42
+                            Sat 5 Sep 20:15 → Sun 6 Sep 08:15
+                            3492 Hwy 42 Hattiesburg, MS 39402
+
+§35 is the hour. This is the title: the street number went into it, the role
+did not, and the address ended up said twice.
+
+### The three fields, and which is which
+
+Homebase's own sync writes a shift as three properties, and none of them is
+where the fixture said it would be:
+
+    SUMMARY:      Shift: F.O.C.        the station, behind a badge
+    LOCATION:     3492 Hwy 42\n…       the street address
+    DESCRIPTION:  Security Officer     the role
+
+`labelFor` read the first two and ignored the third. It took the first segment
+of LOCATION as the name of a place — right for `Headquarters, 401 Main St`,
+wrong for `3492 Hwy 42` — and glued it to the summary with " - ".
+
+That dash is the second half of the fault, and the worse half. §17.4 keeps two
+separators apart on purpose: `" | "` is a boundary the employer printed and
+`splitLabel` can trust it; `" - "` is glue this app invented and means nothing
+about structure. So the label went to the site and role tables as one
+unsplittable string, matched neither, and every downstream question — what is
+this shift called, what does it pay (§27), is it the same shift as the one on
+file (`whereKey`) — was answered off raw text.
+
+### What changed
+
+- **The role comes out of DESCRIPTION**, when it is plainly a role: first line,
+  four words at most, every word capitalised, no digits. The fixture's own
+  "Shift published by Homebase.", Google's HTML and our own "12h scheduled" are
+  all refused, and a refused description leaves the row reading exactly as it
+  did before. A wrong role is filed against a rate; a missing one is a row he
+  names himself.
+- **A street line is an address, not a place.** `placeName` drops a first
+  segment that starts with a digit. It is already on the event as LOCATION,
+  tappable, which is §8.1's best argument for the site table in the first
+  place — printing it in the title as well cost the room the role needed.
+- **The halves are joined with the pipe**, because the reader knows the
+  boundary is real: the two halves came out of two different properties. The
+  label Homebase's feed now produces is `Security Officer | F.O.C.`, which is
+  the same shape TrackTik prints and the tables already read.
+- **One resolver, two callers.** `resolveNames` in sites.js does the whole of
+  it — split the label, ask each table about its own half, take the curated
+  spelling — and `applyNames` in the page and the cron's `resolver` both call
+  it. The cron had its own version that matched the whole label against the
+  sites and a `role` field a feed row does not carry against the roles, so a
+  shift the server filed resolved to neither table while the same shift
+  imported by hand resolved to both.
+
+The event now published is `Tru-Point- Security Officer | F.O.C.`, at 19:15,
+with the address still on it. The order is §8.1's `${company}- ${role} |
+${site}`, the same as every other screen and the TrackTik rows; the calendar is
+not the place to invent a second one.
+
+### What is tested
+
+`placeName` and `roleFrom` are unit tests naming the real strings — the street
+line, the description that is a sentence, our own feed's. `labelFor` gets
+Homebase's three fields as one case and Google's two as another. The synthetic
+fixture gains an event in the shape Ray's calendar actually holds, so the whole
+path is a golden test rather than three functions agreeing in isolation.
+`resolveNames` is four cases in sites.test.js, the one the cron was getting
+wrong first among them.

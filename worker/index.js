@@ -17,13 +17,18 @@ import icsMod from '../ics.js';
 import feedMod from '../feed.js';
 import mergeMod from '../merge.js';
 import sitesMod from '../sites.js';
+// For `splitLabel` alone: §17.4's separator is parser.js's to know, and a
+// second copy of that rule here is how the two halves of this app start
+// disagreeing about where a role ends and a place begins.
+import parserMod from '../parser.js';
 import guardsMod from './guards.js';
 import schemaSQL from './schema.sql';
 
 const { parseICS } = icsMod;
 const { feedICS } = feedMod;
 const { mergeCalendar } = mergeMod;
-const { matchName } = sitesMod;
+const { resolveNames } = sitesMod;
+const { splitLabel } = parserMod;
 const { guard, alarmFor, feedJob, normalizeTimezone, zoneFor, todayIn, shiftISO,
         newestStamp, tokenOK, splitSQL, safeSettings, resetPlan,
         orphanGroups, countEvents } = guardsMod;
@@ -162,11 +167,13 @@ function insert(env, shift, stamp){
 function resolver(store, jobId){
   const sites = (store.sites || []).filter(s => s.companyId === jobId);
   const roles = (store.roles || []).filter(r => r.companyId === jobId);
-  return row => {
-    const m = matchName(row.siteRaw || row.label || '', sites);
-    const r = matchName(row.roleRaw || row.role || '', roles);
-    return { ...row, siteId: m.rec ? m.rec.id : null, roleId: r.rec ? r.rec.id : null };
-  };
+  // The same reading the page's `applyNames` does, through the same function.
+  // This used to match the whole label against the site table and `row.role`
+  // — a field a feed row does not carry — against the roles, so a label with
+  // a separator in it resolved to neither: no site, no role, the job's rate
+  // instead of the role's (§27), and a text comparison in `whereKey` where an
+  // identity was available.
+  return row => ({ ...row, ...resolveNames(row, sites, roles, splitLabel) });
 }
 
 async function record(env, jobId, p){

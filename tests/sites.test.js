@@ -378,3 +378,54 @@ test('a job with no roles declared behaves exactly as it did before §27', () =>
   for(const label of ['Cook', 'Headquarters', 'Headquartars', 'Anything At All'])
     assert.equal(T.readLabel(label, HB_SITES(), [], P.splitLabel).roleRaw, '');
 });
+
+/* ---------- resolving a whole row (§36) ----------------------------------
+   One function, two callers: the page's `applyNames` and the Worker's cron.
+   The cron used to do its own thing — the whole label against the site table,
+   and a `role` field a feed row does not carry against the roles — so a shift
+   the server filed resolved to neither table while the same shift imported by
+   hand resolved to both. It showed up as a night paid at the job's rate
+   instead of the role's (§27) and a title made of raw text.
+   ------------------------------------------------------------------------ */
+
+const TP_SITES = () => [site('st9', 'F.O.C.')];
+const TP_ROLES = () => [role('r9', 'Security Officer', 22.5)];
+const resolve = label =>
+  T.resolveNames({ label }, TP_SITES(), TP_ROLES(), P.splitLabel);
+
+test('a feed label resolves both halves against both tables', () => {
+  // What Homebase's own calendar now reads as: the role out of the event's
+  // description, the station out of its summary, and the street address left
+  // where it belongs, on the event.
+  const r = resolve('Security Officer | F.O.C.');
+  assert.equal(r.roleId, 'r9');
+  assert.equal(r.siteId, 'st9');
+  assert.equal(r.role, 'Security Officer');
+  assert.equal(r.roleHow, 'exact');
+  assert.equal(r.siteHow, 'exact');
+});
+
+test('the curated spelling wins over the one the feed wrote', () => {
+  const roles = [role('r9', 'Security Officer', 22.5)];
+  roles[0].aliases = ['Security Agent'];
+  const r = T.resolveNames({ label: 'Security Agent | F.O.C.' }, TP_SITES(), roles, P.splitLabel);
+  assert.equal(r.roleId, 'r9');
+  assert.equal(r.role, 'Security Officer', 'the table says what the role is called');
+  assert.equal(r.roleRaw, 'Security Agent', 'and what was read is kept, for the alias');
+});
+
+test('a half that matches nothing files as the text that was read', () => {
+  // §8.1's rule, unchanged: a row nobody has a record for still files.
+  const r = resolve('Prep Cook | Somewhere New');
+  assert.equal(r.roleId, null);
+  assert.equal(r.siteId, null);
+  assert.equal(r.role, 'Prep Cook');
+  assert.equal(r.siteRaw, 'Somewhere New');
+});
+
+test('a label with no separator still goes to whichever table knows it', () => {
+  assert.equal(resolve('F.O.C.').siteId, 'st9');
+  assert.equal(resolve('F.O.C.').roleId, null);
+  assert.equal(resolve('Security Officer').roleId, 'r9');
+  assert.equal(resolve('Security Officer').siteId, null);
+});
