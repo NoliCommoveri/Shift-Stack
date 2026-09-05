@@ -4371,12 +4371,5 @@ $('#flushcache').onclick = async () => {
   // — and returns the same call to make for this one, which is an opening too.
   // Its own ten-minute floor is what keeps a glance at a message from becoming
   // a card, so both routes can fire freely.
-  const openCard = whenWake(() => S.shifts, {
-    key: 'app',
-    describe: s => {
-      const co = coById(s.companyId);
-      return `${co ? co.name : 'Unassigned'} \u00b7 ${shiftWhere(s)} \u00b7 ${fmtDur(durMins(s))}`;
-    }
-  });
-  openCard();
+  whenWake(() => S.shifts, { key: 'app' })();
 })();

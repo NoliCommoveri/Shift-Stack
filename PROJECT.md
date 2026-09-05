@@ -5708,10 +5708,23 @@ back, `pageshow` with `persisted`. `whenWake` binds both and lets the floor
 below sort out the double; deciding which of the two *counts* as the opening is
 a question with no answer and no need of one.
 
-The card is the same banner in the dialog, saying one sentence:
+The card is three lines, centred, and nothing else:
 
-- off shift — **Work in 17 hours and 53 minutes**
-- on shift — **Off in 10 hours and 15 minutes**
+```
+        Work in
+17 hours and 53 minutes
+       at 19:15
+```
+
+On shift the first line is **Off in** and the other two count to the end of it.
+It is a flag, not a briefing — the job, the site, the length and the date are
+all on the screen behind it, and a card that repeats them is a card to be read
+rather than glanced at. The third line is there because a countdown answers
+"how long" and the next thing asked is always "so what time is that".
+
+The count is set in the sans face rather than the mono every other countdown
+uses. Mono at that size wraps *17 hours and 52 minutes* onto two lines on a
+412px phone, and a flag that has to be read twice is not a flag.
 
 Ten minutes' quiet between showings (`WHEN_QUIET`), because switching out to
 read a message and coming straight back is not an opening, and a card that
@@ -5746,8 +5759,8 @@ The file is pure and takes the clock as an argument, so `tests/when.test.js`
 can ask it about midnight, about a shift already running, and about the minute
 before the door without waiting for any of them. `fmtDurWords` moved in too —
 it had been copied into app.js and view.js — and `whenPrompt`, the one function
-that draws, takes its subtitle from the caller, because the two pages read a
-company off different stores.
+that draws, needs nothing from either page but the shifts and a key: it writes
+its three lines with `textContent`, so it does not even need their `esc`.
 
 The lead could not also be called `LEAVE_PAD`: both files are classic scripts,
 and a page that ever loaded when.js and kids.js together would die on the

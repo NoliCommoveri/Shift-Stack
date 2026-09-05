@@ -10,7 +10,7 @@
    So the arithmetic is here, once, and it is pure. Nothing in this file reads
    `S` or `V` or a global store: it takes the shifts and the clock as
    arguments, and the two pages hand it their own. `whenPrompt` is the one
-   exception — it draws — and even that takes its words from the caller.
+   exception — it draws — and all it draws is three lines of that arithmetic.
    ========================================================================== */
 
 /* Forty-five minutes before the start, he is out of the door. That is the same
@@ -102,6 +102,12 @@ function whenLead(n){
   return n.lead <= 0 ? 'Leave now' : `Leave in ${whenClock(n.lead)}`;
 }
 
+/* 24-hour, for app.js's reason: am/pm is the one character in this app that
+   can be misread into a missed shift. */
+function whenAt(d){
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
 /* The same gap in words, for a sentence rather than a column. "6h 45m" is
    right beside the shift lengths it is compared against and wrong in the
    middle of a line of prose, where it reads as a code.
@@ -164,10 +170,12 @@ function whenPrompt(shifts, opts){
   if(t - last < WHEN_QUIET * 1000 && !o.force) return false;
   try { localStorage.setItem(key, String(t)); } catch(e){ /* blocked */ }
 
-  // textContent throughout: a company name is his to type and this file has no
-  // business trusting it, and building it this way means when.js needs neither
-  // page's `esc`.
-  body.innerHTML = '';
+  /* Three lines and nothing else. This is a flag, not a briefing: the shift,
+     the job, the site and the length are all on the screen behind it, and a
+     card that repeats them is a card to be read rather than glanced at. What
+     it is for is the one number, so the one number is what is big.
+
+     textContent throughout, so this file needs neither page's `esc`. */
   const mk = (into, tag, cls, text) => {
     const e = document.createElement(tag);
     if(cls) e.className = cls;
@@ -175,18 +183,15 @@ function whenPrompt(shifts, opts){
     into.appendChild(e);
     return e;
   };
-  // The banner again, in the dialog, drawn by the same stylesheet: two cards
-  // that said the same thing in two shapes would be read as two facts.
-  const card = mk(body, 'div', 'next');
-  mk(card, 'div', 'lbl', n.on ? 'ON SHIFT' : 'NEXT SHIFT');
-  mk(card, 'div', 'big', whenLine(n));
-  const sub = typeof o.describe === 'function' ? o.describe(n.s, n) : '';
-  if(sub) mk(card, 'div', 'sub', sub);
-  mk(card, 'div', 'cd', n.on
-    ? `Started ${whenClock(-n.to)} ago`
-    : whenLead(n) || whenCountdown(n));
+  body.innerHTML = '';
+  const flag = mk(body, 'div', 'whenflag');
+  mk(flag, 'div', 'what', n.on ? 'Off in' : 'Work in');
+  mk(flag, 'div', 'count', whenWordy(n.on ? n.left : n.to));
+  // The clock time it lands on, because a countdown answers "how long" and the
+  // next thing asked is always "so what time is that".
+  mk(flag, 'div', 'at', 'at ' + whenAt(n.on ? n.end : n.at));
 
-  mk(mk(body, 'div', 'rowbtns'), 'button', 'act', 'Close')
+  mk(mk(body, 'div', 'rowbtns whenclose'), 'button', 'act', 'Close')
     .onclick = () => dlg.close();
   dlg.showModal();
   return true;
@@ -208,5 +213,5 @@ function whenWake(get, opts){
 /* Node picks these up for the tests; the browser just gets the globals. */
 if(typeof module !== 'undefined' && module.exports){
   module.exports = { LEAVE_LEAD, WHEN_QUIET, whenNext, whenClock, whenCountdown,
-                     whenLead, whenWordy, whenLine, fmtDurWords };
+                     whenLead, whenWordy, whenLine, whenAt, fmtDurWords };
 }

@@ -107,6 +107,14 @@ test('a wait longer than a day is said in days, without false minutes', () => {
   assert.equal(W.whenWordy(0), '0 minutes');
 });
 
+test('the third line is the clock time it lands on, 24-hour', () => {
+  const s = [shift()];
+  // Off shift that is the start; on shift it is the end, which is the next
+  // morning and still reads as a time rather than a date.
+  assert.equal(W.whenAt(W.whenNext(s, at('2026-09-05T01:22:00')).at), '19:15');
+  assert.equal(W.whenAt(W.whenNext(s, at('2026-09-05T21:00:00')).end), '07:15');
+});
+
 test('nothing counts backwards, whichever line asks', () => {
   // Every one of these can be handed a negative by a clock that ticks between
   // the read and the draw, and a "-3 min" on the banner reads as a bug.

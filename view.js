@@ -723,16 +723,9 @@ $('#tok').onkeydown = e => { if(e.key === 'Enter') $('#unlock').click(); };
      closed — the page stays loaded and coming back fires no `load` — so
      `whenWake` binds the two events that do fire, and returns the same call
      for this opening. Nothing is shown behind the door: a phone with no token
-     yet has no shifts to count down to, and `whenNext` would say so anyway.
-     The ten-minute floor lives in `whenPrompt`, keyed per page. */
-  const vOpenCard = whenWake(() => (V.token ? V.shifts : []), {
-    key: 'view',
-    describe: s => {
-      const co = coById(s.companyId);
-      return `${co ? co.name : 'Unassigned'} \u00b7 ${shiftWhere(s)} \u00b7 ${fmtDur(durMins(s))}`;
-    }
-  });
-  vOpenCard();
+     yet has no shifts to count down to. The ten-minute floor lives in
+     `whenPrompt`, keyed per page because both apps share one localStorage. */
+  whenWake(() => (V.token ? V.shifts : []), { key: 'view' })();
 
   // A shift that starts while the app is open must not leave the banner saying
   // "Leave in 3 min" for an hour. The app has had this minute timer since it
