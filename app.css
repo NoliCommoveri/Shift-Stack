@@ -1,0 +1,299 @@
+/* Shift Deck, the whole stylesheet. PROJECT.md §42.
+   Lifted out of index.html unchanged when the read-only viewer was built.
+   Both pages link it, which is the point: the viewer is the same schedule and
+   the same pay tables, drawn the same way. A palette that lived in one page
+   and was copied into the other would have been two palettes inside a month. */
+:root{
+  --paper:#EDEEE9;
+  --card:#FFFFFF;
+  --ink:#22282B;
+  --soft:#5C6663;
+  --rule:#C6CAC1;
+  --hair:#DCDFD7;
+  --signal:#B0631A;
+  --deep:#8A4C12;
+  --wash:#F6E9D8;
+  --bad:#A32B1E;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--paper);color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,sans-serif;
+  font-size:16px;line-height:1.5;-webkit-text-size-adjust:100%;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.wrap{max-width:46rem;margin:0 auto;padding:1rem 1rem 6.5rem}
+h1{font-size:1.3rem;font-weight:600;letter-spacing:-.015em;margin:0 0 1rem}
+h2{font-size:1rem;font-weight:600;margin:0 0 .1rem}
+.soft{color:var(--soft)}
+.tiny{font-size:.84rem}
+.mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+
+/* tabs */
+nav{
+  position:fixed;left:0;right:0;bottom:0;z-index:20;
+  background:var(--paper);border-top:1px solid var(--rule);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+nav div{max-width:46rem;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr)}
+nav button{
+  background:none;border:none;font-family:inherit;font-size:.85rem;
+  color:var(--soft);padding:.85rem .2rem;cursor:pointer;
+  border-top:2px solid transparent;margin-top:-1px;
+}
+nav button[aria-current="true"]{color:var(--ink);font-weight:600;border-top-color:var(--signal)}
+nav button:focus-visible{outline:2px solid var(--signal);outline-offset:-2px}
+
+/* `hidden` has to win over any display rule set here, or an element the
+   app hides stays on screen — `label.f{display:block}` quietly beat the
+   browser's own [hidden] rule until this was widened from `section`. */
+[hidden]{display:none !important}
+
+/* generic bits */
+.card{background:var(--card);border:1px solid var(--hair);border-radius:3px;padding:.85rem;margin-bottom:.7rem}
+button.act{
+  background:var(--ink);color:var(--paper);border:none;border-radius:2px;
+  font-family:inherit;font-size:.95rem;font-weight:500;padding:.7rem 1rem;cursor:pointer;
+}
+button.act:hover{background:#111517}
+button.ghost{
+  background:none;border:1px solid var(--rule);color:var(--ink);
+  font-family:inherit;font-size:.88rem;padding:.5rem .8rem;border-radius:2px;cursor:pointer;
+}
+button.ghost:hover{border-color:var(--soft)}
+button:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+.danger{color:var(--bad)}
+.rowbtns{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.7rem}
+
+input,select{
+  font-family:inherit;font-size:.92rem;background:var(--card);color:var(--ink);
+  border:1px solid var(--rule);border-radius:2px;padding:.45rem .5rem;min-width:0;
+}
+input[type=date],input[type=number],input.clock{font-family:"IBM Plex Mono",monospace;font-size:.88rem}
+/* A time is typed, not picked: `<input type="time">` is drawn in the phone's
+   locale, which on his puts an AM/PM segment on the one screen that exists to
+   catch an am/pm misread (PROJECT.md §24). The box below is 24-hour and holds
+   HH:MM; it goes red while what is in it is not a time it can read. */
+input.clock{width:6.4rem;text-align:center;letter-spacing:.04em}
+input.clock[aria-invalid="true"]{border-color:var(--bad);color:var(--bad)}
+input:focus,select:focus{outline:2px solid var(--signal);border-color:var(--signal)}
+label.f{display:block;margin-bottom:.55rem}
+label.f span{display:block;font-size:.8rem;color:var(--soft);margin-bottom:.15rem}
+label.f input,label.f select{width:100%}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:.55rem}
+
+/* schedule */
+.weekhead{
+  display:flex;justify-content:space-between;align-items:baseline;gap:.6rem;
+  border-bottom:1px solid var(--rule);padding:1.3rem 0 .35rem;margin-bottom:.5rem;
+}
+.weekhead h2{font-size:.95rem}
+.day{display:grid;grid-template-columns:3.1rem 1fr;gap:.7rem;padding:.5rem 0;border-bottom:1px solid var(--hair)}
+.daynum{text-align:center;padding-top:.15rem}
+.daynum b{display:block;font-size:1.15rem;font-weight:600;line-height:1.1;font-family:"IBM Plex Mono",monospace}
+.daynum span{font-size:.7rem;color:var(--soft);letter-spacing:.06em}
+.day.today .daynum b{
+  background:var(--ink);color:var(--paper);border-radius:50%;
+  width:1.85rem;height:1.85rem;line-height:1.85rem;margin:0 auto;
+}
+.shift{display:flex;gap:.6rem;align-items:flex-start;padding:.3rem 0;cursor:pointer}
+.tick{width:3px;border-radius:2px;align-self:stretch;min-height:2.2rem;background:var(--rule);flex:none}
+/* A shift proposed from the rota, which nothing has confirmed yet: the stripe
+   is outlined rather than filled, and the word says what the outline means. */
+.rota{font-style:italic}
+/* A shift the employer's calendar published and the Worker brought in. The
+   same italic the rota mark uses, because both say the same kind of thing —
+   this row is not one he typed — and the words after it say which. */
+.fromfeed{font-style:italic}
+/* The read-only shift panel. A label and a value per row, which is what the
+   edit dialog's fields look like with the inputs taken out. */
+.facts{margin:0 0 .7rem}
+.facts div{display:flex;gap:.6rem;justify-content:space-between;align-items:baseline;
+  padding:.3rem 0;border-bottom:1px solid var(--hair)}
+.facts span{font-size:.8rem;color:var(--soft);flex:none}
+.facts b{font-weight:600;text-align:right}
+tr.assumed td:first-child{color:var(--ink)}
+.shift .when{font-weight:500;font-family:"IBM Plex Mono",monospace;font-size:.9rem}
+.shift .where{font-size:.86rem;color:var(--soft)}
+.shift .len{margin-left:auto;font-size:.82rem;color:var(--soft);font-family:"IBM Plex Mono",monospace;padding-top:.15rem}
+/* All three of these are drawn between the two shifts they are about
+   (PROJECT.md §29, §30, §40), in one shape, so that what a week looks like at
+   scrolling speed is a stack of rows with the odd band sitting in a gap.
+
+   The two warnings are filled rather than tinted: they are read in the
+   half-second of scrolling past a week, and sitting in the gap they describe
+   they have to read as a thing in their own right rather than as a footnote to
+   the shift above.
+
+   Two fills, and the order between them is the point. §25 gave the rest note
+   grey so it could not be mistaken for the double booking, which is the
+   failure with no recovery — but once the rest note was filled, a red *line*
+   under a filled amber block was the worse warning drawn quieter. So the
+   overlap is filled too, in the red that has only ever had this one job.
+
+   The back-to-back line is the one that is deliberately not filled (§40). It
+   is not a warning — going straight from one job to the other is the ordinary
+   week — so it is the shape without the colour: hairline, on paper, in the
+   soft grey the app already uses for the things beside a fact rather than the
+   fact. Filling it would put a third colour on the ladder and, worse, would
+   make the commonest join on the schedule the loudest thing in the week. */
+.gapwarn,.restline,.b2bline{
+  font-size:.8rem;font-weight:500;border-radius:2px;
+  padding:.25rem .5rem;margin:.35rem 0 .35rem 1.2rem;
+}
+.gapwarn,.restline{color:#FFF}
+.restline{background:var(--signal);border:1px solid var(--deep)}
+.gapwarn{background:var(--bad);border:1px solid #7C2016}
+.b2bline{color:var(--soft);background:var(--card);border:1px solid var(--hair)}
+.empty{padding:2rem 0;color:var(--soft)}
+
+/* next shift banner */
+.next{
+  background:var(--ink);color:var(--paper);border-radius:3px;
+  padding:.9rem 1rem;margin-bottom:1rem;
+}
+.next .lbl{font-size:.78rem;opacity:.65;letter-spacing:.06em}
+.next .big{font-size:1.25rem;font-weight:600;margin:.1rem 0 .05rem}
+.next .sub{font-size:.87rem;opacity:.8}
+.next .cd{font-family:"IBM Plex Mono",monospace;font-size:.85rem;opacity:.9;margin-top:.35rem}
+
+/* import */
+.intake{
+  border:1.5px dashed var(--rule);background:var(--card);border-radius:3px;
+  padding:1.7rem 1rem;text-align:center;cursor:pointer;
+}
+.intake:hover,.intake.hot{border-color:var(--signal);background:var(--wash)}
+.intake p{margin:0;font-weight:500}
+.intake small{display:block;margin-top:.35rem;color:var(--soft)}
+input[type=file]{display:none}
+.bar{height:3px;background:var(--hair);border-radius:2px;overflow:hidden;margin-top:.9rem}
+.bar i{display:block;height:100%;width:0;background:var(--signal);transition:width .25s}
+.prog{display:none}.prog.on{display:block}
+.prog span{display:block;margin-top:.4rem;font-size:.85rem;color:var(--soft)}
+
+.rev{padding:.75rem 0;border-bottom:1px solid var(--hair)}
+.rev.flagged{background:var(--wash);margin:0 -.5rem;padding-left:.5rem;padding-right:.5rem}
+.rev.gone .mono,.rev.gone .tiny{text-decoration:line-through;color:var(--soft)}
+.rev.gone .flag{text-decoration:none}
+.tick{display:flex;align-items:center;gap:.35rem;font-size:.88rem}
+.tick input{width:1.05rem;height:1.05rem;accent-color:var(--signal)}
+.revf{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
+.revf input[type=text]:not(.clock){flex:1 1 8rem}
+.flag{font-size:.8rem;color:var(--signal);margin:.4rem 0 0}
+/* Declared shifts (§8.2). Seven toggles rather than a day picker: the whole
+   rota has to be readable and changeable with a thumb, on a phone. */
+.subhead{font-size:.85rem;font-weight:600;margin:1rem 0 .15rem}
+/* Folds (§28). The Setup screen is a phone screen, and a job carrying a rota,
+   a role table and a site table does not fit on one. Native <details>: it
+   folds, it takes a keyboard, and it needs no script to do either. */
+.fold{border-top:1px solid var(--hair)}
+.fold>summary{
+  display:flex;align-items:baseline;gap:.5rem;cursor:pointer;
+  padding:.55rem .1rem;list-style:none;font-size:.85rem;font-weight:600;
+}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary::before{
+  content:"";flex:0 0 auto;width:.42rem;height:.42rem;margin-right:.1rem;
+  border-right:1.5px solid var(--soft);border-bottom:1.5px solid var(--soft);
+  transform:rotate(-45deg) translate(-.1rem,-.1rem);transition:transform .12s;
+}
+.fold[open]>summary::before{transform:rotate(45deg) translate(-.05rem,-.05rem)}
+.fold>summary:focus-visible{outline:2px solid var(--signal);outline-offset:-2px}
+/* What the fold says while it is shut. It has to fit on one line on a phone,
+   so it is the part that gives way — the name never truncates. */
+.foldname{flex:0 0 auto;display:flex;align-items:center;gap:.4rem}
+.foldnote{
+  flex:1 1 auto;min-width:0;text-align:right;font-weight:400;font-size:.78rem;
+  color:var(--soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.foldbody{padding:0 0 .7rem}
+/* The job itself: a heavier line and a bigger name, so two jobs folded shut
+   read as two jobs and not as six sections. */
+.fold.job{border-top:none}
+.fold.job>summary{font-size:1rem;padding:.2rem .1rem .6rem}
+.fold.job>summary::before{width:.5rem;height:.5rem;border-width:2px}
+.fold.job>.foldbody{padding-bottom:0}
+.fold.job .dot{margin-right:0}
+.pat{border-top:1px solid var(--hair);padding:.55rem 0}
+.pat:first-child{border-top:none}
+.days{display:flex;gap:.25rem;margin-bottom:.4rem}
+.day-t{
+  flex:1 1 0;background:var(--card);border:1px solid var(--rule);color:var(--soft);
+  font-family:inherit;font-size:.82rem;padding:.35rem 0;border-radius:2px;cursor:pointer;
+}
+.day-t[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--paper);font-weight:600}
+.patt{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
+.patwhat{font-size:.8rem;color:var(--soft);margin:.35rem 0 0}
+.sug{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--hair)}
+.sug button{margin-left:auto}
+/* Sites (§8.1) */
+.rec{border:1px solid var(--hair);border-radius:3px;padding:.6rem;margin-bottom:.5rem}
+.rec.archived{opacity:.62}
+.aliases{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;margin:.1rem 0 .5rem}
+.alias{display:inline-flex;align-items:center;gap:.15rem;font-size:.8rem;
+  background:var(--wash);border:1px solid var(--hair);border-radius:2px;padding:.05rem .1rem .05rem .35rem}
+.alias .kill{font-size:.9rem}
+.sitebtns{margin-bottom:.2rem}
+.sitebtns select,.rolebtns select{flex:0 1 10rem}
+/* The review row's site column: what was read, then what it was taken as. */
+.revf .read{flex:0 1 auto;max-width:9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.revf .sitesel,.revf .rolesel{flex:1 1 8rem;min-width:7rem}
+/* The rota's two pickers, §27. Narrower than the review screen's because the
+   row already carries seven day toggles and a pair of clocks, and they wrap
+   under them on a phone rather than squeezing the times. */
+.patt .patrole,.patt .patsite{flex:1 1 7rem;min-width:6rem;font-size:.85rem}
+/* The horizon warnings sit above the week list. A job that feeds itself gets
+   the quieter treatment: worth knowing, but not a job to do. */
+.horizon{margin:0 0 .6rem;padding:.5rem .6rem;border-left:2px solid var(--signal);background:var(--card)}
+.horizon.fed{color:var(--soft);border-left-color:var(--hair)}
+/* Red is for a shift that is going to go wrong on the phone rather than a job
+   to do here: a double booking, which has no recovery, and a calendar too far
+   behind to be carrying the right alarms for what is about to happen. */
+.horizon.clash,.horizon.late{color:var(--bad);border-left-color:var(--bad)}
+/* §25 states a fact about the night, not a fault in the schedule, so it is
+   not given the red the clash gets — that red has one job. */
+.horizon.rest{color:var(--signal)}
+.kill{background:none;border:none;color:var(--soft);font-size:1.15rem;cursor:pointer;padding:.3rem .45rem;border-radius:2px}
+.kill:hover{color:var(--bad);background:#F3DEDA}
+
+/* pay */
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th{text-align:left;font-weight:500;color:var(--soft);font-size:.8rem;padding:.35rem 0;border-bottom:1px solid var(--rule)}
+td{padding:.45rem 0;border-bottom:1px solid var(--hair);font-variant-numeric:tabular-nums}
+td.n,th.n{text-align:right;font-family:"IBM Plex Mono",monospace;
+  /* The figures never wrap and never get squeezed by the notes beside them.
+     A week paid at two rates names its hours per role in the first column
+     (§27), which is a lot of text next to three numbers that have to stay
+     readable as numbers. */
+  white-space:nowrap;padding-left:.6rem}
+tr.tot td{font-weight:600;border-bottom:none;border-top:1px solid var(--rule)}
+details{margin-top:1rem}
+summary{cursor:pointer;font-size:.88rem;color:var(--soft)}
+
+/* "Show earlier" on both lists (§29). Small, quiet and full width: it is the
+   end of the list rather than an action, and it must not read as one. */
+button.more{
+  display:block;width:100%;background:none;border:1px dashed var(--rule);
+  color:var(--soft);font-family:inherit;font-size:.82rem;padding:.5rem;
+  border-radius:2px;cursor:pointer;margin:.6rem 0;
+}
+button.more:hover{border-color:var(--soft);color:var(--ink)}
+/* The pay row's breakdown (§29). Sits under the date, and is the only thing in
+   the first column besides the date and a warning. */
+button.brk{
+  background:none;border:1px solid var(--rule);color:var(--soft);
+  font-family:inherit;font-size:.75rem;padding:.05rem .35rem;
+  border-radius:2px;cursor:pointer;margin-top:.2rem;
+}
+button.brk:hover{border-color:var(--soft);color:var(--ink)}
+
+.dot{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:.35rem;vertical-align:baseline}
+
+/* dialog */
+dialog{
+  border:1px solid var(--rule);border-radius:3px;background:var(--paper);color:var(--ink);
+  padding:1.1rem;width:min(30rem,calc(100vw - 2rem));
+}
+dialog::backdrop{background:rgba(34,40,43,.45)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}

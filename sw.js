@@ -12,8 +12,15 @@
 
    v13 is §41: the shell is stored stripped of the redirect flag, and a phone
    holding v12 is holding the poisoned copy of `/index.html` that broke the
-   installed app. Nothing but a new cache name re-fetches it. */
-const SHELL = 'shiftdeck-shell-v13';
+   installed app. Nothing but a new cache name re-fetches it.
+
+   v14 is §42: the stylesheet moved out of index.html into app.css so the
+   read-only viewer could link the same one. A phone holding v13 has a shell
+   whose index.html still carries its styles inline and whose file list has
+   never heard of app.css — it would work, being the old page whole, and would
+   go on working for as long as the cache stood, which is how a deploy ships
+   nothing. */
+const SHELL = 'shiftdeck-shell-v14';
 const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs a 10MB re-download
 /* Every script index.html loads, and nothing it does not. feed.js and merge.js
    were missing from this list from the day §14.7 extracted them: the shell
@@ -23,7 +30,7 @@ const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs
    missing collaborator by design — so the app was dead offline, which is the
    one condition it exists to survive. `tests/config.test.js` now reads both
    lists and fails if they disagree. */
-const FILES = ['./', './index.html', './parser.js', './ics.js', './patterns.js', './holidays.js', './sites.js', './pay.js', './feed.js', './merge.js', './app.js', './manifest.webmanifest'];
+const FILES = ['./', './index.html', './app.css', './parser.js', './ics.js', './patterns.js', './holidays.js', './sites.js', './pay.js', './feed.js', './merge.js', './app.js', './manifest.webmanifest'];
 
 /* The start URL, absolute, and the only thing a navigation that misses the
    cache can fall back to. `./` against sw.js's own location is the origin

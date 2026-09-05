@@ -1,6 +1,12 @@
 # Shift Deck — project state
 
-_Last updated 5 September 2026_ — §39 puts each job's colour on its own events,
+_Last updated 5 September 2026_ — §42 builds the read-only second phone: `/view`,
+two tabs, and a `VIEW_TOKEN` that opens exactly one route so that the phone
+*cannot* write rather than merely declining to. It needed no new column and no
+new field — the shifts and every pay rate were already in D1 — only a read
+path, a second credential and a page. The stylesheet moved out of index.html so
+both pages draw the same week from one file, and a browser test puts one
+mixed-rate week through both and fails if the grosses disagree. §39 puts each job's colour on its own events,
 which is the second signal §25 said colour could be and never the only one: the
 title still names the job. It is an experiment with a known worst case — a
 client that does not read RFC 7986's `COLOR` skips the line and shows the
@@ -4841,3 +4847,223 @@ launch is the one thing that cannot fetch it. So: open the site in Chrome
 The home screen icon works from then on. If it does not, **Setup → Flush cache
 and reload** does the same thing harder, and reinstalling the icon picks up the
 new `start_url` as well.
+
+---
+
+## 42. Built: a read-only second phone, 5 September 2026
+
+Ray asked whether there could be a read-only version on a second phone, with
+just the shifts and pay tabs and no add or settings, so that he can see his
+husband's schedule too.
+
+Yes, and the whole of it was already in the database. The question that
+followed — whether it meant sending anything to D1 that was not already going
+there — has a clean answer: nothing. The `shifts` table holds all three
+sources; the cron writes `source='feed'` and `/push` writes the phone's
+`manual` and `pattern` rows. Every figure the pay tab needs is on the company
+object — the rate, `otMult`, `otAfterHrs`, the break rule, `weekStart` — and
+`cfg.companies` has gone up with every push since §14.3. `renderPay` reads
+nothing from `S.settings` at all. So this section adds no write, no column and
+no field. What it adds is a read path, a second credential and a second page.
+
+### 42.1 Why a page and not a flag
+
+The obvious build is a query parameter: `?view=1`, hide the Add and Setup tabs,
+done in an afternoon. It is worth naming why that is the wrong answer, because
+it looks like the cheaper one.
+
+A phone holding the push token and a `curl` are the same thing to a Worker.
+A viewer built as a flag on `app.js` is a phone that holds `PUSH_TOKEN` — the
+credential that can rewrite the whole store and, through `/reset`, delete it —
+and that is stopped from using it by a CSS rule. The tabs are hidden; the code
+that pushes is still loaded, still bound to `save`, and still one bug or one
+long-press away from running. What is being asked for is not a screen with
+fewer buttons, it is a phone that *cannot* change his schedule, and that is a
+property of the server or it is not a property at all.
+
+So: `VIEW_TOKEN`, a second dashboard secret, which opens exactly one route.
+
+    GET /read      →  viewOK   →  the cfg row and every shift
+    POST /push     →  PUSH_TOKEN only
+    POST /reset    →  PUSH_TOKEN only
+    POST /migrate  →  PUSH_TOKEN only
+    GET /status    →  PUSH_TOKEN only
+    GET /trace     →  PUSH_TOKEN only
+
+`viewOK` accepts the push token as well, because it is strictly the more
+privileged of the two and there is no reason this route should keep the app's
+own phone out. An unset `VIEW_TOKEN` opens nothing: `tokenOK` refuses an empty
+expected secret, so the deploy between adding the secret and it taking effect
+(§14.9) fails closed, which is the failure that is safe.
+
+It lives in `guards.js`, next to `tokenOK`, for that file's stated reason — a
+rule about who gets in should be callable by a test that has no database and no
+network. It was written in `index.js` first and moved, which was the right
+second thought: `index.js` cannot be required by a test at all, because it
+imports `schema.sql`, and a guard that can only be asserted by reading its own
+source as text is a guard nothing has ever run. `guards.test.js` now runs it —
+the near misses, the trailing space, the wrong case, and every shape of unset.
+
+`config.test.js` asserts the wiring, which is the half a unit test cannot see:
+that exactly one route accepts the view token, that it is a GET, that `/push`,
+`/reset` and `/migrate` do not mention `viewOK` at all, and that `/read` reads
+neither `raw` nor `polls` — the employer's calendar text and the cron's log are
+not his week and have no business on a second phone.
+
+### 42.2 Why `/read` rather than `/shifts`
+
+`/shifts` exists and answers with `WHERE source = 'feed'`. That filter is
+right for the app: the phone asking already holds the manual and pattern rows,
+because it wrote them, and handing them back would be handing it its own
+homework. A second phone holds nothing, so the whole table is the answer here.
+
+`cfg` comes back in the same response rather than behind a second call, because
+the two halves are one answer. A shift's colour, its site, its role and what
+its hours are worth all live in `cfg`; a viewer with the shifts and not the
+companies would draw an unnamed grey week and a pay tab of dashes. It is
+already the narrowed row `safeSettings` wrote in §14.3 — the push token and the
+employer's secret calendar address were never in it — so there was nothing
+further to strip.
+
+### 42.3 The stylesheet moved out
+
+`index.html` carried its styles inline. Two pages drawing the same week from
+one stylesheet is correct; two pages drawing the same week from two copies of
+one stylesheet is a schedule that looks slightly different on the two phones
+within a month, and on a schedule a difference in how something is drawn reads
+as a difference in the shifts.
+
+So the whole `<style>` block became `app.css`, unchanged, and both pages link
+it. `SHELL` goes to `v14`: a phone holding v13 has a shell whose `index.html`
+still carries its styles inline and whose file list has never heard of
+`app.css`. It would work — it is the old page, whole — and it would go on
+working for as long as the cache stood, which is §41's lesson for the fourth
+time.
+
+### 42.4 Two service workers on one origin
+
+The viewer needs its own offline shell, and that is the fiddly part.
+
+A worker may only claim a scope at or below its own directory. The page is
+served at `/view` — Cloudflare's `html_handling` drops the extension, and
+`/view.html` redirects there, so `/view` is the URL that does not redirect and
+therefore the only sound `start_url` (§41). But `/view` is not below `/view/`,
+so a worker at `/view/sw.js` could not control the page it exists for. It goes
+at the root instead, as `/view-sw.js`, and registers with `scope: '/view'`:
+from the root it may claim any scope, and the more specific registration wins
+for these pages. The app keeps `/`, the viewer takes `/view*`, and both can be
+installed on one phone without either quietly answering the other's fetches.
+
+Cache names are the second half of that. `activate` deletes every cache it does
+not recognise, so two workers sharing a naming scheme would each delete the
+other's shell on every activation — two apps that refetch themselves from the
+network on every launch, which is the opposite of the point. The viewer's shell
+is `shiftdeck-view-shell-v1` and its `activate` only ever considers keys
+starting `shiftdeck-view-`.
+
+`fromShell` looks in its own cache rather than calling `caches.match`, which
+searches every cache on the origin: the shared modules are the same files
+today, they are one deploy away from not being, and a viewer running `app.css`
+out of a shell the app cached last month is a bug with no symptom anyone could
+report.
+
+`/read` is never cached. `view.js` keeps the last answer in IndexedDB and draws
+from it, which is a cache that knows how old it is and says so on the screen; a
+second copy in the Cache API would be an older answer with nothing to say it
+was one, handed back to a `fetch` that believes it reached the server.
+
+### 42.5 Its own IndexedDB, and what that is worth later
+
+`shiftdeck-view`, not `shiftdeck`. The viewer is served from the app's origin,
+so a shared database name would be two writers over one `'state'` key — the
+app's whole store overwritten by a cache of the server's answer. That is only
+possible on one device, and it is the device this was tested on.
+
+Ray asked whether the viewer would create an IndexedDB that web push could use
+later. It does, and it is the right substrate for it — a service worker cannot
+read `localStorage` but can read IndexedDB, so a `push` handler could open this
+store and build the notification body out of the shifts it already holds. Worth
+being exact about what that would still need, because the database is not the
+missing piece: `view-sw.js` has `install`, `activate` and `fetch` and no `push`
+listener, there are no VAPID keys, nothing calls `pushManager.subscribe`, and
+each device's subscription endpoint would have to be stored server-side for the
+Worker to send to it. That last one is a new D1 table, which makes push the
+first thing in this project that genuinely does add data the database is not
+already carrying. Per-device endpoints are an upside rather than a cost: two
+phones would be separately addressable, so a shift change could go to both and
+a "you are on in two hours" to only one.
+
+### 42.6 The as-of line
+
+The one thing this screen has that the app does not need, and the reason it
+needs it is the reason the whole project exists.
+
+On the app, an empty week is a week he has not imported, and three separate
+things say so — the horizon note, the stale-export warning, the poll log in
+Setup. None of those belong here: every one of them is a job to do, and there
+is nothing to do from this phone. What is left is the single failure a
+read-only screen can have. It shows a week; Saturday is empty; and the reason
+is not that he is off, it is that this phone last reached the Worker on
+Tuesday. Nothing else on the page can tell those apart.
+
+So there is one line under each heading — *As of four minutes ago* — and it
+changes colour rather than wording, because it has to work without being read.
+An hour is amber and twelve hours is red, and at twelve hours it stops being a
+timestamp and says what it means: *this may not be his week any more*. The
+thresholds come off the cron, which polls every fifteen minutes, and off
+`autoPush`, which sends within seconds of an edit; an hour behind is already
+unusual.
+
+It refreshes on launch, on `visibilitychange`, and on a button. No timer: a
+phone in a pocket polling a Worker every minute is a battery cost for an answer
+nobody is reading.
+
+### 42.7 What is shared, and the test that keeps it shared
+
+`view.html` loads the same eight scripts `index.html` does, minus `app.js`.
+Every one of them is pure — dates, ICS, the site and role tables, the pay
+arithmetic — and loading them rather than reimplementing them is what makes a
+week here foot to the week there. What is not shared is `app.js` itself, which
+is five thousand lines of editing, importing and exporting on a page with
+nothing to edit.
+
+The pay tab is `renderPay` and `payDetail` with `S` changed to `V`. That is a
+copy, and a copy of an arithmetic is exactly what §27 moved into `pay.js` to
+prevent — so the test that matters puts one mixed-rate week with overtime in it
+through *both pages* in a real browser and compares the hours, the overtime,
+the average rate and the gross. A figure on Ray's phone that disagreed with the
+figure on his by a cent would be worse than no pay tab at all, because the
+disagreement is the half that would get believed.
+
+The other browser test is §31's, on the new page: seven scripts share one
+global scope here too, `view.js` adds about forty names to it, and the last
+time two files declared the same identifier every title in the exported
+calendar came out `[object Object]` for four sections. It asserts the page
+loads with no uncaught errors, that `weekPay`, `whereText`, `durMins`,
+`clashPairs` and `restGaps` all resolved, that `S` is *not* defined, that the
+nav has exactly two buttons, and that neither tab contains a single `<input>`.
+
+### 42.8 Handing the token over
+
+The token is minted in the Cloudflare dashboard and has to reach a phone that
+is not the one it was minted on. So it travels as a link: `/view#t=THETOKEN`,
+which the page reads once and takes straight back out of the address bar. An
+installed PWA launches at `start_url` and drops the hash anyway, which is why
+it is written to IndexedDB the moment it is read. There is a paste field too,
+for a token sent as text.
+
+`app.js` was left alone. A helper on the Setup screen that built the link would
+be a convenience, and it would put the view token on the husband's phone, which
+has no use for it. Four secrets already live in one dashboard panel; this is
+the fourth.
+
+### 42.9 What was left out
+
+- **The launcher buttons.** They open TrackTik and Homebase by Android package
+  name. Those apps are not on the second phone, and would not be his account
+  if they were.
+- **The horizon and stale-calendar notes.** Jobs to do, on a phone with nothing
+  to do.
+- **Editing anything at all.** A shift opens the read-only panel `showFeedShift`
+  gives a feed row on the app — there, because a feed row is the employer's;
+  here, because every row is somebody else's.

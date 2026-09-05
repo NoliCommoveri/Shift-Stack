@@ -65,7 +65,10 @@ test('.assetsignore keeps the repo off the public site', () => {
   for(const must of ['.git', 'node_modules', 'worker', 'tests', 'wrangler.toml', 'PROJECT.md'])
     assert.ok(ignore.includes(must), `.assetsignore must exclude ${must}`);
   // And the app itself must still be served.
-  for(const served of ['index.html', 'app.js', 'feed.js', 'merge.js', 'sw.js'])
+  // The viewer's four files and the stylesheet both pages link (§42). A page
+  // excluded here is a 404 on the second phone with nothing to say why.
+  for(const served of ['index.html', 'app.js', 'app.css', 'feed.js', 'merge.js', 'sw.js',
+                       'view.html', 'view.js', 'view-sw.js', 'view.webmanifest'])
     assert.ok(!ignore.includes(served), `${served} must not be excluded`);
 });
 
@@ -85,7 +88,11 @@ const worker = fs.readFileSync(path.join(ROOT, 'worker', 'index.js'), 'utf8');
  * handler and check the token inside it, which is just as good and would look
  * unguarded to anything that only read the route line. */
 function bodyOf(name){
-  const at = worker.search(new RegExp(`(async\\s+)?function\\s+${name}\\s*\\(`));
+  // A declaration or a block-bodied arrow assigned to a const: `viewOK` is the
+  // second shape, and the first version of this only knew the first, so the
+  // guard it was asked about read as absent rather than as unguarded.
+  const at = worker.search(new RegExp(
+    `(async\\s+)?function\\s+${name}\\s*\\(|const\\s+${name}\\s*=\\s*(async\\s*)?\\(`));
   if(at < 0) return '';
   let i = worker.indexOf('{', at), depth = 0;
   for(let j = i; j < worker.length; j++){
@@ -110,14 +117,17 @@ test('no endpoint answers with the schedule before checking a token', () => {
 
   const guarded = r => {
     if(/tokenOK\(env\.PUSH_TOKEN, bearer\(req\)\)/.test(r.body)) return true;
+    // The read-only viewer's route (§42). A different secret, and a narrower
+    // one: `viewOK` is asserted below to open nothing that writes.
+    if(/viewOK\(env, bearer\(req\)\)/.test(r.body)) return true;
     // Dispatched instead: follow it and look in the handler.
     const call = /return\s+([A-Za-z_$][\w$]*)\s*\(/.exec(r.body);
     return !!call && /tokenOK\(env\.PUSH_TOKEN, bearer\(req\)\)/.test(bodyOf(call[1]));
   };
 
-  assert.ok(routes.length >= 4, `expected the four endpoints, found ${routes.length}`);
+  assert.ok(routes.length >= 5, `expected every endpoint, found ${routes.length}`);
   for(const r of routes)
-    assert.ok(guarded(r), `${r.path} must check the push token, at the route or in its handler`);
+    assert.ok(guarded(r), `${r.path} must check a token, at the route or in its handler`);
 
   // /shifts is what §14.7's pass two added, and it hands back every shift the
   // cron holds. Named rather than merely counted, so deleting it fails here
@@ -129,6 +139,141 @@ test('no endpoint answers with the schedule before checking a token', () => {
   // there says a feed exists at all.
   assert.match(bodyOf('feed'), /tokenOK\(env\.FEED_TOKEN, token\)/);
   assert.match(bodyOf('feed'), /status: 404/);
+});
+
+/* The read-only half is read-only on the server (§42).
+ *
+ * The viewer hides its Add and Setup tabs by not having them, which is worth
+ * nothing on its own: a phone holding a token and a `curl` are the same thing
+ * to a Worker. What makes the second phone unable to touch his schedule is
+ * that `VIEW_TOKEN` opens one route and that route only reads. So that is what
+ * is asserted here, rather than anything about the page.
+ */
+test('the view token opens exactly one route, and that route only reads', () => {
+  // The rule itself is in guards.js and has its own unit tests; what is
+  // checked here is where it is wired in.
+  assert.ok(require('../worker/guards.js').viewOK, 'viewOK is a guard, not a route detail');
+
+  // Every route that accepts it. One, and it is a GET.
+  const uses = [...worker.matchAll(/path === '(\/[a-z]+)' && req\.method === '([A-Z]+)'\)\{\s*\n\s*if\(!viewOK/g)];
+  assert.equal(uses.length, 1, 'exactly one route accepts the view token');
+  assert.deepEqual([uses[0][1], uses[0][2]], ['/read', 'GET']);
+
+  // And the routes that write are not among them. Named individually rather
+  // than counted: the failure this guards against is a route gaining a second,
+  // looser guard later, and a count would not notice.
+  for(const path of ['/push', '/reset', '/migrate']){
+    const at = worker.indexOf(`path === '${path}'`);
+    assert.ok(at > 0, `${path} is still a route`);
+    const body = worker.slice(at, at + 400);
+    assert.ok(!/viewOK/.test(body), `${path} must not accept the view token`);
+  }
+
+  // What /read hands back is the store, not the machinery. `raw` holds the
+  // employer's calendar text verbatim and `polls` is the cron's log; neither
+  // is his week, and neither belongs on a second phone.
+  const read = bodyOf('readAll');
+  assert.ok(read, 'readAll exists');
+  assert.ok(!/FROM raw|FROM polls/.test(read), '/read answers with the store, not the log');
+});
+
+/* One stylesheet, two pages (§42).
+ *
+ * The viewer draws the same weeks and the same pay tables as the app, so it
+ * links the same CSS. A copy would have been two schedules that looked
+ * slightly different inside a month, and on a schedule a difference in how
+ * something is drawn reads as a difference in the shifts.
+ */
+test('both pages link the one stylesheet, and both workers cache it', () => {
+  assert.ok(fs.existsSync(path.join(ROOT, 'app.css')), 'app.css exists');
+  for(const page of ['index.html', 'view.html']){
+    const html = fs.readFileSync(path.join(ROOT, page), 'utf8');
+    assert.match(html, /<link rel="stylesheet" href="app\.css">/,
+      `${page} must link app.css`);
+    // And must not have kept a copy of what moved out of it.
+    assert.ok(!/--paper:#EDEEE9/.test(html.replace(/<link[^>]*>/g, '')),
+      `${page} must not carry its own copy of the palette`);
+  }
+  for(const worker of ['sw.js', 'view-sw.js']){
+    const sw = fs.readFileSync(path.join(ROOT, worker), 'utf8');
+    assert.match(sw, /['"][.\/]*\/?app\.css['"]/, `${worker} must cache app.css`);
+  }
+});
+
+/* The viewer's own shell (§42).
+ *
+ * The same assertion the app gets, for the same reason: a file missing from
+ * the list is not slow offline, it is absent, and `feed.js` throws on a
+ * missing collaborator by design.
+ */
+test('the viewer\u2019s service worker caches every script its page loads', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'view.html'), 'utf8');
+  const sw = fs.readFileSync(path.join(ROOT, 'view-sw.js'), 'utf8');
+
+  const scripts = [...html.matchAll(/<script\s+src="([^"]+)"/g)].map(m => m[1]);
+  const shell = (/const FILES = \[([^\]]+)\]/.exec(sw) || [, ''])[1]
+    .split(',').map(x => x.trim().replace(/^'|'$/g, ''));
+  const cached = f => shell.includes(f) || shell.includes('/' + f) || shell.includes('./' + f);
+
+  assert.ok(scripts.length >= 8, `expected the viewer\u2019s scripts, found ${scripts.length}`);
+  for(const f of scripts)
+    assert.ok(cached(f), `view-sw.js must cache ${f}, or the viewer is dead offline`);
+  for(const f of ['/view', 'view.webmanifest'])
+    assert.ok(cached(f), `view-sw.js must cache ${f}`);
+
+  // app.js is the half the viewer deliberately does not load: five thousand
+  // lines of editing, importing and exporting, on a page with nothing to edit.
+  assert.ok(!scripts.includes('app.js'), 'the viewer does not load app.js');
+});
+
+/* The viewer opens from the home screen, and does not take the app's scope
+ * with it (§41, §42).
+ */
+test('the viewer starts at a URL the host does not redirect, in its own scope', () => {
+  const m = JSON.parse(fs.readFileSync(path.join(ROOT, 'view.webmanifest'), 'utf8'));
+  // Same trap as §41: `html_handling` defaults to auto-trailing-slash, so
+  // /view.html redirects to /view and a start URL that redirects is a launch
+  // that has to survive the redirect on the one request that cannot.
+  assert.ok(!/\.html$/.test(m.start_url), `start_url must not redirect: ${m.start_url}`);
+  assert.equal(m.start_url, '/view');
+  assert.equal(m.scope, '/view');
+  // Its own identity, or installing it would replace the app on a phone that
+  // has both.
+  assert.notEqual(m.id, JSON.parse(
+    fs.readFileSync(path.join(ROOT, 'manifest.webmanifest'), 'utf8')).id);
+
+  const sw = fs.readFileSync(path.join(ROOT, 'view-sw.js'), 'utf8');
+  const shell = (/const FILES = \[([^\]]+)\]/.exec(sw) || [, ''])[1]
+    .split(',').map(x => x.trim().replace(/^'|'$/g, ''));
+  assert.ok(shell.includes(m.start_url), 'the start URL must be in the shell cache');
+
+  // Two workers on one origin. Distinct cache names, or each `activate` would
+  // delete the other's shell and both apps would refetch themselves on every
+  // launch; and a registration scoped to /view, or the viewer would claim the
+  // whole origin and start answering the app's fetches from its own shell.
+  const app = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+  const nameOf = t => (/const SHELL = '([^']+)'/.exec(t) || [, ''])[1];
+  assert.notEqual(nameOf(sw), nameOf(app));
+  assert.ok(nameOf(sw).startsWith('shiftdeck-view-'));
+  assert.match(sw, /k\.startsWith\('shiftdeck-view-'\)/,
+    'the viewer must only ever delete its own caches');
+  const js = fs.readFileSync(path.join(ROOT, 'view.js'), 'utf8');
+  assert.match(js, /register\('\/view-sw\.js', \{ scope: '\/view' \}\)/);
+});
+
+/* The viewer holds no credential that can write, and asks for nothing that
+ * could (§42). The page half of the rule the Worker enforces above.
+ */
+test('the viewer cannot write, and never sees the push token', () => {
+  const js = fs.readFileSync(path.join(ROOT, 'view.js'), 'utf8');
+  assert.ok(!/method:\s*'POST'/i.test(js), 'the viewer makes no POST');
+  for(const route of ['/push', '/reset', '/migrate', '/status', '/trace'])
+    assert.ok(!js.includes(`'${route}'`), `the viewer must not call ${route}`);
+  assert.ok(js.includes("fetch('/read'"), 'the viewer reads /read');
+  // Its own database. The app's is `shiftdeck`, on the same origin, and a
+  // shared name would be two writers over one 'state' key -- the app's whole
+  // store overwritten by a cache of the server's answer.
+  assert.match(js, /const VIEW_DB = 'shiftdeck-view'/);
 });
 
 /* The offline shell holds every script the page loads.

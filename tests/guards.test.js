@@ -387,3 +387,42 @@ test('the feed’s events are counted off the rendered file', () => {
   // VALARM blocks are BEGIN: lines too, and there are two per shift here.
   assert.ok(/BEGIN:VALARM/.test(feedICS(store.shifts, store)));
 });
+
+
+/* Who the read-only viewer's token lets in. PROJECT.md §42.
+ *
+ * This is the whole of what makes the second phone read only. Not the missing
+ * tabs — a phone holding a token and a `curl` are the same thing to a Worker —
+ * but the fact that `VIEW_TOKEN` opens one route and `PUSH_TOKEN` is required
+ * by every route that changes anything. Which route is which is asserted in
+ * config.test.js; that the rule itself is right is asserted here.
+ */
+test('the view token reads, and an unset one opens nothing', () => {
+  const env = { PUSH_TOKEN: 'push-secret', VIEW_TOKEN: 'view-secret' };
+
+  assert.equal(G.viewOK(env, 'view-secret'), true);
+  // The push token too: it is strictly the more privileged of the two, and
+  // there is no reason this route should keep the app's own phone out.
+  assert.equal(G.viewOK(env, 'push-secret'), true);
+
+  assert.equal(G.viewOK(env, 'nope'), false);
+  assert.equal(G.viewOK(env, ''), false);
+  assert.equal(G.viewOK(env, undefined), false);
+  // Not a prefix, not a suffix, not a near miss.
+  assert.equal(G.viewOK(env, 'view-secre'), false);
+  assert.equal(G.viewOK(env, 'view-secret '), false);
+  assert.equal(G.viewOK(env, 'View-Secret'), false);
+
+  // A secret only takes effect on a deploy made after it was added (§14.9), so
+  // the Worker genuinely runs with VIEW_TOKEN undefined for one deploy. It
+  // must fail closed for that deploy rather than being open to the world for
+  // the length of it -- and it must not fall through to accepting anything
+  // just because the *other* token is set.
+  assert.equal(G.viewOK({ PUSH_TOKEN: 'push-secret' }, 'anything'), false);
+  assert.equal(G.viewOK({ PUSH_TOKEN: 'push-secret' }, ''), false);
+  assert.equal(G.viewOK({}, 'anything'), false);
+  assert.equal(G.viewOK({}, ''), false);
+  assert.equal(G.viewOK(undefined, 'anything'), false);
+  // And an empty string as a secret is not a password of length zero.
+  assert.equal(G.viewOK({ VIEW_TOKEN: '', PUSH_TOKEN: '' }, ''), false);
+});
