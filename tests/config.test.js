@@ -296,6 +296,33 @@ test('the kids’ worker caches its page and claims only its own scope', () => {
   const ids = ['manifest.webmanifest', 'view.webmanifest', 'kids.webmanifest']
     .map(f => JSON.parse(fs.readFileSync(path.join(ROOT, f), 'utf8')).id);
   assert.equal(new Set(ids).size, 3, 'three apps, three identities');
+
+  /* And its own icon. The app and the viewer share `icon-192.png`, so on a
+     phone holding two of them the only thing telling them apart is the label
+     under an identical picture — which is the one thing a home screen is
+     scanned by. The kids' one is a different drawing, and it has to stay a
+     different drawing: pointing this back at `icon-192.png` would look like a
+     tidy-up and would undo the whole reason the file exists. */
+  const app = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.webmanifest'), 'utf8'));
+  const kids = m.icons.map(i => i.src);
+  for(const shared of app.icons.map(i => i.src))
+    assert.ok(!kids.includes(shared), `the kids’ icon must not be the app’s ${shared}`);
+  for(const f of kids)
+    assert.ok(fs.existsSync(path.join(ROOT, f)), `${f} is in the manifest and not in the repo`);
+
+  /* Two purposes, two files, because they are two different pictures. Android
+     crops a `maskable` icon to a circle inscribed in the square, so the
+     maskable one is the artwork inset into the middle 80% on the app's paper
+     — and the `any` one is the artwork full bleed, because nothing crops that.
+     Declaring one file as `any maskable`, which is what the app does, means
+     whichever of the two is wrong is wrong silently. */
+  const purposes = m.icons.map(i => i.purpose);
+  assert.ok(purposes.includes('maskable'), 'a maskable icon, for Android’s mask');
+  assert.ok(purposes.includes('any'), 'and one that is not cropped');
+  assert.ok(!purposes.some(p => /any maskable/.test(p)),
+    'one file cannot be correct for both');
+  assert.match(html, /<link rel="apple-touch-icon" href="kids-192\.png">/,
+    'iOS reads the tag, not the manifest');
 });
 
 /* One stylesheet, two pages (§45).

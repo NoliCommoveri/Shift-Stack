@@ -326,8 +326,10 @@ different address:
    out of the address bar the moment it is read — or open `https://…/kids` and
    paste it into the one field.
 3. **Menu → Add to Home screen.** It installs as *Daddy's week*, with its own
-   icon, its own cache and its own storage, and it does not disturb either of
-   the other two if they are on the same phone.
+   cache and its own storage, and it does not disturb either of the other two
+   if they are on the same phone. It has its own icon too — a calendar, a clock
+   and a briefcase — where the app and the viewer share one, so the three are
+   told apart by the picture rather than by the word underneath it.
 
 `https://…/kids`, not `https://…/kids.html`, for §41's reason.
 

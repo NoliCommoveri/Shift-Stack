@@ -5543,7 +5543,42 @@ as text, labelled "Code" rather than "View token", because of who is reading it.
 alone again — a helper that built the link would put the kids' code on the
 phone with the fewest uses for it.
 
-### 46.9 What was left out
+### 46.9 Its own icon
+
+The app and the viewer share `icon-192.png`. On a phone holding both, the only
+thing telling them apart is the word under an identical picture, which is not
+how a home screen is read — and a third identical square would have made that
+worse rather than left it alone.
+
+So `/kids` has its own drawing: a calendar with work days and home days on it,
+a clock and a briefcase. Ray supplied it. It ships as three files rather than
+two, which is a correction to what the other two manifests do:
+
+    kids-192.png            any        the artwork, full bleed
+    kids-512.png            any        the same, larger
+    kids-maskable-512.png   maskable   the artwork inset into the middle 80%
+
+`purpose: "any maskable"` on one file — which is what `manifest.webmanifest`
+and `view.webmanifest` both say — is a claim that one picture is correct under
+two different treatments, and it is not. Android crops a maskable icon to the
+circle inscribed in its square, so a full-bleed drawing loses its corners and,
+here, the clock's rays; a pre-inset drawing used as `any` sits in a box of
+margin next to icons that do not. Two files, one for each, and neither is
+guessed at.
+
+The artwork arrived as an opaque RGB square with a black stroke and black
+corners outside its own rounded frame — no alpha to hide them. Both come off in
+the resize, which is in `scratchpad/icons.js` rather than in the repo: there is
+no build step here and there is not going to be one for three PNGs. Chromium
+did the resampling, because this machine has no ImageMagick and no PIL and does
+have a browser.
+
+`config.test.js` asserts the icons are not the app's, that every file named in
+the manifest exists, and that no entry claims both purposes at once. The first
+of those is the one that matters: pointing this back at `icon-192.png` would
+look like a tidy-up.
+
+### 46.10 What was left out
 
 - **The pay tab.** The ask, and the reason for `/soon`.
 - **Everything before today, and everything after next Saturday.** Also the
