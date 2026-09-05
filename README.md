@@ -26,6 +26,14 @@ the icon works again. **Setup → Flush cache and reload** is the bigger hammer.
 
 Pay rates, roles and site names are entered in the app, not stored in the repo.
 
+The three apps have three icons — a badge for the app, a wallet for the read-only
+viewer, and a briefcase for the kids' one — so a phone carrying more than one
+tells them apart by the picture rather than by the word underneath. Each ships
+two: the drawing as it is, and the drawing inset for Android's circular mask.
+Changing an icon needs the shell version bumped in `sw.js` or `view-sw.js`, or
+an installed phone keeps the manifest it already has; and Android may not redraw
+a launcher icon for an installed PWA until it is removed and added again.
+
 ## First run
 
 1. **Setup** → add both jobs. Set the colour, hourly rate, and which day the
@@ -327,9 +335,7 @@ different address:
    paste it into the one field.
 3. **Menu → Add to Home screen.** It installs as *Daddy's week*, with its own
    cache and its own storage, and it does not disturb either of the other two
-   if they are on the same phone. It has its own icon too — a calendar, a clock
-   and a briefcase — where the app and the viewer share one, so the three are
-   told apart by the picture rather than by the word underneath it.
+   if they are on the same phone.
 
 `https://…/kids`, not `https://…/kids.html`, for §41's reason.
 

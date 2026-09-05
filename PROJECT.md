@@ -5589,3 +5589,62 @@ look like a tidy-up.
   have had to be sent to be hidden.
 - **A tap target of any kind.** There is no shift panel here. A row is not a
   door to anything; it is the answer.
+
+## 47. Changed: an icon each, 5 September 2026
+
+Ray drew three: a calendar with a badge for the app, a calendar with a wallet
+for the viewer, and a calendar with a briefcase for the kids' phone (§46.9).
+They replace `icon-192.png` and `icon-512.png`, which the app and the viewer
+had been sharing since the viewer was built.
+
+Sharing them was not a decision, it was §45 not making one — the viewer was
+copied from the app and the icon line came with it. What it cost is small and
+constant: on a phone holding both, the only thing distinguishing two identical
+squares is the word underneath, and a home screen is scanned by picture. §46
+would have made it three.
+
+### 47.1 Two files a purpose, not one file claiming both
+
+All three manifests said `purpose: "any maskable"` on both icons. That is a
+claim that one picture is correct under two different treatments, and it is
+not one:
+
+- **`maskable`** is cropped by the platform to the circle inscribed in its
+  square. A full-bleed drawing loses its corners — on the kids' one, the
+  clock's rays; on the app's, the top of the calendar's rings.
+- **`any`** is drawn as given. A picture pre-inset for the mask sits in a box
+  of margin beside icons that are not.
+
+So each app ships three files: the artwork full bleed at 192 and 512 as `any`,
+and the artwork inset into the middle 80% on the app's paper as `maskable`.
+Whichever half is wrong under one file is wrong silently, which is why
+`config.test.js` now asserts it: every file a manifest names exists, no file is
+named by two manifests, no `purpose` has a space in it, both purposes are
+present, and each page's `apple-touch-icon` — which is what iOS reads instead
+of the manifest — names one of them.
+
+### 47.2 What the artwork needed doing to it
+
+All three arrived as opaque RGB: no alpha, a dark stroke around a rounded
+frame, and the four corners outside that frame filled solid. Left alone that is
+four dark triangles on a home screen. The resize scales each image a little
+past its box and clips the box with a 15% radius, so the outermost few per cent
+— which is all stroke — falls outside it and the corners go with it.
+
+Chromium did the resampling. This machine has no ImageMagick and no PIL and
+does have a browser, and a browser is a perfectly good resampler. The script is
+in the scratchpad rather than the repo: nine PNGs do not earn a build step in a
+project whose whole shape is that what is in the root is what gets served.
+
+### 47.3 Getting it onto a phone that is already installed
+
+The manifests are in both shell caches, and a phone holding an old shell keeps
+the old manifest and the old icon with it. So `SHELL` goes to `v16` in `sw.js`
+and `v2` in `view-sw.js` — §41's rule, which is that `install` only re-runs
+under a cache name it has not seen, and a fix that ships without a bump is a
+fix nothing fetches.
+
+That gets the *file* to the phone. Whether Android redraws the launcher icon
+for an already-installed PWA is the platform's business and not this repo's; if
+it does not, removing it from the home screen and adding it again is the
+answer. Both are cosmetic, and neither touches the schedule.
