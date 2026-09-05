@@ -168,6 +168,33 @@ function tokenOK(secret, given){
   return timingSafeEqual(secret, given);
 }
 
+/* Who may read the schedule without being able to change it. PROJECT.md §45.
+
+   `VIEW_TOKEN` is the read-only viewer's credential and the only one it ever
+   holds. It opens exactly one route — `GET /read` — and nothing else: not
+   `/push`, which writes the shifts; not `/reset`, which deletes them; not
+   `/status` or `/trace`, which describe the cron and the database rather than
+   the week. That the second phone *cannot* write is a property of this
+   function and of the route table in index.js, not of the page it serves: a
+   phone holding a token and a `curl` are the same thing to a Worker, so the
+   read-only half has to be read-only on this side or it is not read-only at
+   all.
+
+   `PUSH_TOKEN` is accepted too. It is strictly the more privileged of the two
+   — the phone that can rewrite the whole store is not one this route needs to
+   keep out — and the alternative is a second secret on a phone that already
+   has one.
+
+   Here rather than in index.js for the reason `tokenOK` is: a rule about who
+   gets in should be callable by a test that has no database and no network.
+   An unset `VIEW_TOKEN` opens nothing, because `tokenOK` refuses an empty
+   expected secret — a Worker genuinely runs with the token undefined for the
+   one deploy between adding it and it taking effect (§14.9), and failing
+   closed is the only safe way through that. */
+function viewOK(env, given){
+  return tokenOK(env && env.PUSH_TOKEN, given) || tokenOK(env && env.VIEW_TOKEN, given);
+}
+
 
 /* The schema file, split into statements the database can be handed one at a
    time. Comments are stripped rather than used to decide what to keep: the
@@ -278,5 +305,5 @@ function safeSettings(settings){
 }
 
 module.exports = { guard, splitSQL, alarmFor, feedJob, normalizeTimezone, zoneFor, DEFAULT_ZONE,
-                   todayIn, shiftISO, newestStamp, timingSafeEqual, tokenOK,
+                   todayIn, shiftISO, newestStamp, timingSafeEqual, tokenOK, viewOK,
                    safeSettings, SETTINGS_KEPT, resetPlan, orphanGroups, RESET_TABLES, countEvents };

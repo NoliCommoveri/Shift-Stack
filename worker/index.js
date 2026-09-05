@@ -26,7 +26,7 @@ import schemaSQL from './schema.sql';
 const { feedICS } = feedMod;
 const { planPoll, feedRow } = pollMod;
 const { alarmFor, feedJob, zoneFor, newestStamp, tokenOK, splitSQL,
-        safeSettings, resetPlan, orphanGroups, countEvents } = guardsMod;
+        safeSettings, resetPlan, orphanGroups, countEvents, viewOK } = guardsMod;
 
 const JSON_HEAD = { 'content-type': 'application/json; charset=utf-8' };
 const nowISO = () => new Date().toISOString();
@@ -37,6 +37,7 @@ const bearer = req => {
   const m = /^Bearer\s+(.+)$/i.exec(h.trim());
   return m ? m[1] : '';
 };
+
 
 /* The token rules, the guards, the zone validator and the date arithmetic all
    live in guards.js so they can be tested without a database (§14.6). */
@@ -258,6 +259,42 @@ async function feedShifts(env){
   return json({ shifts: await readShifts(env, `WHERE source = 'feed'`), at: nowISO() });
 }
 
+/* Everything a screen needs to draw his week, and nothing that could change it
+   (§45).
+
+   Deliberately not `/shifts`, which answers with the cron's half alone. That
+   filter exists because the phone asking already holds the manual and pattern
+   rows it wrote; a second phone holds nothing, so the whole `shifts` table is
+   the answer here — all three sources, the same set `feedICS` builds the
+   calendar from.
+
+   `cfg` comes back with it rather than behind a second call, because the two
+   are one answer: a shift's colour, its site, its role and what its hours pay
+   all live in `cfg`, and a viewer that had the shifts but not the companies
+   would draw an unnamed grey week and a pay tab of dashes. It is already the
+   narrowed row `safeSettings` wrote — the push token and the employer's
+   calendar address were never in it — so there is nothing further to strip.
+
+   One timestamp, `at`, and the viewer shows it. A read-only screen has no way
+   to tell a schedule that has not changed from a server it has stopped
+   reaching, and on a phone that is the whole failure: an empty Saturday that
+   is really a fetch that failed four days ago. */
+async function readAll(env){
+  if(!(await tablesExist(env)))
+    return json({ needsSetup: true, cfg: null, shifts: [], at: nowISO() });
+  const cfg = await readCfg(env) || {};
+  return json({
+    cfg: {
+      companies: cfg.companies || [],
+      sites: cfg.sites || [],
+      roles: cfg.roles || [],
+      settings: cfg.settings || {}
+    },
+    shifts: await readShifts(env),
+    at: nowISO()
+  });
+}
+
 /* The poll ring buffer and the current counts, for the app's Setup screen.
    §14.6's two alarms are computed here rather than in the page, so that the
    rule about what counts as "quietly stopped changing" has one home. */
@@ -474,6 +511,15 @@ async function route(req, env){
   if(path === '/shifts' && req.method === 'GET'){
     if(!tokenOK(env.PUSH_TOKEN, bearer(req))) return new Response('no', { status: 401 });
     return feedShifts(env);
+  }
+
+  // The read-only viewer's one route (§45). The only place `viewOK` is used,
+  // and the only route a `VIEW_TOKEN` opens: everything above and below this
+  // either writes or describes the machinery, and the second phone gets
+  // neither. GET, so there is not even a verb here that could change anything.
+  if(path === '/read' && req.method === 'GET'){
+    if(!viewOK(env, bearer(req))) return new Response('no', { status: 401 });
+    return readAll(env);
   }
 
   // Read-only, and behind the push token like everything else that describes

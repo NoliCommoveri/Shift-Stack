@@ -174,7 +174,8 @@ What it needs, once:
 
 1. **The secrets, in the Cloudflare dashboard** — `PUSH_TOKEN` (what the phone
    authenticates with), `FEED_TOKEN` (what sits in the URL ICSx⁵ subscribes
-   to), and `ICS_URL` (the secret address of the staging calendar). They are
+   to), `ICS_URL` (the secret address of the staging calendar), and
+   `VIEW_TOKEN` if a second phone is going to read it (below). They are
    not in the repo, and `keep_vars = true` in `wrangler.toml` is what stops
    each build deleting them.
 2. **The database** — Setup → Server → **Set up the database**. Every statement
@@ -231,6 +232,62 @@ with their refusals. Two alarms fire there: six hours with no successful poll,
 and a feed that has quietly stopped changing. That second one is the failure
 this whole thing exists to catch — not a wrong shift, a calendar nothing has
 updated and nothing has mentioned.
+
+### A second phone, read only
+
+`/view` is the same schedule and the same pay tables with nothing that can
+change them. Two tabs — Schedule and Pay — and no Add, no Setup, no export, no
+teardown. It is for the other person in the house: the one who wants to know
+whether he is on Saturday, and has no business editing his rota.
+
+It is a separate page, not a switch on the app, because hiding buttons is worth
+nothing. A phone holding the push token and a `curl` are the same thing to a
+Worker. What actually makes this read only is the server: `VIEW_TOKEN` opens
+exactly one route, `GET /read`, and `/push`, `/reset` and `/migrate` all refuse
+it. Nothing in `view.js` writes and nothing it holds could.
+
+Setting it up, once:
+
+1. **`VIEW_TOKEN`, in the Cloudflare dashboard**, alongside the other three.
+   Any long random string. A deploy has to happen *after* it is added before it
+   takes effect, which is true of all of them (§14.9).
+2. **On the second phone**, open `https://…/view`, paste the token, press
+   *Show me the week*. Or send yourself `https://…/view#t=THETOKEN` and follow
+   it — the token is taken out of the address bar the moment it is read.
+3. **Menu → Add to Home screen**, same as the app. It installs as its own
+   thing, called *His shifts*, with its own icon, its own offline cache and its
+   own storage.
+
+Open it at `https://…/view` and not `https://…/view.html`: the host redirects
+the second to the first, and §41's ERR_FAILED is waiting down that path too.
+
+The token lives on that phone only. It is never pushed to the server, never
+written into D1, and never leaves the origin it came from. Rotating it is
+changing the secret in the dashboard and redeploying; the phone holding the old
+one drops back to the door with its last week still cached.
+
+**What it shows.** Every shift the server holds — the ones typed on his phone,
+the ones the rota proposed, and the ones the cron pulled out of the employer's
+calendar — with the same overlap, short-turnaround and back-to-back lines the
+app draws. The pay tab is the app's, arithmetic included: it runs the same
+`pay.js`, so a gross here foots to the gross there. There is a test that puts
+one mixed-rate week through both pages and fails if they disagree.
+
+**What it does not show.** The Setup screen, the poll log, the trace, the
+export, the horizon warnings and the stale-calendar note. All of those are jobs
+to do, and there is nothing to do from this phone.
+
+**The line under the heading.** It says when this phone last reached the
+server — *As of four minutes ago* — and it turns amber after an hour and red
+after twelve. That line is the one thing this screen cannot do without. With no
+way to add a shift, an empty Saturday and a fetch that failed on Tuesday look
+identical, and the second one is the failure this whole project exists to
+prevent. The page checks on launch and whenever you come back to it, and there
+is a **Refresh** button beside the line. There is no timer: a phone in a pocket
+polling every minute is a battery cost for an answer nobody is reading.
+
+**Offline** it draws the last answer it got, from its own IndexedDB, and says
+how old it is. It caches its shell exactly as the app does.
 
 ## Bringing in an employer's calendar sync
 

@@ -791,6 +791,7 @@ test('a week draws one line per join, in the band the gap falls in', async (t) =
 const http = require('node:http');
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+                '.css': 'text/css; charset=utf-8',
                 '.webmanifest': 'application/manifest+json', '.png': 'image/png' };
 
 function host(){
@@ -801,7 +802,11 @@ function host(){
     // been redirected, and that flag is what a navigation cannot be answered
     // with.
     if(p === '/index.html'){ res.writeHead(307, { location: '/' }); return res.end(); }
-    const file = path.join(ROOT, p === '/' ? 'index.html' : p);
+    // The same rule one level down, which is what the viewer is served by
+    // (§45): `view.html` answers at `/view`, and the URL carrying the
+    // extension is the one that redirects.
+    if(p === '/view.html'){ res.writeHead(307, { location: '/view' }); return res.end(); }
+    const file = path.join(ROOT, p === '/' ? 'index.html' : p === '/view' ? 'view.html' : p);
     if(!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()){
       res.writeHead(404, { 'content-type': 'text/plain' });
       return res.end('not found');
@@ -914,5 +919,272 @@ test('a week filled from the rota is confirmed from its own banner', async (t) =
     assert.deepEqual(errors, [], 'the page loaded with no uncaught errors');
   } finally {
     await browser.close();
+  }
+});
+
+/* ==========================================================================
+   The read-only viewer. PROJECT.md §45.
+   ========================================================================== */
+
+/* Seven scripts in one shared global scope again, and this page adds an eighth
+ * that the unit tests cannot reach at all. §31 is the record of what that
+ * costs: two files declared `fold`, nothing threw, and every title in the
+ * exported calendar came out `[object Object]` for four sections. `view.js`
+ * declares about forty names beside the modules' four hundred, so this is the
+ * test that would notice the forty-first colliding.
+ */
+test('the viewer loads, wires up, and opens on the door', async (t) => {
+  const browser = await open();
+  if(!browser) return t.skip('no Playwright browser available');
+
+  try {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    page.on('console', m => {
+      if(m.type() === 'error' && !/ERR_|service worker|Failed to load resource/i.test(m.text()))
+        errors.push(m.text());
+    });
+
+    await page.goto('file://' + path.join(ROOT, 'view.html'));
+    await page.waitForFunction(() => typeof V === 'object' && V !== null, null, { timeout: 15000 });
+
+    // Every collaborator the page reaches for by name. `weekPay` is the one
+    // that matters most: it is the arithmetic behind a figure checked against
+    // a real deposit, and the viewer must be running the app's copy of it.
+    const wired = await page.evaluate(() => ({
+      weekPay: typeof weekPay, paidMins: typeof paidMins, rateFor: typeof rateFor,
+      whereText: typeof whereText, durMins: typeof durMins, clashPairs: typeof clashPairs,
+      restGaps: typeof restGaps, asDate: typeof asDate,
+      app: typeof S            // app.js is not loaded here, and must not be
+    }));
+    assert.deepEqual(wired, { weekPay: 'function', paidMins: 'function', rateFor: 'function',
+                              whereText: 'function', durMins: 'function', clashPairs: 'function',
+                              restGaps: 'function', asDate: 'function', app: 'undefined' });
+
+    // With no token there is nothing on the page but the door, and no tabs to
+    // reach past it.
+    const shut = await page.evaluate(() => ({
+      gate: !document.getElementById('tab-gate').hidden,
+      sched: document.getElementById('tab-schedule').hidden,
+      pay: document.getElementById('tab-pay').hidden,
+      nav: document.getElementById('nav').hidden
+    }));
+    assert.deepEqual(shut, { gate: true, sched: true, pay: true, nav: true });
+
+    // Two tabs, and neither of them is Add or Setup. This is the whole ask.
+    const tabs = await page.evaluate(() =>
+      [...document.querySelectorAll('#nav button')].map(b => b.dataset.tab));
+    assert.deepEqual(tabs, ['schedule', 'pay']);
+
+    assert.deepEqual(errors, [], 'the viewer loaded with no uncaught errors');
+  } finally {
+    await browser.close();
+  }
+});
+
+/* The two screens agree, to the cent.
+ *
+ * The viewer redraws `renderSchedule` and `renderPay` from app.js against its
+ * own store, which is a copy — and a copy of an arithmetic is exactly the
+ * thing §27 moved into `pay.js` to prevent. A gross on Ray's phone that
+ * disagreed with the gross on his by a cent would be worse than no pay tab at
+ * all, because the disagreement is the half that would get believed.
+ *
+ * So the same week is put through both pages and the figures are compared.
+ * Deliberately a mixed-rate week with overtime in it: that is the case where
+ * the two could differ and still look plausible.
+ */
+const PAYWEEK = {
+  companies: [{ id: 'c1', name: 'Trupoint', color: '#2F4B7C', rate: 15,
+                weekStart: 0, otAfterHrs: 40, otMult: 1.5,
+                breakMins: 30, breakAfterHrs: 6 }],
+  sites: [{ id: 's1', companyId: 'c1', name: 'Rosemont', address: '9501 W Devon' }],
+  roles: [{ id: 'r1', companyId: 'c1', name: 'Cook', rate: 18 },
+          { id: 'r2', companyId: 'c1', name: 'Dishwasher', rate: 14 }],
+  shifts: [
+    { id: 'a', companyId: 'c1', date: '2026-08-31', start: '09:00', end: '19:00', roleId: 'r1', siteId: 's1', source: 'manual' },
+    { id: 'b', companyId: 'c1', date: '2026-09-01', start: '09:00', end: '19:00', roleId: 'r1', siteId: 's1', source: 'manual' },
+    { id: 'c', companyId: 'c1', date: '2026-09-02', start: '09:00', end: '19:00', roleId: 'r2', siteId: 's1', source: 'feed' },
+    { id: 'd', companyId: 'c1', date: '2026-09-03', start: '09:00', end: '19:00', roleId: 'r2', siteId: 's1', source: 'feed' },
+    { id: 'e', companyId: 'c1', date: '2026-09-04', start: '09:00', end: '19:00', roleId: 'r1', siteId: 's1', source: 'pattern' }
+  ]
+};
+
+test('a week is worth the same on both phones', async (t) => {
+  const browser = await open();
+  if(!browser) return t.skip('no Playwright browser available');
+
+  const figures = async (file, load) => {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto('file://' + path.join(ROOT, file));
+    await page.waitForFunction(load.ready, null, { timeout: 15000 });
+    const out = await page.evaluate(load.run, PAYWEEK);
+    assert.deepEqual(errors, [], `${file} loaded with no uncaught errors`);
+    await page.close();
+    return out;
+  };
+
+  try {
+    const app = await figures('index.html', {
+      ready: () => typeof S === 'object' && S !== null,
+      run: w => {
+        Object.assign(S, w);
+        const co = S.companies[0];
+        const t = weekTotals(S.shifts, co);
+        return { hrs: t.hrs, ot: t.ot, gross: t.gross, rate: t.rate,
+                 mixed: t.mixed, rows: t.byRate.map(r => [r.name, r.hrs, r.pay]) };
+      }
+    });
+
+    const view = await figures('view.html', {
+      ready: () => typeof V === 'object' && V !== null,
+      run: w => {
+        Object.assign(V, w);
+        const co = V.companies[0];
+        const t = weekTotals(V.shifts, co);
+        return { hrs: t.hrs, ot: t.ot, gross: t.gross, rate: t.rate,
+                 mixed: t.mixed, rows: t.byRate.map(r => [r.name, r.hrs, r.pay]) };
+      }
+    });
+
+    // The fixture is worth checking too, or two pages could agree on nothing.
+    assert.ok(app.gross > 0 && app.ot > 0 && app.mixed,
+      'the fixture is a mixed-rate week with overtime in it');
+    assert.deepEqual(view, app, 'the viewer and the app price the week identically');
+  } finally {
+    await browser.close();
+  }
+});
+
+/* And it draws. The figures agreeing is worth nothing if the page throws on
+ * the way to the screen, which is the failure mode a shared global scope
+ * actually produces.
+ */
+test('the viewer draws the week, the warnings and the pay tables', async (t) => {
+  const browser = await open();
+  if(!browser) return t.skip('no Playwright browser available');
+
+  try {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto('file://' + path.join(ROOT, 'view.html'));
+    await page.waitForFunction(() => typeof V === 'object' && V !== null, null, { timeout: 15000 });
+
+    const drawn = await page.evaluate(w => {
+      Object.assign(V, w);
+      // A double booking and a short turnaround, so the bands are exercised
+      // rather than merely available.
+      V.shifts = V.shifts.concat([
+        { id: 'x', companyId: 'c1', date: '2026-09-02', start: '18:00', end: '23:00',
+          roleId: 'r1', siteId: 's1', source: 'manual' },
+        { id: 'y', companyId: 'c1', date: '2026-09-05', start: '02:00', end: '10:00',
+          roleId: 'r1', siteId: 's1', source: 'manual' }
+      ]);
+      V.at = new Date().toISOString();
+      V.got = Date.now();
+      vPastOpen = true;
+      vPayOpen = true;
+      vShowApp();
+      vDrawAll();
+      return {
+        shifts: document.querySelectorAll('#sched .shift').length,
+        clashes: document.querySelectorAll('#sched .gapwarn').length,
+        rests: document.querySelectorAll('#sched .restline').length,
+        next: document.querySelectorAll('#nextwrap .next, #nextwrap .card').length,
+        payRows: document.querySelectorAll('#payout table tr').length,
+        asof: document.getElementById('asof').textContent,
+        // Nothing on this page changes anything, so nothing on it is an input.
+        inputs: document.querySelectorAll('#tab-schedule input, #tab-pay input').length
+      };
+    }, PAYWEEK);
+
+    assert.equal(drawn.shifts, 7, 'every shift on file is drawn');
+    assert.equal(drawn.clashes, 1, 'the double booking is called out');
+    assert.equal(drawn.rests, 1, 'the short turnaround is called out');
+    assert.equal(drawn.next, 1, 'the next-shift banner is drawn');
+    assert.ok(drawn.payRows > 1, 'the pay table has weeks in it');
+    assert.match(drawn.asof, /As of/, 'the as-of line says when this was read');
+    assert.equal(drawn.inputs, 0, 'there is nothing on either tab to type into');
+
+    // The breakdown dialog opens, which is where `payDetail` would throw.
+    const detail = await page.evaluate(() => {
+      document.querySelector('#payout button.brk').click();
+      return document.getElementById('dlgbody').textContent;
+    });
+    assert.match(detail, /The hours/);
+    assert.match(detail, /Gross/);
+    assert.ok(!/\[object /.test(detail), '§31, on the other page');
+
+    assert.deepEqual(errors, [], 'the viewer drew with no uncaught errors');
+  } finally {
+    await browser.close();
+  }
+});
+
+/* The viewer installs, claims its own scope, and launches (§41, §45).
+ *
+ * Two workers on one origin is the part of this that is easy to get subtly
+ * wrong and impossible to notice by reading: a scope that is a hair too wide
+ * and the viewer starts answering the app's fetches out of its own shell; a
+ * scope a hair too narrow and it does not control the page it exists for, so
+ * the offline launch it was built for is a blank error screen.
+ *
+ * §41's own trap is here too, one level down. `/view.html` redirects to
+ * `/view`, and a worker answering a *navigation* with a redirected response is
+ * a network error by specification.
+ */
+test('the viewer installs at its own scope and opens from the home screen', async (t) => {
+  const browser = await open();
+  if(!browser) return t.skip('no Playwright browser available');
+  const { server, base } = await host();
+
+  try {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+
+    await page.goto(base + '/view');
+    await page.waitForFunction(() => typeof V === 'object' && V !== null, null, { timeout: 15000 });
+    await page.waitForFunction(
+      () => navigator.serviceWorker.controller !== null, null, { timeout: 15000 });
+
+    // The scope it actually claimed, from the browser rather than from the
+    // string in the source.
+    const scope = await page.evaluate(async () => {
+      const r = await navigator.serviceWorker.getRegistration();
+      return r && r.scope;
+    });
+    assert.match(scope, /\/view$/, `the viewer claimed ${scope}`);
+
+    // The launch. A home screen icon navigates to the manifest's start URL.
+    const res = await page.goto(base + '/view');
+    assert.ok(res.ok(), `the start URL answered ${res && res.status()}`);
+    await page.waitForFunction(() => typeof V === 'object' && V !== null, null, { timeout: 15000 });
+    assert.equal(await page.title(), 'His shifts');
+
+    // And the URL that redirects, which is the one §41 was about.
+    const viaRedirect = await page.goto(base + '/view.html');
+    assert.ok(viaRedirect.ok(), 'the redirecting URL still lands');
+    await page.waitForFunction(() => typeof V === 'object' && V !== null, null, { timeout: 15000 });
+
+    // The app is not the viewer's to serve. Navigating to `/` leaves the
+    // viewer's scope, so its worker must not be the one answering.
+    await page.goto(base + '/');
+    await page.waitForFunction(() => typeof S === 'object' && S !== null, null, { timeout: 15000 });
+    const appScope = await page.evaluate(async () => {
+      const r = await navigator.serviceWorker.getRegistration();
+      return r && r.scope;
+    });
+    assert.ok(!/\/view$/.test(appScope || ''),
+      `the app must not be served by the viewer's worker (got ${appScope})`);
+
+    assert.deepEqual(errors, [], 'the viewer loaded with no uncaught errors');
+  } finally {
+    await browser.close();
+    server.close();
   }
 });

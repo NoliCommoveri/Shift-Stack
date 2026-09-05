@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>His shifts</title>
+<meta name="theme-color" content="#EDEEE9">
+<link rel="manifest" href="view.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Non-blocking, for the same reason index.html loads it this way: an
+     unreachable fonts.googleapis.com must not hold up the scripts. -->
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet" media="print" onload="this.media='all'">
+<!-- The app's own stylesheet, unchanged and unforked (§45). The viewer draws
+     the same weeks and the same pay tables as the app does, so it has to be
+     the same CSS: a copy would have been two schedules that looked slightly
+     different within a month, and the difference would have been read as a
+     difference in the shifts. -->
+<link rel="stylesheet" href="app.css">
+<style>
+/* The handful of things only this page has. Everything else it draws — the
+   week list, the warning bands, the pay tables, the dialog — is app.css. */
+
+/* Two tabs, not four. The grid in app.css is hard-coded to four columns
+   because the app has four; this page has Schedule and Pay and nothing else,
+   which is the whole design. */
+nav div{grid-template-columns:repeat(2,1fr)}
+
+/* The line under the heading that says when this was last heard from the
+   server (§45). It is the one thing a read-only screen cannot do without: with
+   no way to add a shift, an empty week and a fetch that failed on Tuesday look
+   identical, and the second one is the failure this project exists to prevent.
+   Quiet while it is fresh, and it stops being quiet on its own. */
+.asof{font-size:.8rem;color:var(--soft);margin:-.6rem 0 1rem;display:flex;
+      gap:.5rem;align-items:baseline;flex-wrap:wrap}
+.asof.stale{color:var(--signal)}
+.asof.cold{color:var(--bad)}
+.asof button{
+  background:none;border:1px solid var(--rule);color:inherit;
+  font-family:inherit;font-size:.75rem;padding:.05rem .4rem;border-radius:2px;cursor:pointer;
+}
+.asof button:hover{border-color:var(--soft)}
+
+/* A shift here opens a panel rather than an editor, so the row must not offer
+   the pointer the app's does. It is still tappable — the panel is worth
+   having — but it is not a thing that changes anything. */
+.shift{cursor:default}
+
+/* The setup screen: one field, once. It is not a Settings tab — there is no
+   Settings tab — it is the door, and it is on screen only until the token
+   works. */
+.gate{max-width:26rem}
+.gate input{width:100%;font-family:"IBM Plex Mono",monospace;font-size:.9rem}
+.gate .err{color:var(--bad);font-size:.85rem;margin:.5rem 0 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- ============ THE DOOR ============
+     Shown until a token that works is in hand, and never again after. -->
+<section id="tab-gate" hidden>
+  <h1>His shifts</h1>
+  <div class="card gate">
+    <p class="tiny soft" style="margin-top:0">This phone shows the schedule and
+      what it pays. It cannot add, change or delete anything — that is the
+      Worker's rule, not this page's.</p>
+    <label class="f"><span>View token</span>
+      <input id="tok" type="password" inputmode="text" autocomplete="off"
+             spellcheck="false" placeholder="paste it here"></label>
+    <div class="rowbtns"><button class="act" id="unlock">Show me the week</button></div>
+    <p class="err" id="gateerr" hidden></p>
+    <p class="tiny soft" style="margin-bottom:0">It is stored on this phone
+      only, and sent to nothing but the site it came from.</p>
+  </div>
+</section>
+
+<!-- ============ SCHEDULE ============ -->
+<section id="tab-schedule" hidden>
+  <h1>Schedule</h1>
+  <div class="asof" id="asof"></div>
+  <div id="nextwrap"></div>
+  <div id="sched"></div>
+</section>
+
+<!-- ============ PAY ============ -->
+<section id="tab-pay" hidden>
+  <h1>Pay</h1>
+  <div class="asof" id="asofpay"></div>
+  <div id="payout"></div>
+  <p class="tiny soft">Estimates from the hours on file and the rates set on the
+    other phone, before deductions.</p>
+</section>
+
+</div>
+
+<nav id="nav" hidden><div>
+  <button data-tab="schedule" aria-current="true">Schedule</button>
+  <button data-tab="pay">Pay</button>
+</div></nav>
+
+<dialog id="dlg"><div id="dlgbody"></div></dialog>
+
+<!-- The same modules the app loads, minus app.js. Every one of them is pure —
+     dates, ICS, sites and roles, the pay arithmetic — and loading them rather
+     than reimplementing is what makes a week here foot to the same figure as
+     the same week there. `view.js` is the only file on this page the app does
+     not also load. -->
+<script src="parser.js"></script>
+<script src="ics.js"></script>
+<script src="patterns.js"></script>
+<script src="holidays.js"></script>
+<script src="sites.js"></script>
+<script src="pay.js"></script>
+<script src="feed.js"></script>
+<script src="merge.js"></script>
+<script src="view.js"></script>
+</body>
+</html>

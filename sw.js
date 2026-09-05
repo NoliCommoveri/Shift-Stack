@@ -18,8 +18,16 @@
    the title reads job, site, role; the nav bar is reordered and bigger; the
    calendar-file pathways are off the Add screen; and a week filled from the
    rota can be confirmed from its own banner. A release he is waiting to see is
-   the definition of one that has to reach the phone promptly. */
-const SHELL = 'shiftdeck-shell-v14';
+   the definition of one that has to reach the phone promptly.
+
+   v15 is §45: the stylesheet moved out of index.html into app.css so the
+   read-only viewer could link the same one. A new name rather than a second
+   v14, and that is the whole point of the bump — a phone that already took
+   v14 holds a shell whose index.html still carries its styles inline and whose
+   file list has never heard of app.css. It would work, being the old page
+   whole, and it would go on working for as long as the cache stood: a deploy
+   that ships nothing, to the one phone that already trusted this worker. */
+const SHELL = 'shiftdeck-shell-v15';
 const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs a 10MB re-download
 /* Every script index.html loads, and nothing it does not. feed.js and merge.js
    were missing from this list from the day §14.7 extracted them: the shell
@@ -29,7 +37,7 @@ const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs
    missing collaborator by design — so the app was dead offline, which is the
    one condition it exists to survive. `tests/config.test.js` now reads both
    lists and fails if they disagree. */
-const FILES = ['./', './index.html', './parser.js', './ics.js', './patterns.js', './holidays.js', './sites.js', './pay.js', './feed.js', './merge.js', './app.js', './manifest.webmanifest'];
+const FILES = ['./', './index.html', './app.css', './parser.js', './ics.js', './patterns.js', './holidays.js', './sites.js', './pay.js', './feed.js', './merge.js', './app.js', './manifest.webmanifest'];
 
 /* The start URL, absolute, and the only thing a navigation that misses the
    cache can fall back to. `./` against sw.js's own location is the origin
