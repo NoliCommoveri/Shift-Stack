@@ -15,6 +15,15 @@ Everything stays on the device. Nothing is uploaded anywhere.
 4. Menu → **Add to Home screen**. Install it properly rather than bookmarking —
    that is what lets it work offline and keeps its storage.
 
+Open the site at its root — `https://…/` and not `https://…/index.html`. The
+host redirects the second to the first, and a service worker is not allowed to
+answer a *launch* with a response that came through a redirect: the icon opens
+Chrome's "This site can't be reached … ERR_FAILED" and nothing says why. The
+app now starts at the root and never caches a redirected copy of anything
+(PROJECT.md §41). A phone that hit this before the fix needs the new worker,
+which the broken icon cannot fetch: open the site in Chrome, let it load, and
+the icon works again. **Setup → Flush cache and reload** is the bigger hammer.
+
 Pay rates, roles and site names are entered in the app, not stored in the repo.
 
 ## First run
@@ -78,12 +87,13 @@ once per job instead and colour each subscription in ICSx⁵.
 
 Alarm lead times are set in Setup, in hours before each shift.
 
-One alarm is not a lead time. When two shifts leave him between two and eight
+One alarm is not a lead time. When two shifts leave him between one and eight
 hours off — home, but not for a night's sleep — the exported calendar carries a
 second alarm on the later shift, set to go off as the earlier one ends: "Heads
-up: only 6h off between shifts." Under two hours he is not going home and it
-says nothing; over eight there is a night in it and it says nothing. The app
-says the gap and leaves the rest to him.
+up: only 6h off between shifts." An hour or less is going straight from one job
+to the other, which the week list says and the calendar does not; over eight
+there is a night in it and nothing says anything. The app says the gap and
+leaves the rest to him.
 
 ## How the two calendars fit together
 
@@ -537,14 +547,27 @@ everything before it. Nothing is dropped — a shift last Tuesday is still on
 file, still exported and still in the pay figures — it is one tap down rather
 than a week of scrolling in front of the thing you wanted.
 
-**What happens between two shifts is drawn between them.** Both the short-rest
-note and the overlap warning sit in the gap they are about, filled and in white
-so they read at scrolling speed — amber for a short rest, red for an overlap:
+**What happens between two shifts is drawn between them.** Three lines sit in
+the gap they are about, and which one appears depends only on how long that gap
+is:
 
+    Back to back — 45 minutes between shifts
     Heads up — short turnaround (6 hours and 45 minutes off)
     Warning — shifts overlap. Verify schedule in employer apps and adjust.
 
-Neither names a shift, because they are the two either side of it.
+An hour or less between one shift and the next is **back to back** — grey and
+unfilled, because going straight from one job to the other is an ordinary week
+and not a problem to solve. It is in the list and nowhere else: no banner, no
+alarm. What it is for is the join you cannot see at scrolling speed, where a
+night ending 07:15 and an afternoon starting 08:00 are two rows in two day
+blocks under two different dates.
+
+Over an hour and under eight is a **short turnaround** — home, but without a
+night in it — in white on amber, and that one also gets a banner and an alarm.
+Over eight hours there is a night's sleep in it and the app says nothing.
+Overlapping shifts are white on red, above everything.
+
+None of them names a shift, because they are the two either side of it.
 
 ## What the Schedule tab warns about
 

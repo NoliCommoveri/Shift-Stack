@@ -164,6 +164,49 @@ test('the service worker caches every script the page loads', () => {
   assert.match(sw, /const SHELL = 'shiftdeck-shell-v(\d+)'/);
 });
 
+/* The app opens from the home screen (§41).
+ *
+ * The installed PWA navigated to `./index.html` on every launch. Cloudflare's
+ * asset handler redirects that to `/`, `fetch` follows the redirect and keeps
+ * a flag saying so, the Cache API stores the flag, and a service worker
+ * answering a *navigation* with a redirected response is a network error by
+ * specification. So the shell cached the app and the home screen icon opened
+ * ERR_FAILED, while the same URL in a browser tab was fine.
+ *
+ * Two independent things had to be true for that, so both are asserted here.
+ */
+test('the app starts at a URL the host does not redirect', () => {
+  const m = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.webmanifest'), 'utf8'));
+  // `html_handling` defaults to auto-trailing-slash, which redirects
+  // /index.html to /. A start URL that redirects is a launch that has to
+  // survive the redirect, every time, on the one request that cannot.
+  assert.ok(!/\.html$/.test(m.start_url), `start_url must not redirect: ${m.start_url}`);
+  assert.equal(m.scope, './');
+
+  // The identity Chrome gave the app when it was installed, said out loud so
+  // that moving start_url does not make this a different app and leave the
+  // installed one pointing at the old URL for ever.
+  assert.equal(m.id, '/index.html');
+
+  const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+  const shell = (/const FILES = \[([^\]]+)\]/.exec(sw) || [, ''])[1]
+    .split(',').map(x => x.trim().replace(/^'|'$/g, ''));
+  assert.ok(shell.includes(m.start_url), 'the start URL must be in the shell cache');
+});
+
+test('the service worker never stores or serves a redirected response', () => {
+  const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+  // `addAll` caches exactly what `fetch` returned, redirect flag included,
+  // which is what poisoned the shell. Every put goes through `plain` instead.
+  assert.ok(!/\.addAll\(/.test(sw), 'cache.addAll stores the redirect flag; rebuild the response');
+  assert.match(sw, /async function plain\(res\)/);
+  assert.match(sw, /new Response\(await res\.blob\(\)/);
+  // And a navigation served straight off the network is stripped too.
+  assert.match(sw, /request\.mode === 'navigate' && res\.redirected/);
+  // The other way to produce the same blank page: respondWith(undefined).
+  assert.ok(!/return hit \|\| net/.test(sw), 'a miss with no network must not resolve to undefined');
+});
+
 /* The zone the cron reads the feed on, when no phone has pushed one (§37).
  *
  * `zoneFor` prefers the job's own answer and falls back to this, so the

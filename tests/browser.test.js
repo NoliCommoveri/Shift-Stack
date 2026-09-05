@@ -709,3 +709,149 @@ test('a server that did not empty stops the teardown with the token intact', asy
     await browser.close();
   }
 });
+
+/* §40, drawn.
+ *
+ * The three lines between two shifts are a rendering decision and the only
+ * place they exist is a page: `renderSchedule` reads `S`, builds DOM and is
+ * reachable from nowhere else. patterns.test.js can prove which band a gap
+ * falls in and cannot prove that the right sentence lands in front of the
+ * right shift, which is the half a reader would notice being wrong.
+ */
+test('a week draws one line per join, in the band the gap falls in', async (t) => {
+  const browser = await open();
+  if(!browser) return t.skip('no Playwright browser available');
+
+  try {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto('file://' + path.join(ROOT, 'index.html'));
+    await page.waitForFunction(() => typeof S === 'object' && S !== null, null, { timeout: 15000 });
+
+    // Built off the page's own idea of today, because the week list drops
+    // everything before the current week's start.
+    const drawn = await page.evaluate(() => {
+      const t0 = todayISO(), t1 = shiftDays(t0, 1);
+      S.companies = [{ id: 'c1', name: 'Trupoint', color: '#333' },
+                     { id: 'c2', name: 'DSI', color: '#555' }];
+      S.shifts = [
+        { id: 'a', companyId: 'c1', date: t0, start: '07:00', end: '15:00', label: 'Gate' },
+        // 45 minutes later: back to back.
+        { id: 'b', companyId: 'c2', date: t0, start: '15:45', end: '23:00', label: 'Plant' },
+        // Two hours after that, across midnight: a short turnaround, which
+        // was silent until §40 moved the floor to an hour.
+        { id: 'c', companyId: 'c1', date: t1, start: '01:00', end: '09:00', label: 'Gate' },
+        // And on top of it: the overlap, which outranks both.
+        { id: 'd', companyId: 'c2', date: t1, start: '08:00', end: '12:00', label: 'Plant' }
+      ];
+      renderSchedule();
+      return [...document.querySelectorAll('#sched .gapwarn, #sched .restline, #sched .b2bline')]
+        .map(e => [e.className, e.textContent]);
+    });
+
+    assert.deepEqual(drawn, [
+      ['b2bline',  'Back to back — 45 minutes between shifts'],
+      ['restline', 'Heads up — short turnaround (2 hours off)'],
+      ['gapwarn',  'Warning — shifts overlap. Verify schedule in employer apps and adjust.']
+    ]);
+
+    // The truest back to back there is: one ends as the next begins. It has to
+    // say something rather than nothing, and it must not say "0 minutes".
+    const zero = await page.evaluate(() => {
+      const t0 = todayISO();
+      S.shifts = [
+        { id: 'a', companyId: 'c1', date: t0, start: '07:00', end: '15:00', label: 'Gate' },
+        { id: 'b', companyId: 'c2', date: t0, start: '15:00', end: '23:00', label: 'Plant' }
+      ];
+      renderSchedule();
+      return [...document.querySelectorAll('#sched .b2bline')].map(e => e.textContent);
+    });
+    assert.deepEqual(zero, ['Back to back — no gap between shifts']);
+
+    assert.deepEqual(errors, [], 'the page loaded with no uncaught errors');
+  } finally {
+    await browser.close();
+  }
+});
+
+/* §41: the app opens from the home screen.
+ *
+ * This is the one test in the suite that needs an origin rather than a
+ * `file://` page, and it needs it for the reason the bug existed: a service
+ * worker will not register on a file URL, so nothing else here has ever run
+ * the code that broke. The server below is the two facts about the host that
+ * matter — `/` serves the app, and `/index.html` redirects to `/`, which is
+ * what Cloudflare's asset handler does by default — and the installed PWA
+ * navigating to a redirected URL is exactly what produced ERR_FAILED.
+ *
+ * Run against the previous sw.js this fails, which is the point of writing it
+ * rather than trusting the text checks in config.test.js.
+ */
+const http = require('node:http');
+
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+                '.webmanifest': 'application/manifest+json', '.png': 'image/png' };
+
+function host(){
+  const server = http.createServer((req, res) => {
+    const p = new URL(req.url, 'http://x').pathname;
+    // The redirect that started it. Cloudflare sends this so that a page has
+    // one canonical URL; `fetch` follows it and flags the response as having
+    // been redirected, and that flag is what a navigation cannot be answered
+    // with.
+    if(p === '/index.html'){ res.writeHead(307, { location: '/' }); return res.end(); }
+    const file = path.join(ROOT, p === '/' ? 'index.html' : p);
+    if(!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()){
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      return res.end('not found');
+    }
+    res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'text/plain' });
+    res.end(fs.readFileSync(file));
+  });
+  return new Promise(done => server.listen(0, '127.0.0.1',
+    () => done({ server, base: `http://127.0.0.1:${server.address().port}` })));
+}
+
+test('the installed app opens at a URL the host redirects', async (t) => {
+  const browser = await open();
+  if(!browser) return t.skip('no Playwright browser available');
+  const { server, base } = await host();
+
+  try {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+
+    // First visit: the service worker installs and fills the shell, which is
+    // where the poisoned copy of /index.html used to be stored.
+    await page.goto(base + '/');
+    await page.waitForFunction(() => typeof S === 'object' && S !== null, null, { timeout: 15000 });
+    await page.waitForFunction(
+      () => navigator.serviceWorker.controller !== null, null, { timeout: 15000 });
+
+    // The launch. A home screen icon navigates to the manifest's start URL,
+    // and a navigation the worker answers with a redirected response is a
+    // network error — `goto` throws, and the phone shows ERR_FAILED.
+    const res = await page.goto(base + '/index.html');
+    assert.ok(res.ok(), `the start URL answered ${res && res.status()}`);
+    await page.waitForFunction(() => typeof S === 'object' && S !== null, null, { timeout: 15000 });
+    assert.equal(await page.title(), 'Shift Deck');
+
+    // And again, now that the worker holds a copy of that navigation too.
+    const again = await page.goto(base + '/index.html');
+    assert.ok(again.ok(), 'the second launch is served from the shell');
+    await page.waitForFunction(() => typeof S === 'object' && S !== null, null, { timeout: 15000 });
+
+    // The manifest's own start URL, which is the one Chrome will actually
+    // open, loads under the same worker.
+    const start = await page.goto(base + '/');
+    assert.ok(start.ok());
+    await page.waitForFunction(() => typeof S === 'object' && S !== null, null, { timeout: 15000 });
+
+    assert.deepEqual(errors, [], 'the page loaded with no uncaught errors');
+  } finally {
+    await browser.close();
+    server.close();
+  }
+});

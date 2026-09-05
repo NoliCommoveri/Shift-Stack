@@ -130,23 +130,35 @@ tr.assumed td:first-child{color:var(--ink)}
 .shift .when{font-weight:500;font-family:"IBM Plex Mono",monospace;font-size:.9rem}
 .shift .where{font-size:.86rem;color:var(--soft)}
 .shift .len{margin-left:auto;font-size:.82rem;color:var(--soft);font-family:"IBM Plex Mono",monospace;padding-top:.15rem}
-/* Both of these are drawn between the two shifts they are about (PROJECT.md
-   §29, §30), and both are filled rather than tinted: they are read in the
+/* All three of these are drawn between the two shifts they are about
+   (PROJECT.md §29, §30, §40), in one shape, so that what a week looks like at
+   scrolling speed is a stack of rows with the odd band sitting in a gap.
+
+   The two warnings are filled rather than tinted: they are read in the
    half-second of scrolling past a week, and sitting in the gap they describe
    they have to read as a thing in their own right rather than as a footnote to
    the shift above.
 
-   Same shape, two colours, and the order between them is the point. §25 gave
-   the rest note grey so it could not be mistaken for the double booking, which
-   is the failure with no recovery — but once the rest note was filled, a red
-   *line* under a filled amber block was the worse warning drawn quieter. So
-   the overlap is filled too, in the red that has only ever had this one job. */
-.gapwarn,.restline{
-  font-size:.8rem;font-weight:500;color:#FFF;border-radius:2px;
+   Two fills, and the order between them is the point. §25 gave the rest note
+   grey so it could not be mistaken for the double booking, which is the
+   failure with no recovery — but once the rest note was filled, a red *line*
+   under a filled amber block was the worse warning drawn quieter. So the
+   overlap is filled too, in the red that has only ever had this one job.
+
+   The back-to-back line is the one that is deliberately not filled (§40). It
+   is not a warning — going straight from one job to the other is the ordinary
+   week — so it is the shape without the colour: hairline, on paper, in the
+   soft grey the app already uses for the things beside a fact rather than the
+   fact. Filling it would put a third colour on the ladder and, worse, would
+   make the commonest join on the schedule the loudest thing in the week. */
+.gapwarn,.restline,.b2bline{
+  font-size:.8rem;font-weight:500;border-radius:2px;
   padding:.25rem .5rem;margin:.35rem 0 .35rem 1.2rem;
 }
+.gapwarn,.restline{color:#FFF}
 .restline{background:var(--signal);border:1px solid var(--deep)}
 .gapwarn{background:var(--bad);border:1px solid #7C2016}
+.b2bline{color:var(--soft);background:var(--card);border:1px solid var(--hair)}
 .empty{padding:2rem 0;color:var(--soft)}
 
 /* next shift banner */

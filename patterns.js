@@ -407,35 +407,64 @@ function clashPairs(shifts){
    taught him to scroll past the line that also carries the double-booking.
 
    This is not that warning re-tuned, and the difference is which case is
-   silent. Under two hours he is not going home at all; that is the case §19
-   killed and it stays killed. Over eight there is a night's sleep in it and
-   nothing to say. What is left is the band in between, where he is home, and
-   whether he knows it before he gets there decides whether he sleeps four
-   hours on purpose or wakes up with ninety minutes left.
+   silent — or rather, which case is a warning. Over eight hours there is a
+   night's sleep in it and nothing to say at all. Under an hour he is going
+   straight from one job to the other, which is his ordinary week: §40 prints
+   that in the week list as a plain statement of the join and never as a
+   warning, never on the banner, and never as an alarm, because the moment it
+   is any of those three it is §19's warning again. The band in between is the
+   one worth a heads up, and whether he knows about it before he gets home
+   decides whether he sleeps four hours on purpose or wakes up with ninety
+   minutes left.
 
-   The message states the gap and stops. It proposes nothing — how he spends
-   six hours is not this app's business, and a warning that gives advice is one
-   he has to disagree with rather than read.
+   Every one of them states the gap and stops. They propose nothing — how he
+   spends six hours is not this app's business, and a warning that gives advice
+   is one he has to disagree with rather than read.
 
    Absolute timeline again, for §19.2's reason: Trupoint runs 19:15-07:15 and
    00:15-08:15, so the rest that matters is nearly always measured across
    midnight and a check that worked inside a date could not see it.
    -------------------------------------------------------------------- */
 
-/* Under REST_MIN he is not coming home; over REST_MAX there is a night in it.
-   Both are the human's numbers rather than derived ones, which is why they are
-   stated here and not computed from a sleep figure somewhere else. */
-const REST_MIN_MINS = 120;
+/* The two numbers that cut the timeline into three bands. Both are the
+   human's rather than derived ones, which is why they are stated here and not
+   computed from a sleep figure somewhere else.
+
+   At or under BACK_TO_BACK he is going straight on — one ends, the other
+   starts, and an hour is as much of a break as that leaves room for. Over
+   REST_MAX there is a night in it. In between he is home without a night in
+   it, which is the band §25 was built for.
+
+   §25 put the floor of that middle band at two hours, on the grounds that
+   under two he is not coming home at all. That is still true and §40 says it
+   is no longer a reason for silence: the hour between one and two is the case
+   where he is neither home nor going straight on, and being told "1 hour and
+   45 minutes off" is exactly what that hour is for. So the floor moved down to
+   an hour, and what is under it is not silence any more — it is the other
+   message. */
+const BACK_TO_BACK_MINS = 60;
 const REST_MAX_MINS = 480;
 
-/* The band, as a predicate, so the two places in the app that ask cannot
-   drift apart on the boundaries. Inclusive at the bottom, exclusive at the
-   top: exactly two hours is worth saying, exactly eight is not. */
+/* The bands, as predicates, so the surfaces that ask cannot drift apart on the
+   boundaries — and so the two cannot overlap or leave a gap between them,
+   since one constant is the top of the first and the floor of the second.
+
+   Back to back is closed at both ends. No gap at all is the truest case of it
+   and has to be in, and an hour is the number Ray gave. The turnaround band is
+   therefore open at the bottom, and open at the top as it always was: exactly
+   an hour is back to back, exactly eight is a night's sleep. */
+function isBackToBack(mins){
+  return Number.isFinite(mins) && mins >= 0 && mins <= BACK_TO_BACK_MINS;
+}
 function isShortRest(mins){
-  return Number.isFinite(mins) && mins >= REST_MIN_MINS && mins < REST_MAX_MINS;
+  return Number.isFinite(mins) && mins > BACK_TO_BACK_MINS && mins < REST_MAX_MINS;
 }
 
-/* Every stretch of time off between consecutive shifts, in order.
+/* Every join between consecutive shifts, in order, with the time off across
+   it. Zero is in — that is the shift that starts as the last one ends, and
+   §40's back-to-back line is about exactly that. It is not rest, and nothing
+   here calls it rest: the predicates above say which band a number is in, and
+   `isShortRest` has never been true of zero and still is not.
 
    Two things stop this being a sort and a subtraction.
 
@@ -469,9 +498,10 @@ function restGaps(shifts){
   for(let i = 1; i < spans.length; i++){
     const next = spans[i];
     const mins = next.from - prev.to;
-    // Zero is a handover and negative is a clash. Neither is time off, and the
-    // clash has its own warning that says something this one must not muddy.
-    if(mins > 0 && readable(prev.to, next.from))
+    // Negative is a clash, and it stays out: it is not a gap at all, it is two
+    // shifts on top of each other, and it has its own warning that says
+    // something this one must not muddy.
+    if(mins >= 0 && readable(prev.to, next.from))
       out.push({ a: prev.shift, b: next.shift, mins });
     if(next.to > prev.to) prev = next;
   }
@@ -485,5 +515,6 @@ if(typeof module !== 'undefined' && module.exports){
                      checkShift, suggestPatterns,
                      isoFromDayNum, dowOf, weekDates, generateWeek, canGenerate,
                      dayNum, absSpan, clashMins, findClashes, clashPairs,
-                     REST_MIN_MINS, REST_MAX_MINS, isShortRest, restGaps };
+                     BACK_TO_BACK_MINS, REST_MAX_MINS,
+                     isBackToBack, isShortRest, restGaps };
 }

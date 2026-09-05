@@ -1,7 +1,8 @@
 {
   "name": "Shift Deck",
   "short_name": "Shifts",
-  "start_url": "./index.html",
+  "id": "/index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
