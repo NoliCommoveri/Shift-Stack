@@ -1,6 +1,11 @@
 # Shift Deck — project state
 
-_Last updated 4 September 2026_ — §34 answers a question about testing on a
+_Last updated 5 September 2026_ — §39 puts each job's colour on its own events,
+which is the second signal §25 said colour could be and never the only one: the
+title still names the job. It is an experiment with a known worst case — a
+client that does not read RFC 7986's `COLOR` skips the line and shows the
+calendar he has now — and the one thing it is waiting on is his phone.
+§34 answers a question about testing on a
 second phone and finds a way to duplicate a calendar that nothing in the app or
 the Worker could see or undo: the company id is minted per setup, so setting the
 same job up twice files a whole second copy of the employer's calendar under the
@@ -4538,3 +4543,95 @@ And one assertion in `config.test.js` keeps it honest: `poll()` must call
 `planPoll`, and must not contain a parse, a diff or a guard of its own. The
 decision moving back into a file no test can reach is exactly how this went
 untested for as long as it did.
+
+---
+
+## 39. Built: a colour per job on the calendar, 5 September 2026
+
+The app has known which job a shift belongs to since §32, and it says so in
+three places: the dot beside the job in Setup, the 3px tick down the side of
+every row in the Schedule, and the job's name at the front of every title. The
+calendar had the third of those and neither of the first two. One subscription,
+one colour, both employers — which is the state §32 fixed everywhere except
+the screen he actually looks at in the morning.
+
+### What is possible, and what is not
+
+Three routes, and only one of them survives contact with the chain this app
+publishes through.
+
+- **Google's own per-event colours** are `colorId` on the Calendar API and
+  nothing else. §4 rejected that API for reasons that have not changed, and a
+  published `.ics` cannot reach it.
+- **`CATEGORIES`** is accepted by everything and displayed by nothing in this
+  chain. Writing it would be writing a line for no reader.
+- **`COLOR`, RFC 7986**, per event. ICSx⁵ maps it onto the Android calendar
+  provider's per-event colour, and the Google Calendar app and its widget draw
+  what the provider holds. Everything else in the chain skips the property.
+
+The third is what is built. The reason it was worth building rather than
+debating is the shape of its failure: a client that does not understand `COLOR`
+ignores the line, so the calendar in that case is the calendar he has today.
+There is no version of this that makes anything worse, which is a rare enough
+property in this project to spend an afternoon on.
+
+The alternative that would have been certain — **a feed per job**, subscribed
+twice, coloured in ICSx⁵ — was not built. It works everywhere and it costs two
+subscriptions on the phone, two URLs to keep secret, and a second thing to
+notice when one of them stops. §4 spent a week getting one feed onto that
+phone. If the colours do not appear, this is where to go next.
+
+### The value is a name, not a hex
+
+RFC 7986 takes a CSS3 colour *keyword*. Setup's picker is an `<input
+type="color">` and gives hex. So something has to turn `#2F4B7C` into a word,
+and it is `icsColor` in `ics.js`, next to the folder and the escaper, because
+which values the format accepts is a fact about the format.
+
+138 names against sixteen million hexes means the match is the nearest one, and
+**nearest has to be measured in CIELAB**. That is not fastidiousness. The first
+draft measured it with "redmean", a cheap RGB approximation that weights green
+four times, and against the five colours a new job is actually born with it
+answered `darkslateblue` for both the navy and the plum. Two jobs, one colour,
+and the whole feature silently does nothing — the exact failure it exists to
+prevent. In Lab the same five come out `steelblue`, `peru`, `seagreen`,
+`darkslateblue` and `brown`.
+
+A colour that is not a colour — an empty field, a name, a malformed hex —
+returns the empty string and the writer leaves the property out. `COLOR:` with
+nothing after it is a malformed line for every client, including the ones that
+were going to ignore the value anyway.
+
+### What is tested
+
+- The palette test is the one that matters: five jobs, five different names. It
+  is the assertion redmean failed.
+- Every one of the 138 entries is checked against an independently written list
+  of CSS3 keywords and asked to answer to its own hex, because ICSx⁵ drops a
+  name it cannot find and a typo in the table would be invisible.
+- The writer puts two jobs' colours on one calendar, and writes no `COLOR` line
+  at all for a job that has none — which is every store in every test written
+  before today, and every calendar this app published before today.
+- The browser test asserts the line in a real Chromium. `ics.js` and `feed.js`
+  are separate `<script>` tags sharing one global scope, and §31 is what
+  happens when a name is resolved by `require` in the tests and by something
+  else on the page.
+
+### The shell version, because §37 was written the same day
+
+`SHELL` in `sw.js` goes to `v12`. The colour is in `ics.js` and `feed.js`, both
+of them in that file's `FILES`, and the calendar the *page* saves is written by
+whichever copies the shell is holding. §37 is what leaving it alone looks like:
+the fix deploys, the phone keeps serving the previous scripts out of cache, and
+the thing that was fixed goes on not working with nothing to say why. The
+subscription is not affected either way — the Worker renders that feed itself —
+but the export path is, and the export path is the one he can check today.
+
+### What is not settled
+
+**Whether his phone does anything with it.** ICSx⁵ reads `COLOR` and the
+provider stores a per-event colour; whether that is on by default, behind a
+setting, or overridden by the subscription's own colour is not something the
+tests here can answer. The next step is one look at the calendar after a sync.
+If the events are all still one colour, the feed-per-job route above is the
+fallback and nothing has to be undone to take it.

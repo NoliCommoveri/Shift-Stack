@@ -28,9 +28,9 @@
    Aliasing means this file cannot be broken from the outside by a name it
    does not control, whoever declares it next. */
 const _dep = _need(
-  ['icsFold', 'icsEscape', 'icsStamp', 'shiftUID', 'restGaps', 'isShortRest', 'eventTitle', 'addressFor'],
+  ['icsFold', 'icsEscape', 'icsStamp', 'icsColor', 'shiftUID', 'restGaps', 'isShortRest', 'eventTitle', 'addressFor'],
   () => Object.assign({}, require('./ics.js'), require('./patterns.js'), require('./sites.js')),
-  () => ({ icsFold, icsEscape, icsStamp, shiftUID, restGaps, isShortRest, eventTitle, addressFor }));
+  () => ({ icsFold, icsEscape, icsStamp, icsColor, shiftUID, restGaps, isShortRest, eventTitle, addressFor }));
 
 /* Three environments load this file and each hands over its collaborators a
    different way: Node's test runner by `require`, the browser by globals set
@@ -69,6 +69,7 @@ function _need(names, load, page){
 const foldLine  = _dep.icsFold;
 const icsEsc    = _dep.icsEscape;
 const icsNow    = _dep.icsStamp;
+const tintFor   = _dep.icsColor;
 const uidFor    = _dep.shiftUID;
 const gapsIn    = _dep.restGaps;
 const tooShort  = _dep.isShortRest;
@@ -157,6 +158,13 @@ function feedICS(only, store, opts){
     // carries what the employer published for that night.
     const where = placeFor(s, feedById(store.sites, s.siteId));
     if(where) L.push(foldLine('LOCATION:' + icsEsc(where)));
+    // The job's own colour, the one on the dot in Setup and on the tick in
+    // the Schedule, so the two views of the same week agree at a glance
+    // (§39). Left out entirely when the job has no colour to give: a client
+    // that ignores COLOR is the ordinary case, and an empty one would be a
+    // malformed line for all of them.
+    const tint = co && tintFor(co.color);
+    if(tint) L.push(`COLOR:${tint}`);
     leads.forEach(h => {
       L.push('BEGIN:VALARM','ACTION:DISPLAY',
         foldLine('DESCRIPTION:' + icsEsc(title)),

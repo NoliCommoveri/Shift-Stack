@@ -105,6 +105,10 @@ test('the app loads with no uncaught errors, and writes a real calendar', async 
     assert.match(ics, /\r\nLOCATION:[^\r\n]*Devon/);
     assert.match(ics, /\r\nDTEND:20260905T070000\r\n/);
     assert.match(ics, /\r\nTRIGGER:-PT2H\r\n/);
+    // §39, on the path that matters: ics.js and feed.js are separate <script>
+    // tags sharing one global scope, and `icsColor` has to have been found by
+    // name there, not just by require in the unit tests.
+    assert.match(ics, /\r\nCOLOR:darkslategray\r\n/);
 
     assert.deepEqual(errors, [], 'the page loaded with no uncaught errors');
   } finally {

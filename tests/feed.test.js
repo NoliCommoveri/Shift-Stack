@@ -147,6 +147,43 @@ test('a short rest warns against the whole store, not just the shifts being sent
   assert.ok(!/Heads up/.test(alone));
 });
 
+/* ---------- colour -------------------------------------------------------- */
+
+test("each event carries its job's colour as a CSS3 name", () => {
+  const s = store({ companies: [{ id: 'c1', name: 'Trupoint', color: '#2F4B7C' }] });
+  assert.equal(lineStarting(F.feedICS([shift()], s, NOW), 'COLOR:'), 'COLOR:steelblue');
+});
+
+test('two jobs on the one calendar get their own two colours', () => {
+  // The whole reason for the property. One feed, one subscription, and until
+  // now one colour for both employers.
+  const s = store({
+    companies: [{ id: 'c1', name: 'Trupoint', color: '#2F4B7C' },
+                { id: 'c2', name: 'DSI', color: '#B0631A' }],
+    shifts: []
+  });
+  const rows = [shift(), shift({ id: 'sh2', companyId: 'c2', date: '2026-09-05' })];
+  const got = lines(F.feedICS(rows, s, NOW)).filter(l => l.startsWith('COLOR:'));
+  assert.deepEqual(got, ['COLOR:steelblue', 'COLOR:peru']);
+});
+
+test('a job with no colour gets no COLOR line at all', () => {
+  // Every store in the tests above is this case, and every calendar written
+  // before §39 was too. An empty COLOR: would be a malformed line in all of
+  // them, which is a worse calendar than the one with no colours in it.
+  const out = F.feedICS([shift()], store(), NOW);
+  assert.ok(!/COLOR/.test(out), 'no colour to give, so nothing written');
+  const junk = store({ companies: [{ id: 'c1', name: 'Trupoint', color: 'not a colour' }] });
+  assert.ok(!/COLOR/.test(F.feedICS([shift()], junk, NOW)));
+});
+
+test('the colour does not replace the job name in the title', () => {
+  // §25: colour alone cannot carry a distinction, and a client that ignores
+  // COLOR — which is most of them — has to lose nothing by it.
+  const s = store({ companies: [{ id: 'c1', name: 'Trupoint', color: '#2F4B7C' }] });
+  assert.match(I.unfold(F.feedICS([shift()], s, NOW)), /SUMMARY:[^\r\n]*Trupoint/);
+});
+
 /* ---------- the helpers it owns ------------------------------------------ */
 
 test('durMins treats end <= start as overnight', () => {
