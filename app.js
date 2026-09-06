@@ -4010,6 +4010,71 @@ $('#srvcheck').onclick = async () => {
   catch (e) { renderServer(null, e.message); }
 };
 
+/* The cron's own poll, run by hand (§50.2).
+
+   "Check the server" asks how long it has been since a poll; this asks why.
+   They are different questions and only the second one is answerable, because
+   a poll that never fires and a poll that fires and dies leave the same log —
+   which is nothing. The evening that produced this button was spent on exactly
+   that ambiguity, with a Worker that was serving pages perfectly and a cron
+   that had been silent for seven hours.
+
+   Slow on purpose, or rather allowed to be: it fetches the employer's calendar
+   and waits for it, up to the Worker's thirty seconds. That wait is the answer
+   in the case that matters — a feed that hangs is what a stopped cron looks
+   like from the inside, and feeling it take thirty seconds and come back
+   saying so is worth more than any wording here.
+
+   It writes. The record it leaves is the cron's record in the cron's ring
+   buffer, so the poll list below redraws with this poll at the top of it and
+   the alarm clears if it succeeded. That is deliberate: a diagnostic that ran
+   a quieter version of the real thing would be one more thing that can agree
+   with itself and be wrong. */
+$('#srvpoll').onclick = async () => {
+  // Its own line, not #srvnote. `renderServer` rewrites that one from
+  // `/status` and this handler calls it two lines later, so sharing it meant
+  // the answer was replaced by a counts summary before it could be read — and
+  // the half that got erased was the refusal reason, which is the only thing
+  // anybody presses this button to find out.
+  const note = $('#srvpollnote');
+  note.hidden = false;
+  note.className = 'tiny soft';
+  note.textContent = 'Polling the calendar\u2026 this can take a few seconds.';
+  try {
+    const r = await server('/poll', { method: 'POST' });
+    const p = r.poll || {};
+    // Two `ok`s and they mean different things. `r.ok` is the request: it
+    // reached the Worker and the Worker answered. `p.ok` is the poll: whether
+    // §14.6 let it write anything. A poll that ran and was refused comes back
+    // as a perfectly successful HTTP call carrying a refusal, and reading the
+    // outer flag would report it as a success on the one screen where somebody
+    // already suspects it is not one.
+    if(p.ok){
+      note.textContent =
+        `Polled just now: ${p.events || 0} events, ${p.added || 0} added, `
+        + `${p.replaced || 0} changed, ${p.removed || 0} removed, ${p.unchanged || 0} unchanged.`
+        + (p.ms ? ` The feed answered in ${(p.ms / 1000).toFixed(1)}s.` : '')
+        + ' The cron runs this same poll on its own schedule \u2014 if pressing this works'
+        + ' and the schedule stays quiet, the schedule is what is broken.';
+    } else {
+      note.className = 'flag';
+      note.textContent = `The poll ran and refused: ${p.reason || 'no reason given'}`;
+    }
+    // Refresh the counts, the alarm and the poll list against what just
+    // happened, so the rest of the section is not still showing the state this
+    // undid. This is what overwrites #srvnote, and why the line above is not it.
+    await pullFromServer();
+    renderServer(await server('/status'));
+  } catch (e) {
+    // A failure here is the request, not the poll: no token, a 500, the Worker
+    // unreachable. Said on the poll's own line too, so it is not confused with
+    // whatever `/status` last reported.
+    note.className = 'flag';
+    note.textContent = `The poll could not be run: ${e.message}`;
+    renderServer(null, e.message);
+  }
+};
+
 /* Applying the schema is a button rather than a command, because §14.9's
    guardrail is that nobody is asked to run a CLI or paste SQL into the D1
    console. Every statement is `IF NOT EXISTS`, so pressing it twice is

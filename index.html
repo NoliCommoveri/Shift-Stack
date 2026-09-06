@@ -118,9 +118,20 @@
   <div class="rowbtns">
     <button class="ghost" id="srvcheck">Check the server</button>
     <button class="ghost" id="srvtrace">What the server holds</button>
+    <!-- Runs the cron's own poll on demand (§50.2). Next to "Check the
+         server" because it answers the question that one raises: that button
+         says how long it has been, and this one says why. -->
+    <button class="ghost" id="srvpoll">Poll now</button>
     <button class="ghost" id="srvmigrate">Set up the database</button>
   </div>
   <p class="tiny soft" id="srvnote" style="margin-top:.5rem"></p>
+  <!-- What the last hand-run poll did (§50.2). Its own line and not #srvnote,
+       which "Check the server" rewrites from /status the moment it answers:
+       sharing one meant the poll's result — the refusal reason above all, the
+       only thing anybody presses this button to read — was overwritten by a
+       counts line a fifth of a second later. Caught by the browser test, not
+       by looking at it. -->
+  <p class="tiny soft" id="srvpollnote" style="margin-top:.35rem" hidden></p>
   <p class="flag" id="srvalarm" style="margin-top:.35rem" hidden></p>
   <!-- Which clock the cron reads the employer's calendar on (§14.10). Its own
        line rather than a clause in the note above: a wrong zone is every shift

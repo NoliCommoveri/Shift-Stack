@@ -32,6 +32,24 @@ const { alarmFor, feedJob, zoneFor, newestStamp, tokenOK, splitSQL,
 const JSON_HEAD = { 'content-type': 'application/json; charset=utf-8' };
 const nowISO = () => new Date().toISOString();
 
+/* How long the employer's calendar gets to answer before the poll gives up and
+   says so (§50.1). Generous — this is a static file over HTTPS and a slow one
+   still lands inside a second — because the number is not tuning, it is the
+   difference between a fault that is recorded and a fault that is invisible.
+   Anything short enough to trip on an ordinary slow morning would turn a
+   working feed into a log full of refusals. */
+const FEED_TIMEOUT_MS = 30000;
+
+/* A timeout reads as an ordinary abort, and "The operation was aborted" is not
+   a sentence that tells Ray what to do. Named for what happened instead, on
+   the screen where he is already asking why nothing has changed. */
+function feedError(e){
+  const name = e && e.name;
+  if(name === 'TimeoutError' || name === 'AbortError')
+    return `the feed did not answer within ${Math.round(FEED_TIMEOUT_MS / 1000)} seconds`;
+  return `the feed could not be reached: ${(e && e.message) || e}`;
+}
+
 
 const bearer = req => {
   const h = req.headers.get('authorization') || '';
@@ -88,12 +106,26 @@ async function poll(env){
   let text = '', ms = 0;
   const t0 = Date.now();
   try {
-    const res = await fetch(env.ICS_URL, { headers: { 'user-agent': 'shift-deck/1' } });
+    // One deadline over the whole read, headers and body alike (§50.1). A feed
+    // that *refuses* has always been caught here and recorded; a feed that
+    // *hangs* was the one failure this cron could not report on itself, because
+    // the invocation is terminated rather than rejected — `ctx.waitUntil` dies
+    // with it, the catch below never runs, and the poll leaves no row at all.
+    // A gap in a log that writes on every branch is the hardest kind of fault
+    // to read, and this app exists to refuse silent staleness.
+    //
+    // Aborting the signal errors the body stream too, so `res.text()` is
+    // covered by the same deadline as the request — a feed that opens and then
+    // stops sending is the same hang wearing a different hat.
+    const res = await fetch(env.ICS_URL, {
+      headers: { 'user-agent': 'shift-deck/1' },
+      signal: AbortSignal.timeout(FEED_TIMEOUT_MS)
+    });
     ms = Date.now() - t0;
     if(!res.ok) return record(env, job.id, { ok: 0, reason: `the feed answered ${res.status}`, ms });
     text = await res.text();
   } catch (e) {
-    return record(env, job.id, { ok: 0, reason: `the feed could not be reached: ${e.message}`, ms: Date.now() - t0 });
+    return record(env, job.id, { ok: 0, reason: feedError(e), ms: Date.now() - t0 });
   }
 
   // Everything between the text and the writes, and the only part of the cron
@@ -494,6 +526,42 @@ async function migrate(env){
   return json({ ok: true, statements: stmts.length });
 }
 
+/* ---------- the poll, by hand (§50.2) -------------------------------------
+   The same `poll()` the cron runs, awaited rather than handed to `waitUntil`,
+   so that its outcome comes back in the response instead of only into a table.
+
+   It exists because of the evening this section is named for. The cron stopped
+   and there was no way to ask it anything: the Setup screen could show that no
+   poll had been recorded for seven hours, and nothing anywhere could say
+   whether the schedule was firing and dying or not firing at all. Those have
+   opposite fixes and the log looked identical either way — a gap.
+
+   Pressing this collapses that. If it answers, the code, the secrets, the feed
+   and D1 writes are all fine and the fault is the schedule. If it answers with
+   a reason, the reason is the fault and it is now written down. If it hangs for
+   thirty seconds and comes back saying the feed did not answer, that was the
+   fault all along, and the cron had been dying of it silently every tick.
+
+   Not a new code path, deliberately. A "test the feed" button that fetched and
+   parsed without writing would prove something adjacent and not the thing —
+   this runs the poll, guards and batch and all, and its record lands in the
+   same ring buffer as the cron's. What the button does is remove the wait. */
+async function pollNow(env){
+  if(!(await tablesExist(env)))
+    return json({ ok: false, error: 'The database has no tables yet. Press "Set up the database".' }, 409);
+  try {
+    // `poll` returns the record it wrote, which is exactly what /status would
+    // show fifteen minutes -- or two hours -- later.
+    return json({ ok: true, poll: await poll(env), at: nowISO() });
+  } catch (e) {
+    // The same fallback `scheduled` uses, for the same reason: a throw here is
+    // still a fact about the poll and belongs in the log with the rest.
+    const reason = `the poll threw: ${e.message}`;
+    try { await record(env, 'unknown', { ok: 0, reason }); } catch { /* the database is what failed */ }
+    return json({ ok: false, error: reason }, 500);
+  }
+}
+
 /* Has the schema been applied? Asked of sqlite_master rather than by catching
    a failure, so that a real database error is not read as "not set up yet". */
 async function tablesExist(env){
@@ -587,6 +655,15 @@ async function route(req, env){
   if(path === '/reset' && req.method === 'POST'){
     if(!tokenOK(env.PUSH_TOKEN, bearer(req))) return new Response('no', { status: 401 });
     return reset(req, env);
+  }
+
+  // Running the cron's own poll on demand (§50.2). POST, because it writes
+  // exactly what the cron writes, and behind the push token like the rest of
+  // the machinery. The one thing on this Worker that can tell a schedule that
+  // is not firing from a poll that is failing.
+  if(path === '/poll' && req.method === 'POST'){
+    if(!tokenOK(env.PUSH_TOKEN, bearer(req))) return new Response('no', { status: 401 });
+    return pollNow(env);
   }
 
   if(path === '/migrate' && req.method === 'POST'){

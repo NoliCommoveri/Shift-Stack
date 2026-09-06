@@ -5833,16 +5833,99 @@ cron that is the point of it". It now asserts what that name claims: that
 An empty array and a four-field expression both deploy without complaint and
 simply never fire, and those are the failures worth a test.
 
-**Still open, and not what this change was about.** The polls stopped at
-20:15 UTC on 5 September and the Worker has not recorded a tick since, through
-a redeploy at 20:56 that reported `Deployed shift-deck triggers` and
-`schedule: */15 * * * *` in the build log. The schedule was registered and
-still nothing fired, so the gap is not the expression and was not fixed by
-editing it. The leading theory is that `fetch(env.ICS_URL)` in `poll()` has no
-`AbortSignal` and neither does the `res.text()` under it: a feed that *rejects*
-is caught and recorded as "the feed could not be reached", but a feed that
-*hangs* takes the whole invocation down with it — `ctx.waitUntil` is
-terminated, the `.catch` never runs, and no poll row is written at all, which
-is exactly the log there is. Unconfirmed. The check that settles it is the
-Cron Events view in the Worker's dashboard metrics, which reports scheduled
-invocations and their outcomes separately from fetches.
+**Still open, and not what the interval change was about.** The polls stopped
+at 20:15 UTC on 5 September and the Worker recorded no tick for seven hours,
+through a redeploy at 20:56 whose build log reads `Deployed shift-deck
+triggers` and `schedule: */15 * * * *`. The schedule was registered and still
+nothing fired, so the gap was never the expression and editing it fixed
+nothing. §50.1 and §50.2 are what came out of not being able to ask.
+
+
+### 50.1 A feed that hangs took the whole tick with it
+
+Every branch of `poll()` writes a poll record. That is what makes a gap in the
+log readable at all: a refusal, a 404, an unreachable feed, even a throw —
+each leaves a row saying so, and §14.6's alarm counts hours between them. The
+design assumes that a poll which goes wrong *returns*.
+
+`fetch(env.ICS_URL)` had no `AbortSignal`, and neither did the `res.text()`
+under it. A feed that **refuses** rejects, and the catch records it. A feed
+that **hangs** does neither. The invocation is terminated by the runtime
+rather than rejected, `ctx.waitUntil` dies with it, the catch never runs, and
+the tick leaves no trace of itself — every fifteen minutes, silently, on a
+Worker that goes on serving pages perfectly. That is precisely the log there
+is, and it is the only mechanism found that produces it: it survives a
+redeploy, it survives the midnight-UTC reset that would have revived anything
+quota-shaped, and it is invisible to every screen this app has.
+
+Now `AbortSignal.timeout(FEED_TIMEOUT_MS)`, thirty seconds, on the fetch —
+which errors the body stream too, so one deadline covers the request and the
+read. A feed that opens and then stops sending is the same hang wearing a
+different hat. The recorded reason names the timeout rather than passing on
+"The operation was aborted", which is not a sentence anybody can act on.
+
+Thirty seconds is not tuning. Both ends of it matter and neither is tight: a
+static file over HTTPS lands inside a second, so anything short enough to trip
+on a slow morning would turn a working feed into a log full of refusals —
+which is the same screen as a broken one. The number only has to be shorter
+than the invocation limit and longer than reality.
+
+`tests/config.test.js` asserts the signal is on that fetch, that the deadline
+is a named constant in a sane range, and that a timeout is named as one.
+Removing the signal fails it. This is a fault whose entire symptom is the
+absence of evidence, so the test is the only thing that can stand in for
+noticing.
+
+### 50.2 "Poll now"
+
+The seven hours were not lost to the fault. They were lost to not being able
+to ask anything about it.
+
+A cron that never fires and a cron that fires and dies leave the same log,
+which is nothing, and they have opposite fixes. `/status` could say it had
+been seven hours; nothing on this Worker could say why, and there was no way
+to run a poll except to wait for one. So: `POST /poll`, behind the push token,
+and a **Poll now** button next to "Check the server" on Setup.
+
+It runs `poll(env)` — the cron's own function, awaited rather than handed to
+`waitUntil`, so the outcome comes back in the response instead of only into a
+table. Deliberately not a quieter "test the feed" that fetches and parses
+without writing: that would prove something adjacent, agree with itself, and
+be wrong in the same direction as the thing it was checking. This does the
+guards and the batch and leaves its record in the cron's own ring buffer, so
+the poll list redraws with it at the top. What the button removes is the wait,
+and nothing else.
+
+Pressing it collapses the ambiguity in one go. It answers with counts → the
+code, the secrets, the feed and D1 writes are all fine and the schedule is the
+fault. It answers with a reason → that is the fault, now written down. It
+takes thirty seconds and says the feed did not answer → that was the fault all
+along, and the cron had been dying of it on every tick.
+
+**Two `ok`s that mean different things.** `r.ok` is the request — it reached
+the Worker and the Worker answered. `p.ok` is the poll — whether §14.6 let it
+write anything. A poll that ran and was refused is a perfectly successful HTTP
+call carrying a refusal, and a handler reading the outer flag would report it
+as a success on the one screen where somebody already suspects it is not one.
+
+**The result needed a line of its own,** and the browser test is what found
+that out. The handler wrote its answer into `#srvnote` and then called
+`renderServer`, which rewrites `#srvnote` from `/status` — so the poll result
+appeared and was overwritten by a counts summary a fifth of a second later.
+The half that got erased was the refusal reason: the only thing anybody
+presses this button to read. It is now `#srvpollnote`, flagged rather than
+soft when the poll refused. Nothing about that was visible from reading the
+code, and it would have been discovered on the next bad evening.
+
+**v18.** A new control in `index.html` and a new handler in `app.js` reach a
+phone holding v17's shell exactly never. This is §37 in its purest form — a
+fix that is deployed, correct, tested and unreachable, on the one screen
+somebody is standing in front of asking why nothing has happened.
+
+**What is still not known.** Whether the hang is what actually stopped it.
+That is not answerable from here and does not need to be answered before
+shipping: the timeout costs nothing if the cause was something else, and the
+button reports whatever the cause turns out to be. The check that settles it
+is the **Cron Events** view in the Worker's dashboard metrics, which reports
+scheduled invocations and their outcomes separately from fetches — firing and
+dying, or not firing at all.

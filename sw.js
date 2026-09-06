@@ -26,8 +26,16 @@
    v14 holds a shell whose index.html still carries its styles inline and whose
    file list has never heard of app.css. It would work, being the old page
    whole, and it would go on working for as long as the cache stood: a deploy
-   that ships nothing, to the one phone that already trusted this worker. */
-const SHELL = 'shiftdeck-shell-v17';
+   that ships nothing, to the one phone that already trusted this worker.
+
+   v18 is §50.2: the "Poll now" button. It is a new control in index.html and
+   a new handler in app.js, and it exists to be pressed on the evening the cron
+   has gone quiet — which is to say it is worth nothing at all if the phone
+   that needs it is serving the shell it cached this morning. This is §37 in
+   its purest form: a fix that is deployed, correct, tested, and unreachable,
+   on the one screen somebody is standing in front of asking why nothing has
+   happened. */
+const SHELL = 'shiftdeck-shell-v18';
 const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs a 10MB re-download
 /* Every script index.html loads, and nothing it does not. feed.js and merge.js
    were missing from this list from the day §14.7 extracted them: the shell
