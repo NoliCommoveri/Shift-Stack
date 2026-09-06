@@ -5854,9 +5854,12 @@ that **hangs** does neither. The invocation is terminated by the runtime
 rather than rejected, `ctx.waitUntil` dies with it, the catch never runs, and
 the tick leaves no trace of itself — every fifteen minutes, silently, on a
 Worker that goes on serving pages perfectly. That is precisely the log there
-is, and it is the only mechanism found that produces it: it survives a
+is, and it was the only mechanism found that produces it: it survives a
 redeploy, it survives the midnight-UTC reset that would have revived anything
-quota-shaped, and it is invisible to every screen this app has.
+quota-shaped, and it is invisible to every screen this app has. **It was also
+wrong** — see §50.3, which is what the button in §50.2 was built to find out
+and did, within a minute of being deployed. The timeout stays, because the
+hole it closes is real whether or not anything had fallen down it yet.
 
 Now `AbortSignal.timeout(FEED_TIMEOUT_MS)`, thirty seconds, on the fetch —
 which errors the body stream too, so one deadline covers the request and the
@@ -5929,3 +5932,47 @@ button reports whatever the cause turns out to be. The check that settles it
 is the **Cron Events** view in the Worker's dashboard metrics, which reports
 scheduled invocations and their outcomes separately from fetches — firing and
 dying, or not firing at all.
+
+### 50.3 It was not the feed
+
+Ray merged, pressed **Poll now**, and it polled normally.
+
+That is the answer, and it is not the one §50.1 expected. A poll that returns
+promptly with its counts has just proved, in one press, that the code is
+sound, that PUSH_TOKEN and ICS_URL both survived the builds, that the
+employer's calendar answers and answers quickly, that the guards are content,
+and that D1 accepts writes. Every component of the poll works. If the feed had
+been hanging, that button would have sat there for thirty seconds and come
+back saying so — which is exactly the outcome §50.1 was written to produce,
+and it did not happen.
+
+So the fault was never in `poll()`. It is the schedule: the Worker was not
+being asked. The one thing the manual poll cannot prove is the one thing left
+in question, because pressing a button is not a cron firing.
+
+**§50.1 was wrong about the cause and right anyway.** The reasoning that led
+to it was sound on the evidence available — every branch of `poll()` writes a
+record, so a gap meant either no invocation or an invocation that could not
+return, and a fetch with no deadline was the only unbounded thing in the file.
+What was missing was a way to test it, which is the entire content of §50.2.
+The timeout is not withdrawn: an unbounded fetch inside a handler whose only
+error report is a database write is a real hole, and it is now closed and
+tested. It simply was not this hole.
+
+**Confirming the recovery is a poll nobody pressed.** The manual record and a
+scheduled one are indistinguishable in the ring buffer, so the check is a poll
+row landing on an even hour UTC — 00:00, 02:00, 04:00 and so on, which is
+19:00, 21:00, 23:00 and 01:00 in Chicago — with nobody having touched the
+button. Until one appears, the schedule is unproven, and the merge's own
+deploy re-registered the trigger, which is a plausible fix and an untested
+one.
+
+**If it stays quiet.** Then the trigger is registered, the poll works, and
+Cloudflare is not invoking it — which is not a fault this repository can hold
+and not one any code change here will move. **Cron Events** in the Worker's
+dashboard metrics is where that is read: it reports scheduled invocations
+separately from fetches, so "not firing at all" and "firing and failing"
+finally look different. Every fault this project has shipped so far has been
+its own; this would be the first that is not, and the reason to be able to
+say so precisely is that the alternative is another evening spent editing code
+that was never wrong.
