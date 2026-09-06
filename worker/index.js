@@ -138,14 +138,27 @@ async function poll(env){
 
   const stamp = nowISO();
   const writes = [];
+  // The deletes go first, and the order is not cosmetic. `shifts_ext_uid` is
+  // unique per (company, ext_uid) and a batch is checked statement by
+  // statement, so a shift taking over the UID of a row that is on its way out
+  // in the same pass would fail the whole batch if the two were the other way
+  // round. Nothing in the plan writes a row it then deletes — a shift claimed
+  // by the feed is never stale — so there is nothing to lose by clearing the
+  // way first.
+  //
+  // The cancellations and the superseded copies leave by the same statement:
+  // both are rows this feed says are no longer a shift he works. They are two
+  // groups rather than one only because §14.6's ceiling counts one of them
+  // (guards.js) — a feed that has come back truncated must not be allowed to
+  // empty a week, and collapsing a duplicate empties nothing (§51).
+  for(const s of plan.remove.concat(plan.stale))
+    writes.push(env.DB.prepare(`DELETE FROM shifts WHERE id = ? AND source = 'feed'`).bind(s.id));
   for(const row of plan.add)
     writes.push(insert(env, feedRow(row, newId()), stamp));
   for(const rep of plan.replace)
     // In place, keeping the shift's id, and SEQUENCE goes up so a calendar
     // that already holds the old revision does not ignore the new one (§22).
     writes.push(insert(env, feedRow(rep.row, rep.id, (rep.was.seq || 0) + 1), stamp));
-  for(const s of plan.remove)
-    writes.push(env.DB.prepare(`DELETE FROM shifts WHERE id = ? AND source = 'feed'`).bind(s.id));
 
   writes.push(env.DB.prepare(
     `INSERT INTO raw (job_id, ics, fetched_at) VALUES (?, ?, ?)
@@ -160,7 +173,13 @@ async function poll(env){
   return record(env, job.id, {
     ok: 1, events: report.events, unreadable, ms,
     added: plan.add.length, replaced: plan.replace.length,
-    removed: plan.remove.length, unchanged: plan.unchanged,
+    // Both kinds of delete, because `removed` is what the poll log counts and
+    // a row that left the table left the table. `stale` rides along beside it
+    // for the answer "Poll now" hands straight back to the Setup screen: it is
+    // not a column in `polls`, and the one-off collapse of a doubled schedule
+    // is worth being able to read as what it was.
+    removed: plan.remove.length + plan.stale.length, stale: plan.stale.length,
+    unchanged: plan.unchanged,
     newest: newestStamp(text)
   });
 }

@@ -598,6 +598,12 @@ test('the cron asks poll.js what to do rather than working it out again', () => 
   // a decision no test can see.
   for(const gone of ['parseICS(', 'mergeCalendar(', 'guard({'])
     assert.ok(!body.includes(gone), `${gone} belongs in poll.js, where it is tested`);
+  // Every group of the plan is applied. `stale` is the one that can be
+  // silently dropped without a test noticing (§51): the merge would go on
+  // reporting the superseded copies on every poll, the batch would go on not
+  // deleting them, and the only symptom is a schedule that stays doubled.
+  for(const group of ['plan.add', 'plan.replace', 'plan.remove.concat(plan.stale)'])
+    assert.ok(body.includes(group), `poll() must apply ${group}`);
 });
 
 test('the feed fetch has a deadline, so a hang is recorded rather than silent', () => {

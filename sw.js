@@ -28,6 +28,13 @@
    whole, and it would go on working for as long as the cache stood: a deploy
    that ships nothing, to the one phone that already trusted this worker.
 
+   v19 is §51: the line on the Setup screen that says how many of a poll's
+   removals were duplicates being collapsed rather than shifts coming off the
+   schedule. The fix itself is entirely in the Worker and reaches him whatever
+   his phone is holding — but the morning after a rota is republished, "7
+   removed" and "7 removed, all of them duplicates of shifts still on file"
+   are opposite pieces of news, and the phone is where he reads them.
+
    v18 is §50.2: the "Poll now" button. It is a new control in index.html and
    a new handler in app.js, and it exists to be pressed on the evening the cron
    has gone quiet — which is to say it is worth nothing at all if the phone
@@ -35,7 +42,7 @@
    its purest form: a fix that is deployed, correct, tested, and unreachable,
    on the one screen somebody is standing in front of asking why nothing has
    happened. */
-const SHELL = 'shiftdeck-shell-v18';
+const SHELL = 'shiftdeck-shell-v19';
 const RUNTIME = 'shiftdeck-runtime-v1';  // engine + fonts: never bump, it costs a 10MB re-download
 /* Every script index.html loads, and nothing it does not. feed.js and merge.js
    were missing from this list from the day §14.7 extracted them: the shell

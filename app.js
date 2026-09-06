@@ -4053,6 +4053,12 @@ $('#srvpoll').onclick = async () => {
       note.textContent =
         `Polled just now: ${p.events || 0} events, ${p.added || 0} added, `
         + `${p.replaced || 0} changed, ${p.removed || 0} removed, ${p.unchanged || 0} unchanged.`
+        // Said separately from the removals it is counted among, because the
+        // two read as opposite news. A shift removed is a shift he is no
+        // longer working; a duplicate collapsed is a row leaving a slot that
+        // still has a shift in it, and on the morning after a rebuilt rota
+        // that is the line that says the doubling has been dealt with (§51).
+        + (p.stale ? ` ${p.stale} of those were duplicates of shifts still on file.` : '')
         + (p.ms ? ` The feed answered in ${(p.ms / 1000).toFixed(1)}s.` : '')
         + ' The cron runs this same poll on its own schedule \u2014 if pressing this works'
         + ' and the schedule stays quiet, the schedule is what is broken.';

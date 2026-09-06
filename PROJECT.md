@@ -1,6 +1,15 @@
 # Shift Deck — project state
 
-_Last updated 5 September 2026_ — §45 builds the read-only second phone:
+_Last updated 6 September 2026_ — §51 is the duplicate: the cron matched a
+feed row against what was on file by event UID and by nothing else, so a rota
+republished under fresh ids arrived as a second copy of the week while the
+first sat there with nothing to remove it. The employer's calendar had one of
+each and the app had two, which is exactly how it was reported. Matching now
+falls back to the slot — day, times and place, the identity `bySlot` in app.js
+has always used — and a superseded copy is collapsed rather than cancelled, so
+the next poll heals a schedule that is already doubled without §14.6 reading it
+as a massacre.
+§45 builds the read-only second phone:
 `/view`, two tabs, and a `VIEW_TOKEN` that opens exactly one route so that the
 phone *cannot* write rather than merely declining to. It needed no new column
 and no new field — the shifts and every pay rate were already in D1 — only a
@@ -5929,3 +5938,104 @@ button reports whatever the cause turns out to be. The check that settles it
 is the **Cron Events** view in the Worker's dashboard metrics, which reports
 scheduled invocations and their outcomes separately from fetches — firing and
 dying, or not firing at all.
+
+
+## 51. Fixed: the calendar sync filed the week twice, 6 September 2026
+
+The cron came back after §50's silence — the trigger deleted and re-added in
+the dashboard — and the poll that ran filed a second copy of every Homebase
+shift. The duplicate was in the app and nowhere else: not in the employer's
+feed, not in the Google calendar the feed is written into. That is the whole
+diagnosis in one sentence, because it says the fault is on the reading side.
+
+**What the reading side did.** `mergeCalendar` matched a feed row against what
+was on file on `ext_uid` and, as its own comment said, "nothing else". Every
+Homebase UID carries the shift's own id — `homebase-4471903-20260903@homebase.io`
+— and a rota rebuilt and republished mints new ones. So each shift arrived
+under a name the app had never seen, which is an `add`; and the row it
+superseded was matched by nothing, which is not a `remove`, because the only
+removal `mergeCalendar` knows is an explicit `STATUS:CANCELLED`. A published
+Google calendar does not cancel a deleted event, it stops mentioning it. Two
+rows, one shift, and the unique index cannot see it: `(company_id, ext_uid)`
+is unique and the two ext_uids differ, which is the point.
+
+It reproduces in six lines against the golden fixture — poll, republish the
+same seven events under new ids, poll again — and it doubles all seven.
+
+**Why it waited for §50 to show up.** Nothing about this needed the cron to
+stop. But a UID churn between two polls two hours apart is one shift moved by
+a manager; a UID churn across a cron that was down while the rota for the
+month was rebuilt is the whole schedule at once. The gap is what turned a
+fault that had presumably been filing the odd stray row into fourteen rows on
+a Setup screen.
+
+**Matching falls back to the slot.** A day, two times and the place on the
+identity the site table gives it — `slotKey`, which is `icsSame` given a name.
+One person cannot work two shifts at one company, on one day, between the same
+two clock times, in the same role at the same place, so a second row with that
+key is not a shift, it is a copy. `bySlot` in app.js has always read a
+hand-imported calendar that way; the cron reading it differently is precisely
+the disagreement the header of merge.js was written to prevent, and it went on
+to produce the failure that header predicts.
+
+The UID pass runs to the end before the slot pass begins, and that order is
+the safety: an employer naming a specific shift gets first refusal on the row
+it names, or an unrelated event standing in the same slot takes it first and
+the named one is filed all over again. A slot match is a `replace`, not an
+`add` — the row keeps its id, and with it the event `feedICS` writes out,
+which is named after that id (§22). An add would take the shift off his phone's
+calendar and put an identical one back beside it.
+
+**And the copies already on file are collapsed.** The fix above stops the next
+one; it does not clear the fourteen rows. Nothing on the phone can: §14.3 gives
+the cron `source='feed'` and the phone cannot delete one, which is the same
+ownership rule that made §34's orphan unreachable. So the poll does it. A shift
+on file that no row of this feed claims, standing in a slot that a row of this
+feed *does* claim, is the superseded copy — the feed has just confirmed that
+slot, and confirmed it as one shift.
+
+Bounded by construction: a row is only ever stale while another row survives in
+its place, so this can never empty a day whatever the feed does. A shift the
+feed has merely stopped mentioning — fallen out of the seven-day window, or off
+the end of somebody else's export — is left alone. §8.4's rule holds: a partial
+view of a schedule is indistinguishable from a week of cancellations, and only
+a slot the feed has just confirmed as one shift can say that a second row in it
+is a leftover.
+
+**`stale` is handed back separately from `remove`, and that is load-bearing.**
+§14.6's ceiling refuses a poll that would remove more than a quarter of what is
+on file. Seven of fourteen is over it. Dropped into `remove`, the collapse
+would refuse itself on every poll from here on and the schedule would stay
+doubled for ever, with a log full of "it would remove 7 of 14 shifts" — the
+guard working exactly as designed, on the one case where the removal was safe.
+The ceiling is a rule about cancellations, about a truncated feed proposing to
+empty a week. Collapsing two rows into one empties nothing. `tests/poll.test.js`
+asserts both halves: that the collapse is allowed, and that the same rows
+offered as cancellations would have been refused.
+
+**A cancellation for a shift the feed has just republished is not a removal.**
+The other order of the same event: the rota cancels the id it threw away and
+carries the hours under a new one. Read as a cancellation, the evening he is
+working comes off his phone. A row claimed by the slot pass is protected from a
+cancellation naming its old UID; a feed that both cancels a UID and carries the
+same UID live is a different thing and is still read as the cancellation, which
+is what it has always done.
+
+**What it costs on the screen.** A poll after a republished rota reports every
+shift as changed rather than unchanged — which is true, their ids did change —
+and `SEQUENCE` goes up on each, so the calendar sees revisions of events it
+already holds rather than new ones. The one-off collapse reports as removals,
+because the rows did leave the table. "Poll now" says how many of them were
+duplicates of shifts still on file, since "7 removed" and "7 removed, all of
+them duplicates" are opposite pieces of news on the morning after a rebuild.
+
+**What is still open.** A shift whose UID *and* times both change in one
+republish is still an add plus an orphan: the slot key is exact by design, and
+loosening it to the day alone would collapse a split shift into one row. That
+is the same trade §8.4 refuses to guess at. It shows up as two shifts on one
+day rather than as a doubled week, which is visible on the Schedule in a way
+the doubling was not — and if it turns out to happen, the answer is probably a
+review row rather than a wider key.
+
+**v19.** The Setup line is new text in app.js, and §37's rule applies to every
+one of them.
