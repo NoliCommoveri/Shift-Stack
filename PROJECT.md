@@ -1238,7 +1238,9 @@ without anyone opening the D1 console.
 
 ### 14.5 The cron
 
-`*/15 * * * *`. For each job with an `icsUrl` configured:
+`0 */2 * * *` — every two hours, on the hour. It was `*/15` until §50
+widened it; the rest of this section is unchanged by that, because nothing
+in it counts ticks. For each job with an `icsUrl` configured:
 
 1. fetch the secret `.ics` address
 2. `parseICS(text, { from: today − 7d, match: co.icsMatch, zone })`
@@ -1256,9 +1258,11 @@ Heritage-Hooves states this and derives its whole tick design from it. Step 3
 is already close, since it diffs on `ext_uid` rather than incrementing
 anything, and the unique constraint in §14.3 is what makes "already applied"
 a fact the database knows rather than one the code hopes for. A double-fire
-must be a no-op, and a missed fire must cost nothing but fifteen minutes.
+must be a no-op, and a missed fire must cost nothing but one interval.
 §14.6's "six hours without a successful poll" alarm is what catches the case
-where they stop firing altogether, and it is doing more work than it looks.
+where they stop firing altogether, and it is doing more work than it looks —
+at `0 */2` it is three missed ticks rather than twenty-four, which is a
+sharper alarm than it was, not a blunter one.
 
 **Cron Triggers are UTC-only**, which is most of what §14.10 used to leave open
 about `zone`. The handler is told the zone; it never infers one.
@@ -5780,3 +5784,148 @@ thing it would break is the banner.
 The viewer also gets a minute timer, which it had never needed: it drew the
 countdown once on load and left it. A number that only changes what he does —
 *Leave in 3 min* — cannot be an hour stale on the screen it is read from.
+
+
+## 50. Changed: the cron polls every two hours, 5 September 2026
+
+`crons = ["0 */2 * * *"]`, where it was `*/15 * * * *`.
+
+Ray asked for it and had already widened ICSx⁵'s own refresh to match, which
+is the half that makes it a change rather than a regression: the two intervals
+are one interval seen from either end, and a phone re-fetching a feed the cron
+has not refilled is re-reading the same bytes.
+
+**Why fifteen was never the requirement.** §14.5 chose it by copying
+Heritage-Hooves, and Heritage-Hooves has a tick that must catch something
+within the hour. This does not. The thing being watched is a published rota,
+and the gap that matters is between a rota changing and a shift being worked —
+days, not minutes. Fifteen minutes bought a rota edit reaching the phone forty
+minutes sooner than two hours would, against ninety-six fetches a day of
+somebody else's calendar. Twelve is enough.
+
+**What did not have to move with it.**
+
+- `alarmFor` in guards.js measures *hours since the last good poll*, not missed
+  ticks, so it needed no edit and got none. Six hours is now three intervals
+  rather than twenty-four — the alarm is more sensitive at the new interval,
+  which is the right direction for it to have drifted.
+- Idempotence (§14.5, §14.3's unique index) is about double-fires and skipped
+  fires, both of which are properties of Cron Triggers rather than of the
+  interval.
+- The free-plan arithmetic only got easier: twelve poll records a day against
+  D1's hundred thousand writes, where it was ninety-six.
+- `STALE_MINS`/`COLD_MINS` in view.js look like cron thresholds and are not.
+  They measure how long since *that phone* last reached the Worker, which is a
+  fact about the viewer's own network and its refresh button. The comment above
+  them said the thresholds "come off the cron", which was wrong when it was
+  written and would have been actively misleading now; it has been corrected
+  rather than retuned.
+
+**The figure is out of the prose.** Six screens and eight comments said
+"every fifteen minutes" as a fact. They now say "every couple of hours" where
+the reader needs a sense of the delay, and "on every poll" where the interval
+was never the point — the sentences about the cron rewriting the whole schedule
+when `whereKey` comes back undefined, for instance, are about a bug that would
+happen at any interval. `tests/config.test.js` pinned the exact expression,
+which meant tuning it failed a test named "the Worker is a Worker, with the
+cron that is the point of it". It now asserts what that name claims: that
+`[triggers]` carries a non-empty `crons`, and that every entry has five fields.
+An empty array and a four-field expression both deploy without complaint and
+simply never fire, and those are the failures worth a test.
+
+**Still open, and not what the interval change was about.** The polls stopped
+at 20:15 UTC on 5 September and the Worker recorded no tick for seven hours,
+through a redeploy at 20:56 whose build log reads `Deployed shift-deck
+triggers` and `schedule: */15 * * * *`. The schedule was registered and still
+nothing fired, so the gap was never the expression and editing it fixed
+nothing. §50.1 and §50.2 are what came out of not being able to ask.
+
+
+### 50.1 A feed that hangs took the whole tick with it
+
+Every branch of `poll()` writes a poll record. That is what makes a gap in the
+log readable at all: a refusal, a 404, an unreachable feed, even a throw —
+each leaves a row saying so, and §14.6's alarm counts hours between them. The
+design assumes that a poll which goes wrong *returns*.
+
+`fetch(env.ICS_URL)` had no `AbortSignal`, and neither did the `res.text()`
+under it. A feed that **refuses** rejects, and the catch records it. A feed
+that **hangs** does neither. The invocation is terminated by the runtime
+rather than rejected, `ctx.waitUntil` dies with it, the catch never runs, and
+the tick leaves no trace of itself — every fifteen minutes, silently, on a
+Worker that goes on serving pages perfectly. That is precisely the log there
+is, and it is the only mechanism found that produces it: it survives a
+redeploy, it survives the midnight-UTC reset that would have revived anything
+quota-shaped, and it is invisible to every screen this app has.
+
+Now `AbortSignal.timeout(FEED_TIMEOUT_MS)`, thirty seconds, on the fetch —
+which errors the body stream too, so one deadline covers the request and the
+read. A feed that opens and then stops sending is the same hang wearing a
+different hat. The recorded reason names the timeout rather than passing on
+"The operation was aborted", which is not a sentence anybody can act on.
+
+Thirty seconds is not tuning. Both ends of it matter and neither is tight: a
+static file over HTTPS lands inside a second, so anything short enough to trip
+on a slow morning would turn a working feed into a log full of refusals —
+which is the same screen as a broken one. The number only has to be shorter
+than the invocation limit and longer than reality.
+
+`tests/config.test.js` asserts the signal is on that fetch, that the deadline
+is a named constant in a sane range, and that a timeout is named as one.
+Removing the signal fails it. This is a fault whose entire symptom is the
+absence of evidence, so the test is the only thing that can stand in for
+noticing.
+
+### 50.2 "Poll now"
+
+The seven hours were not lost to the fault. They were lost to not being able
+to ask anything about it.
+
+A cron that never fires and a cron that fires and dies leave the same log,
+which is nothing, and they have opposite fixes. `/status` could say it had
+been seven hours; nothing on this Worker could say why, and there was no way
+to run a poll except to wait for one. So: `POST /poll`, behind the push token,
+and a **Poll now** button next to "Check the server" on Setup.
+
+It runs `poll(env)` — the cron's own function, awaited rather than handed to
+`waitUntil`, so the outcome comes back in the response instead of only into a
+table. Deliberately not a quieter "test the feed" that fetches and parses
+without writing: that would prove something adjacent, agree with itself, and
+be wrong in the same direction as the thing it was checking. This does the
+guards and the batch and leaves its record in the cron's own ring buffer, so
+the poll list redraws with it at the top. What the button removes is the wait,
+and nothing else.
+
+Pressing it collapses the ambiguity in one go. It answers with counts → the
+code, the secrets, the feed and D1 writes are all fine and the schedule is the
+fault. It answers with a reason → that is the fault, now written down. It
+takes thirty seconds and says the feed did not answer → that was the fault all
+along, and the cron had been dying of it on every tick.
+
+**Two `ok`s that mean different things.** `r.ok` is the request — it reached
+the Worker and the Worker answered. `p.ok` is the poll — whether §14.6 let it
+write anything. A poll that ran and was refused is a perfectly successful HTTP
+call carrying a refusal, and a handler reading the outer flag would report it
+as a success on the one screen where somebody already suspects it is not one.
+
+**The result needed a line of its own,** and the browser test is what found
+that out. The handler wrote its answer into `#srvnote` and then called
+`renderServer`, which rewrites `#srvnote` from `/status` — so the poll result
+appeared and was overwritten by a counts summary a fifth of a second later.
+The half that got erased was the refusal reason: the only thing anybody
+presses this button to read. It is now `#srvpollnote`, flagged rather than
+soft when the poll refused. Nothing about that was visible from reading the
+code, and it would have been discovered on the next bad evening.
+
+**v18.** A new control in `index.html` and a new handler in `app.js` reach a
+phone holding v17's shell exactly never. This is §37 in its purest form — a
+fix that is deployed, correct, tested and unreachable, on the one screen
+somebody is standing in front of asking why nothing has happened.
+
+**What is still not known.** Whether the hang is what actually stopped it.
+That is not answerable from here and does not need to be answered before
+shipping: the timeout costs nothing if the cause was something else, and the
+button reports whatever the cause turns out to be. The check that settles it
+is the **Cron Events** view in the Worker's dashboard metrics, which reports
+scheduled invocations and their outcomes separately from fetches — firing and
+dying, or not firing at all.

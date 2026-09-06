@@ -41,7 +41,19 @@ test('the Worker is a Worker, with the cron that is the point of it', () => {
   assert.equal(tableOf('main'), null);
   assert.match(toml.join('\n'), /^main\s*=\s*"worker\/index\.js"\s*$/m);
   assert.equal(tableOf('crons'), '[triggers]');
-  assert.match(toml.join('\n'), /crons\s*=\s*\["\*\/15 \* \* \* \*"\]/);
+
+  // The interval itself is not pinned. It was `*/15` and is now `0 */2`, and
+  // pinning the figure only meant that tuning it failed a test named for
+  // something else — which teaches the next person to edit the assertion
+  // rather than to think about it. What must not change is that there is a
+  // schedule at all, and that it parses: an empty `crons`, or four fields
+  // where five belong, deploys without complaint and simply never fires.
+  const m = /crons\s*=\s*\[([^\]]*)\]/.exec(toml.join('\n'));
+  assert.ok(m, '[triggers] must carry a crons array');
+  const crons = m[1].split(',').map(s => s.trim().replace(/^"|"$/g, '')).filter(Boolean);
+  assert.ok(crons.length >= 1, 'crons must not be empty');
+  for(const c of crons)
+    assert.equal(c.split(/\s+/).length, 5, `"${c}" is not a five-field cron expression`);
 });
 
 test('the database is bound by id, not just by name', () => {
@@ -586,4 +598,61 @@ test('the cron asks poll.js what to do rather than working it out again', () => 
   // a decision no test can see.
   for(const gone of ['parseICS(', 'mergeCalendar(', 'guard({'])
     assert.ok(!body.includes(gone), `${gone} belongs in poll.js, where it is tested`);
+});
+
+test('the feed fetch has a deadline, so a hang is recorded rather than silent', () => {
+  // §50.1, and the reason it is a test rather than a comment. Every branch of
+  // poll() writes a poll record, which is what makes a gap in that log
+  // readable — so the one way to break the log is a fetch that neither
+  // resolves nor rejects. The invocation is terminated, ctx.waitUntil dies
+  // with it, the catch never runs, and the cron leaves no trace of the tick
+  // it spent hanging. That is not a hypothetical: it is the shape of the
+  // seven-hour silence on 5 September.
+  const body = bodyOf('poll');
+  assert.ok(body, 'the cron handler is still called poll');
+  assert.match(body, /signal:\s*AbortSignal\.timeout\(/,
+    'the fetch of ICS_URL must carry an abort signal, or a hanging feed is invisible');
+
+  const src = fs.readFileSync(path.join(ROOT, 'worker', 'index.js'), 'utf8');
+  const m = /const FEED_TIMEOUT_MS\s*=\s*(\d+)/.exec(src);
+  assert.ok(m, 'the deadline is a named constant');
+  const ms = Number(m[1]);
+  // Long enough not to refuse a slow morning, short enough to be well inside
+  // any invocation limit. Both ends matter: a deadline that trips on ordinary
+  // latency turns a working feed into a log full of refusals, which is the
+  // same screen as a broken one.
+  assert.ok(ms >= 5000 && ms <= 60000, `${ms}ms is not a sane feed deadline`);
+
+  // A timeout arrives as an ordinary abort, and "The operation was aborted"
+  // is not a sentence anybody can act on.
+  assert.match(src, /TimeoutError/, 'a timeout must be named as one in the recorded reason');
+});
+
+test('every server button on the Setup screen is wired to something', () => {
+  // A button that does nothing looks exactly like a button whose server is
+  // down, and this section is the one place somebody is already convinced
+  // something is broken. "Poll now" in particular is only ever pressed on an
+  // evening when the answer matters.
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
+  const ids = [...html.matchAll(/<button[^>]*id="(srv[a-z]+)"/g)].map(m => m[1]);
+  assert.ok(ids.length >= 4, `expected the Server buttons, found ${ids.join(', ') || 'none'}`);
+  assert.ok(ids.includes('srvpoll'), 'the Poll now button is part of the Server section (§50.2)');
+  for(const id of ids)
+    assert.ok(app.includes(`$('#${id}').onclick`), `#${id} is a button with no handler`);
+});
+
+test('the poll can be run by hand, through the same code the cron runs', () => {
+  // §50.2. The value of the button is entirely that it is not a second,
+  // quieter implementation: a "test the feed" that fetched and parsed without
+  // writing would agree with itself and prove nothing about the poll.
+  const src = fs.readFileSync(path.join(ROOT, 'worker', 'index.js'), 'utf8');
+  assert.match(src, /path === '\/poll' && req\.method === 'POST'/,
+    'the manual poll is a POST route, because it writes what the cron writes');
+  const body = bodyOf('pollNow');
+  assert.ok(body, 'the handler is called pollNow');
+  assert.match(body, /await poll\(env\)/, 'it must call the cron\u2019s own poll, not a copy of it');
+  // Awaited rather than handed to waitUntil: the whole point is that the
+  // outcome comes back in the response instead of only into a table.
+  assert.ok(!body.includes('waitUntil'), 'the manual poll answers with its result');
 });

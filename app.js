@@ -183,7 +183,7 @@ const isProposed = s => !!s && s.source === 'pattern';
 /* A shift the employer's own calendar published, brought in by the Worker's
    cron rather than typed here (§14.7). Marked wherever it is drawn and read
    only wherever it is opened: the next poll rewrites it from the employer's
-   feed, so an edit made on this phone would be undone within fifteen minutes
+   feed, so an edit made on this phone would be undone at the next poll
    with nothing said. */
 const isFromFeed = s => !!s && s.source === 'feed';
 
@@ -2228,7 +2228,7 @@ function renderSetup(){
       <p class="tiny soft" style="margin:-.25rem 0 .55rem">Which job the Worker's own
         ICS_URL belongs to \u2014 the one Homebase syncs into Google. One job at a time:
         ticking this unticks the other. Until something is ticked the cron has nothing to
-        file its shifts against and refuses every fifteen minutes, which is a calendar that
+        file its shifts against and refuses on every poll, which is a calendar that
         has quietly stopped changing (\u00a714.6).</p>
 
       <label class="f"><span>Calendar import: only events mentioning\u2026</span>
@@ -2437,7 +2437,7 @@ function showFeedShift(s){
   $('#dlgbody').innerHTML = `
     <h2>${esc(co ? co.name : 'Unassigned')}</h2>
     <p class="tiny soft" style="margin:-.5rem 0 .7rem">From this job\u2019s own calendar,
-      fetched every fifteen minutes.</p>
+      fetched every couple of hours.</p>
     <div class="facts">
       <div><span>Date</span><b>${esc(fmtDay(s.date))}</b></div>
       <div><span>Time</span><b class="mono">${esc(fmtTime(s.start))}\u2013${esc(fmtTime(s.end))}
@@ -2447,7 +2447,7 @@ function showFeedShift(s){
     </div>
     <p class="tiny soft">Changing it here would be undone at the next fetch, so it is read
       only. Move the shift in ${esc(co ? co.name : 'the employer\u2019s app')} and it arrives
-      here within fifteen minutes.</p>
+      here within a couple of hours.</p>
     <div class="rowbtns"><button class="act" id="e-close">Close</button></div>`;
   dlg.showModal();
   $('#e-close').onclick = () => dlg.close();
@@ -2457,7 +2457,7 @@ function editShift(id){
   const s = S.shifts.find(x => x.id === id);
   if(!s) return;
   // Not his to change. It belongs to the employer's calendar, and the cron
-  // replaces it from there every fifteen minutes — an edit saved here would be
+  // replaces it from there on every poll — an edit saved here would be
   // gone by the next poll with nothing on any screen to say why, which is the
   // silent staleness this app exists to refuse (§4). Shown properly instead,
   // and told where the change actually has to be made.
@@ -3455,7 +3455,7 @@ function renderTrace(t, err){
           `${esc(c.name || 'unnamed')}${c.id === t.jobId ? ' (polled)' : ''} <code>${esc(c.id)}</code>`
         ).join(', ')
       : '<span class="flag">No jobs on the server — the cron has nothing to file shifts against '
-        + 'and refuses every fifteen minutes.</span>'));
+        + 'and refuses on every poll.</span>'));
 
   const groups = t.groups || [];
   if(!groups.length) box.appendChild(el('div', null, 'No shifts on the server.'));
@@ -3732,7 +3732,7 @@ async function pullFromServer(){
    On boot and on coming back to the app, because that is when he is looking —
    a PWA resumes rather than reloads, so returning to the home screen icon is
    the only "opened it" signal there is. The floor stops a tab switch costing a
-   request; the cron only moves every fifteen minutes and nothing here is
+   request; the cron only moves every couple of hours and nothing here is
    racing it.
 
    Failure says nothing on these paths on purpose. It is ordinary — the phone
@@ -4008,6 +4008,71 @@ $('#srvcheck').onclick = async () => {
     renderServer(await server('/status'));
   }
   catch (e) { renderServer(null, e.message); }
+};
+
+/* The cron's own poll, run by hand (§50.2).
+
+   "Check the server" asks how long it has been since a poll; this asks why.
+   They are different questions and only the second one is answerable, because
+   a poll that never fires and a poll that fires and dies leave the same log —
+   which is nothing. The evening that produced this button was spent on exactly
+   that ambiguity, with a Worker that was serving pages perfectly and a cron
+   that had been silent for seven hours.
+
+   Slow on purpose, or rather allowed to be: it fetches the employer's calendar
+   and waits for it, up to the Worker's thirty seconds. That wait is the answer
+   in the case that matters — a feed that hangs is what a stopped cron looks
+   like from the inside, and feeling it take thirty seconds and come back
+   saying so is worth more than any wording here.
+
+   It writes. The record it leaves is the cron's record in the cron's ring
+   buffer, so the poll list below redraws with this poll at the top of it and
+   the alarm clears if it succeeded. That is deliberate: a diagnostic that ran
+   a quieter version of the real thing would be one more thing that can agree
+   with itself and be wrong. */
+$('#srvpoll').onclick = async () => {
+  // Its own line, not #srvnote. `renderServer` rewrites that one from
+  // `/status` and this handler calls it two lines later, so sharing it meant
+  // the answer was replaced by a counts summary before it could be read — and
+  // the half that got erased was the refusal reason, which is the only thing
+  // anybody presses this button to find out.
+  const note = $('#srvpollnote');
+  note.hidden = false;
+  note.className = 'tiny soft';
+  note.textContent = 'Polling the calendar\u2026 this can take a few seconds.';
+  try {
+    const r = await server('/poll', { method: 'POST' });
+    const p = r.poll || {};
+    // Two `ok`s and they mean different things. `r.ok` is the request: it
+    // reached the Worker and the Worker answered. `p.ok` is the poll: whether
+    // §14.6 let it write anything. A poll that ran and was refused comes back
+    // as a perfectly successful HTTP call carrying a refusal, and reading the
+    // outer flag would report it as a success on the one screen where somebody
+    // already suspects it is not one.
+    if(p.ok){
+      note.textContent =
+        `Polled just now: ${p.events || 0} events, ${p.added || 0} added, `
+        + `${p.replaced || 0} changed, ${p.removed || 0} removed, ${p.unchanged || 0} unchanged.`
+        + (p.ms ? ` The feed answered in ${(p.ms / 1000).toFixed(1)}s.` : '')
+        + ' The cron runs this same poll on its own schedule \u2014 if pressing this works'
+        + ' and the schedule stays quiet, the schedule is what is broken.';
+    } else {
+      note.className = 'flag';
+      note.textContent = `The poll ran and refused: ${p.reason || 'no reason given'}`;
+    }
+    // Refresh the counts, the alarm and the poll list against what just
+    // happened, so the rest of the section is not still showing the state this
+    // undid. This is what overwrites #srvnote, and why the line above is not it.
+    await pullFromServer();
+    renderServer(await server('/status'));
+  } catch (e) {
+    // A failure here is the request, not the poll: no token, a 500, the Worker
+    // unreachable. Said on the poll's own line too, so it is not confused with
+    // whatever `/status` last reported.
+    note.className = 'flag';
+    note.textContent = `The poll could not be run: ${e.message}`;
+    renderServer(null, e.message);
+  }
 };
 
 /* Applying the schema is a button rather than a command, because §14.9's

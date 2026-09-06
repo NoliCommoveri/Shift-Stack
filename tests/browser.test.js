@@ -1190,6 +1190,100 @@ test('the viewer installs at its own scope and opens from the home screen', asyn
 });
 
 
+/* The manual poll, from the button. PROJECT.md §50.2.
+ *
+ * The value of this button is that it is the cron's own poll and not a
+ * quieter rehearsal of it, and the half of that claim which lives in the page
+ * is that pressing it sends a POST to `/poll` with the token on it and then
+ * reads the result back rather than assuming it. A button that fired and
+ * described what it hoped had happened would be the same kind of confident
+ * wrongness §23 is the record of, on the one screen somebody presses when
+ * they already suspect the server.
+ *
+ * The refusal case is the one worth a test. A poll that runs and is turned
+ * down by §14.6's guards answers `ok: true` at the HTTP layer and `ok: 0`
+ * inside — the request succeeded, the poll did not — and a handler that read
+ * the outer flag would report a refusal as a success in the exact situation
+ * the button exists for.
+ */
+test('the poll button runs the server\u2019s poll and reports what came back', async (t) => {
+  const browser = await open();
+  if(!browser) return t.skip('no Playwright browser available');
+
+  try {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto('file://' + path.join(ROOT, 'index.html'));
+    await page.waitForFunction(() => typeof S === 'object' && S !== null, null, { timeout: 15000 });
+
+    const applied = await page.evaluate(async () => {
+      S.companies = [{ id: 'c1', name: 'DSI', color: '#666', icsFeed: true }];
+      S.settings.pushToken = 'tok';
+      const calls = [];
+      window.fetch = async (path, opts) => {
+        calls.push({ path, method: (opts && opts.method) || 'GET',
+                     auth: !!(opts && opts.headers && opts.headers.authorization) });
+        if(path === '/poll') return { ok: true, status: 200, json: async () => ({
+          ok: true, poll: { ok: 1, events: 5, added: 1, replaced: 0, removed: 0,
+                            unchanged: 4, ms: 320 } }) };
+        if(path === '/status') return { ok: true, status: 200, json: async () => ({
+          shifts: { feed: 5, manual: 13 }, lastGood: new Date().toISOString(),
+          zone: 'America/Chicago', alarm: null, polls: [] }) };
+        return { ok: true, status: 200, json: async () => ({ shifts: [] }) };
+      };
+      document.querySelector('#srvpoll').click();
+      // The handler is async and awaits three round trips; the note is written
+      // before the last of them.
+      for(let i = 0; i < 60 && !/Polled/.test(document.querySelector('#srvpollnote').textContent); i++)
+        await new Promise(r => setTimeout(r, 20));
+      return { calls, note: document.querySelector('#srvpollnote').textContent };
+    });
+
+    const poll = applied.calls.find(c => c.path === '/poll');
+    assert.ok(poll, 'the button asks the server to poll');
+    assert.equal(poll.method, 'POST', 'the manual poll writes, so it is a POST');
+    assert.ok(poll.auth, 'the push token goes with it');
+    // The counts are the server's, read out of its answer.
+    assert.match(applied.note, /5 events/);
+    assert.match(applied.note, /1 added/);
+    assert.match(applied.note, /4 unchanged/);
+    // And the screen is refreshed against what just happened rather than left
+    // showing the state the poll undid.
+    assert.ok(applied.calls.some(c => c.path === '/status'),
+      'the counts and the alarm are re-read after the poll');
+
+    // A poll that ran and was refused is not a poll that succeeded.
+    const refused = await page.evaluate(async () => {
+      window.fetch = async (path) => {
+        if(path === '/poll') return { ok: true, status: 200, json: async () => ({
+          ok: true, poll: { ok: 0, reason: 'the feed did not answer within 30 seconds' } }) };
+        if(path === '/status') return { ok: true, status: 200, json: async () => ({
+          shifts: {}, lastGood: null, zone: 'America/Chicago', alarm: null, polls: [] }) };
+        return { ok: true, status: 200, json: async () => ({ shifts: [] }) };
+      };
+      const line = document.querySelector('#srvpollnote');
+      line.textContent = '';
+      document.querySelector('#srvpoll').click();
+      // Not "until it says something": the handler writes "Polling the
+      // calendar\u2026" the instant it is pressed, and waiting for non-empty
+      // text catches that placeholder rather than the answer.
+      for(let i = 0; i < 100 && !/refused|could not/.test(line.textContent); i++)
+        await new Promise(r => setTimeout(r, 20));
+      return { text: line.textContent, flagged: line.className === 'flag' };
+    });
+    assert.match(refused.text, /refused/, 'a refusal is reported as one');
+    assert.match(refused.text, /did not answer within 30 seconds/,
+      'the server\u2019s reason is what is shown, not a wording of our own');
+    // Coloured, not just worded. This screen is read at a glance by somebody
+    // who already thinks something is wrong.
+    assert.ok(refused.flagged, 'a refusal is flagged rather than filed as a soft note');
+
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+
 /* ==========================================================================
    The kids' phone. PROJECT.md §46.
    ========================================================================== */

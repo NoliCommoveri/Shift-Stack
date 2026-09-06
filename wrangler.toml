@@ -1,8 +1,8 @@
 # Shift Deck. PROJECT.md §14.
 #
 # A plain Worker, not Pages, and the distinction is load-bearing: Cron
-# Triggers do not run on Pages (§14.9 step 3), and the fifteen-minute poll is
-# the whole point of building this. A git-connected Worker takes all of its
+# Triggers do not run on Pages (§14.9 step 3), and the scheduled poll is the
+# whole point of building this. A git-connected Worker takes all of its
 # configuration from this file, so what is here is what deploys — there is
 # nothing to set in the dashboard except the secrets, which by design are not
 # in the repo.
@@ -49,7 +49,21 @@ database_name = "shift-deck"
 database_id = "506df86a-3a17-4e57-8a49-0a02c8e9afc4"
 
 [triggers]
-crons = ["*/15 * * * *"]
+# Every two hours, on the hour. It was `*/15` until 5 September: a two-minute
+# rota change is not worth ninety-six fetches a day of somebody else's
+# calendar, and the interval only ever needed to be shorter than the gap
+# between a rota being published and a shift being worked, which is days.
+#
+# The number lives here and nowhere else that matters. `alarmFor` in
+# guards.js measures hours since the last good poll rather than counting
+# missed ticks, so it did not need changing with it, and the prose on the
+# screens now says "every couple of hours" rather than naming a figure that
+# rots the next time this line is edited.
+#
+# ICSx⁵'s own refresh is the other half of the same interval and Ray has
+# already widened it to match; a phone polling the feed faster than the cron
+# fills it is just re-reading the same file.
+crons = ["0 */2 * * *"]
 
 # Which clock the cron reads the employer's calendar on, when the job in `cfg`
 # does not say (§35, §37). Not a secret and deliberately in the file: a Worker

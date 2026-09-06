@@ -253,9 +253,12 @@ function weekTotals(shifts, co){
    the page can tell those apart, so this line has to, and it has to do it
    without being read — which means it changes colour rather than wording.
 
-   The thresholds come off the cron. It polls every fifteen minutes, and the
-   app pushes within seconds of an edit, so an hour behind is already unusual
-   and half a day behind means something is broken rather than quiet. */
+   The thresholds are about this phone's own reading, not the cron's: the app
+   pushes within seconds of an edit and this screen refreshes when it is
+   opened, so an hour without reaching the Worker is already unusual and half
+   a day means something is broken rather than quiet. They did not move when
+   the cron widened to two hours, because a poll this screen never asked for
+   is not what this line measures. */
 const STALE_MINS = 60, COLD_MINS = 12 * 60;
 
 function vAgeMins(){
@@ -449,7 +452,7 @@ function vDrawSchedule(){
 function vShowShift(s){
   const co = coById(s.companyId), where = shiftAddress(s);
   const dlg = $('#dlg');
-  const from = isFromFeed(s) ? 'From this job’s own calendar, fetched every fifteen minutes.'
+  const from = isFromFeed(s) ? 'From this job’s own calendar, fetched every couple of hours.'
     : isProposed(s) ? 'From the rota. Nothing has confirmed this one yet.'
     : 'Entered on his phone.';
   $('#dlgbody').innerHTML = `

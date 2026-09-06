@@ -17,8 +17,8 @@
 
 /* Same three-environment resolution as feed.js, and for the same reason: a
    `whereKey` that silently arrived as undefined would make every feed row
-   look changed, and the cron would rewrite the whole schedule every fifteen
-   minutes without anything reporting a fault. */
+   look changed, and the cron would rewrite the whole schedule on every
+   poll without anything reporting a fault. */
 const keyOf = (() => {
   let mod = null;
   try { mod = require('./sites.js'); } catch (e) { mod = null; }
@@ -66,8 +66,8 @@ function icsSame(a, b){
    and it is not optional in practice. A shift on file holds `siteId`; a row
    off the feed holds only the text the employer wrote. `whereKey` answers
    those two differently by design, so without a resolver every row would
-   come back as `replace` and the cron would rewrite the whole schedule every
-   fifteen minutes. The page passes `applyNames`, which reads the store; the
+   come back as `replace` and the cron would rewrite the whole schedule on
+   every poll. The page passes `applyNames`, which reads the store; the
    Worker passes its own against the `cfg` row. Neither belongs in here. */
 function mergeCalendar(existing, rows, report, jobId, opts){
   const resolve = (opts && opts.resolve) || (r => r);
