@@ -20,6 +20,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const { planPoll, feedRow } = require('../worker/poll.js');
+const { guard } = require('../worker/guards.js');
 
 const ROOT = path.join(__dirname, '..');
 const FEED = fs.readFileSync(
@@ -53,7 +54,7 @@ const run = (opts = {}) =>
 /* Apply a plan the way index.js applies it, so a second poll can be run
    against the result. `feedRow` is the Worker's own, for the same reason. */
 function apply(mine, plan){
-  const gone = new Set(plan.remove.map(s => s.id));
+  const gone = new Set(plan.remove.concat(plan.stale || []).map(s => s.id));
   const kept = mine.filter(s => !gone.has(s.id));
   const replaced = new Map(plan.replace.map(r => [r.id, r]));
   let n = 0;
@@ -164,6 +165,67 @@ test('a zone corrected between two polls rewrites the shifts it already filed', 
   assert.equal(foc.seq, 1);
   assert.deepEqual(after.map(s => s.id).sort(), held.map(s => s.id).sort(),
                    'in place, keeping every shift’s id');
+});
+
+/* ---------- a rota republished under new ids (§51) ------------------------ */
+
+/* The employer's calendar has one copy of the day; the app had two. Every
+   Homebase UID carries the shift's own id — `homebase-4471903-20260903` — so a
+   rota rebuilt and republished is the same evening under a name the app has
+   never seen, and matching on UID alone files it a second time while the first
+   sits there with nothing to remove it. This is that feed, twice. */
+const REBUILT = FEED.replace(/homebase-44719(\d\d)-/g, (m, n) => `homebase-44729${n}-`);
+
+test('a rota republished under new ids does not file a second copy of the week', () => {
+  const held = apply([], run().plan);
+  const { plan } = run({ text: REBUILT, store: store({ shifts: held }) });
+
+  assert.equal(plan.add.length, 0, 'not one of them is a shift he has been given twice');
+  assert.equal(plan.replace.length, 6, 'the six Homebase events, revised in place');
+  assert.equal(plan.unchanged, 1, 'and the one event whose id did not change');
+
+  const after = apply(held, plan);
+  assert.equal(after.length, held.length);
+  assert.deepEqual(after.map(s => s.id).sort(), held.map(s => s.id).sort(),
+                   'every shift kept its id, so the calendar sees revisions (§22)');
+  const uids = after.map(s => s.extUid).filter(u => u.includes('homebase'));
+  assert.ok(uids.every(u => u.includes('44729')), 'and every one now answers to its new id');
+});
+
+test('a schedule that is already doubled is collapsed by the next poll', () => {
+  // The state §51 was reported in: the cron had been down, the rota was
+  // rebuilt while it was, and the poll that came back filed the whole week
+  // beside itself. Nothing on the phone can clear a source='feed' row (§14.3),
+  // so the cron has to be the thing that heals it.
+  const doubled = [...apply([], run().plan),
+                   ...apply([], run({ text: REBUILT }).plan)]
+                  .map((s, i) => ({ ...s, id: `d${i}` }));
+  assert.equal(doubled.length, 14);
+
+  const { plan, refuse } = run({ text: REBUILT, store: store({ shifts: doubled }) });
+  assert.equal(refuse, null, '§14.6 must not read a collapse as a massacre');
+  assert.equal(plan.stale.length, 7);
+  assert.equal(plan.remove.length, 0);
+  assert.deepEqual([plan.add.length, plan.replace.length], [0, 0]);
+
+  const after = apply(doubled, plan);
+  assert.equal(after.length, 7);
+  const slots = after.map(s => `${s.date} ${s.start} ${s.end}`);
+  assert.equal(new Set(slots).size, slots.length, 'one row a slot');
+});
+
+test('the same collapse offered as cancellations would have been refused', () => {
+  // Why `stale` is handed back separately rather than dropped into `remove`:
+  // seven of fourteen is over §14.6's ceiling, so a doubled schedule would
+  // refuse every poll from here on and never come back to one row a slot.
+  const doubled = [...apply([], run().plan),
+                   ...apply([], run({ text: REBUILT }).plan)]
+                  .map((s, i) => ({ ...s, id: `d${i}` }));
+  const { plan, refuse } = run({ text: REBUILT, store: store({ shifts: doubled }) });
+  assert.equal(refuse, null);
+  assert.match(guard({ report: { events: 7 }, mine: doubled, today: '2026-09-04',
+                       plan: { ...plan, remove: plan.stale, stale: [] } }),
+               /would remove 7 of 14 shifts/);
 });
 
 /* ---------- the guards ----------------------------------------------------- */

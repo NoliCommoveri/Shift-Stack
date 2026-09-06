@@ -89,6 +89,101 @@ test('the same cancellation twice removes one shift, not two', () => {
   assert.equal(out.remove.length, 1);
 });
 
+/* ---------- a rota republished under new ids (§51) ------------------------ */
+
+/* Homebase does not promise a stable UID. A rota rebuilt and republished
+   arrives as the same shifts under fresh event ids, and on UID alone every one
+   of them is an addition standing beside the row it supersedes — one copy in
+   the employer's calendar, two in the app. */
+
+test('the same shift under a new uid replaces the old one rather than joining it', () => {
+  const out = merge([held()], [row({ uid: 'u1-rebuilt' })]);
+  assert.equal(out.add.length, 0, 'a second copy of a shift he works once');
+  assert.equal(out.replace.length, 1);
+  assert.equal(out.replace[0].id, 'sh1', 'the id is kept, so the calendar sees a revision (§22)');
+  assert.equal(out.replace[0].row.extUid, 'u1-rebuilt');
+  assert.equal(out.stale.length, 0, 'the row was reused, not left behind');
+});
+
+test('a whole rota republished is replacements, not a second rota', () => {
+  const mine = [held(), held({ id: 'sh2', extUid: 'u2', date: '2026-09-06' })];
+  const rows = [row({ uid: 'n1' }), row({ uid: 'n2', date: '2026-09-06' })];
+  const out = merge(mine, rows);
+  assert.deepEqual([out.add.length, out.replace.length, out.stale.length], [0, 2, 0]);
+  assert.deepEqual(out.replace.map(r => r.id).sort(), ['sh1', 'sh2']);
+});
+
+test('a uid that matches wins the row a slot match would also have taken', () => {
+  // Pass order is the safety: the employer naming a specific shift has first
+  // refusal on the row it names, or the shift it names is filed twice.
+  const mine = [held()];
+  const out = merge(mine, [row({ uid: 'other' }), row()]);
+  assert.equal(out.unchanged, 1, 'u1 took its own row');
+  assert.equal(out.add.length, 1, 'and the unrecognised event is genuinely new');
+  assert.equal(out.add[0].extUid, 'other');
+});
+
+test('a shift on file the feed has stopped naming, in a slot it confirms, is stale', () => {
+  // The state a database is left in by every poll that ran before §51: the
+  // superseded copy, which nothing removes because nothing cancelled it.
+  const old = held({ id: 'sh-old', extUid: 'u-old' });
+  const now = held({ id: 'sh-new', extUid: 'u-new' });
+  const out = merge([old, now], [row({ uid: 'u-new' })]);
+  assert.equal(out.unchanged, 1);
+  assert.equal(out.stale.length, 1);
+  assert.equal(out.stale[0].id, 'sh-old');
+  assert.equal(out.remove.length, 0, 'a collapsed duplicate is not a cancellation');
+});
+
+test('a shift the feed no longer mentions at all is left alone', () => {
+  // The window is seven days back and the feed is somebody else's file. A row
+  // that has merely fallen out of either is not a shift he did not work, and
+  // §8.4 is the rule: a partial view of a schedule is indistinguishable from a
+  // week of cancellations. Only a slot the feed has just confirmed as one
+  // shift can say a second row in it is a leftover.
+  const out = merge([held()], [row({ uid: 'u2', date: '2026-09-09' })]);
+  assert.equal(out.stale.length, 0);
+  assert.equal(out.remove.length, 0);
+  assert.equal(out.add.length, 1);
+});
+
+test('two events in one feed standing in one slot file one shift', () => {
+  // `bySlot` in app.js has always dropped the exact repeat out of a
+  // hand-imported calendar. The two ends of §14 answering that differently is
+  // the disagreement this file exists to prevent.
+  const out = merge([], [row({ uid: 'a' }), row({ uid: 'b' })]);
+  assert.equal(out.add.length, 1);
+  assert.equal(out.add[0].extUid, 'a');
+});
+
+test('a cancelled id republished at the same hours is not a cancellation', () => {
+  // The feed cancels the id it threw away and carries the shift under a new
+  // one. Read as a removal, the evening he is working comes off his phone.
+  const out = merge([held()], [row({ uid: 'u1-rebuilt' })], { cancelledRows: [{ uid: 'u1' }] });
+  assert.equal(out.remove.length, 0);
+  assert.equal(out.replace.length, 1);
+  assert.equal(out.replace[0].id, 'sh1');
+});
+
+test('a cancellation for a shift the feed does not otherwise carry still removes it', () => {
+  const out = merge([held()], [], { cancelledRows: [{ uid: 'u1' }] });
+  assert.equal(out.remove.length, 1);
+  assert.equal(out.stale.length, 0);
+});
+
+test('collapsing duplicates never empties a slot', () => {
+  // The property that lets `stale` sit outside §14.6's ceiling: a row is only
+  // ever stale while another row survives in its place.
+  const rows = [row({ uid: 'u-new' })];
+  const mine = [held({ id: 'a', extUid: 'u-old' }), held({ id: 'b', extUid: 'u-new' }),
+                held({ id: 'c', extUid: 'u-older' })];
+  const out = merge(mine, rows);
+  assert.equal(out.stale.length, 2);
+  const left = mine.filter(s => !out.stale.some(x => x.id === s.id));
+  assert.equal(left.length, 1);
+  assert.equal(left[0].id, 'b');
+});
+
 /* ---------- the properties the cron depends on --------------------------- */
 
 test('running the same feed twice is a no-op the second time', () => {
@@ -101,7 +196,8 @@ test('running the same feed twice is a no-op the second time', () => {
   // Apply it the way the Worker would, then run the identical feed again.
   const after = [held(), { ...first.add[0], id: 'sh2', source: 'feed' }];
   const second = merge(after, rows);
-  assert.deepEqual([second.add.length, second.replace.length, second.remove.length], [0, 0, 0]);
+  assert.deepEqual([second.add.length, second.replace.length,
+                    second.remove.length, second.stale.length], [0, 0, 0, 0]);
   assert.equal(second.unchanged, 2);
 });
 
