@@ -5834,11 +5834,12 @@ An empty array and a four-field expression both deploy without complaint and
 simply never fire, and those are the failures worth a test.
 
 **Still open, and not what the interval change was about.** The polls stopped
-at 20:15 UTC on 5 September and the Worker recorded no tick for seven hours,
+on 5 September and the Worker recorded no tick for the rest of the night,
 through a redeploy at 20:56 whose build log reads `Deployed shift-deck
-triggers` and `schedule: */15 * * * *`. The schedule was registered and still
-nothing fired, so the gap was never the expression and editing it fixed
-nothing. §50.1 and §50.2 are what came out of not being able to ask.
+triggers` and `schedule: */15 * * * *`. So the gap was never the expression
+and editing it fixed nothing. §50.1 and §50.2 are what came out of not being
+able to ask; §50.4 is the answer, and it is not the one §50.1 or §50.3
+reached.
 
 
 ### 50.1 A feed that hangs took the whole tick with it
@@ -5976,3 +5977,62 @@ finally look different. Every fault this project has shipped so far has been
 its own; this would be the first that is not, and the reason to be able to
 say so precisely is that the alternative is another evening spent editing code
 that was never wrong.
+
+
+## 50.4 It was the build, and the reasoning that said otherwise was backwards
+
+Ray, reading the same Cron Events log this section is built on: *"Last poll was
+10 minutes before I triggered build, which means first miss was the trigger
+supposed to run 15 minutes after build. Of course build caused it."*
+
+He is right, and the shape of the mistake is worth more than the conclusion.
+
+```
+20:45:51   last cron event          Success, 6.1 ms
+20:56:26   retriggered build completes
+21:00:00   next */15 tick due       never fired
+```
+
+**The last success is before the build; the first miss is after it.** The
+build sits between them. That is the ordinary shape of a cause, and it was
+read here as an alibi — twice, and the second time with the exact timestamps
+in hand.
+
+The error was anchoring on the wrong edge of the gap. An estimate of 20:15,
+worked backwards from rounded "hours ago" labels, put the stop forty minutes
+*before* the deploy, and "it stopped before the build" was then treated as
+exonerating and carried forward. It is not exonerating and never was: ten
+minutes before a deploy, a `*/15` cron has nothing to say — the next tick is
+not due yet. The only thing that happened in that window was the last tick
+that worked. When the log later gave the true figure, 20:45:51, the
+conclusion was left standing instead of being recomputed. A correction that
+does not re-derive what depended on it is not a correction.
+
+**What actually diagnoses a stopped scheduler is the first miss, not the last
+success.** The last success says when it was still healthy. The first miss
+says when it stopped, and what happened between those two is the suspect list.
+Here that list had one entry on it the whole time.
+
+**The mechanism, as far as it can be told from outside.** That build is the
+one that followed a `KIDS_TOKEN` added through the dashboard — which is itself
+a version — and its log carries the warning that local configuration differs
+from the remote configuration set via the dashboard, and that uploading will
+override the remote with the local. `Deployed shift-deck triggers` and
+`schedule: */15 * * * *` therefore mean the trigger was written onto the
+Worker, not that it was live with the scheduler. Those are different facts and
+the build log only reports the first. It is exactly the state a dashboard
+delete-and-re-add repairs, which is what Ray did, and exactly why two further
+deploys — each printing the same reassuring line — repaired nothing.
+
+**The operational rule this leaves.** A deploy can silently deregister the
+cron while reporting that it deployed it, so the build log is not evidence
+that the schedule is live. The only evidence is a cron event that fired after
+the deploy. **After any build, the schedule is unproven until one interval has
+passed and a tick has landed** — which at `0 */2` is up to two hours, and is
+the strongest argument yet for §50.5.
+
+**And it makes the fallback the real fix.** Nothing in this repository can
+stop a deploy from unscheduling its own cron, and nothing in it can notice:
+the Worker keeps serving, `/status` keeps answering, the alarm needs six hours
+before it says a word, and the calendar quietly stops changing. The schedule
+cannot be the only thing that fills the feed.
