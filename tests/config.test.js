@@ -41,7 +41,19 @@ test('the Worker is a Worker, with the cron that is the point of it', () => {
   assert.equal(tableOf('main'), null);
   assert.match(toml.join('\n'), /^main\s*=\s*"worker\/index\.js"\s*$/m);
   assert.equal(tableOf('crons'), '[triggers]');
-  assert.match(toml.join('\n'), /crons\s*=\s*\["\*\/15 \* \* \* \*"\]/);
+
+  // The interval itself is not pinned. It was `*/15` and is now `0 */2`, and
+  // pinning the figure only meant that tuning it failed a test named for
+  // something else — which teaches the next person to edit the assertion
+  // rather than to think about it. What must not change is that there is a
+  // schedule at all, and that it parses: an empty `crons`, or four fields
+  // where five belong, deploys without complaint and simply never fires.
+  const m = /crons\s*=\s*\[([^\]]*)\]/.exec(toml.join('\n'));
+  assert.ok(m, '[triggers] must carry a crons array');
+  const crons = m[1].split(',').map(s => s.trim().replace(/^"|"$/g, '')).filter(Boolean);
+  assert.ok(crons.length >= 1, 'crons must not be empty');
+  for(const c of crons)
+    assert.equal(c.split(/\s+/).length, 5, `"${c}" is not a five-field cron expression`);
 });
 
 test('the database is bound by id, not just by name', () => {

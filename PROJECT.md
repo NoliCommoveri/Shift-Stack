@@ -1238,7 +1238,9 @@ without anyone opening the D1 console.
 
 ### 14.5 The cron
 
-`*/15 * * * *`. For each job with an `icsUrl` configured:
+`0 */2 * * *` — every two hours, on the hour. It was `*/15` until §50
+widened it; the rest of this section is unchanged by that, because nothing
+in it counts ticks. For each job with an `icsUrl` configured:
 
 1. fetch the secret `.ics` address
 2. `parseICS(text, { from: today − 7d, match: co.icsMatch, zone })`
@@ -1256,9 +1258,11 @@ Heritage-Hooves states this and derives its whole tick design from it. Step 3
 is already close, since it diffs on `ext_uid` rather than incrementing
 anything, and the unique constraint in §14.3 is what makes "already applied"
 a fact the database knows rather than one the code hopes for. A double-fire
-must be a no-op, and a missed fire must cost nothing but fifteen minutes.
+must be a no-op, and a missed fire must cost nothing but one interval.
 §14.6's "six hours without a successful poll" alarm is what catches the case
-where they stop firing altogether, and it is doing more work than it looks.
+where they stop firing altogether, and it is doing more work than it looks —
+at `0 */2` it is three missed ticks rather than twenty-four, which is a
+sharper alarm than it was, not a blunter one.
 
 **Cron Triggers are UTC-only**, which is most of what §14.10 used to leave open
 about `zone`. The handler is told the zone; it never infers one.
@@ -5780,3 +5784,65 @@ thing it would break is the banner.
 The viewer also gets a minute timer, which it had never needed: it drew the
 countdown once on load and left it. A number that only changes what he does —
 *Leave in 3 min* — cannot be an hour stale on the screen it is read from.
+
+
+## 50. Changed: the cron polls every two hours, 5 September 2026
+
+`crons = ["0 */2 * * *"]`, where it was `*/15 * * * *`.
+
+Ray asked for it and had already widened ICSx⁵'s own refresh to match, which
+is the half that makes it a change rather than a regression: the two intervals
+are one interval seen from either end, and a phone re-fetching a feed the cron
+has not refilled is re-reading the same bytes.
+
+**Why fifteen was never the requirement.** §14.5 chose it by copying
+Heritage-Hooves, and Heritage-Hooves has a tick that must catch something
+within the hour. This does not. The thing being watched is a published rota,
+and the gap that matters is between a rota changing and a shift being worked —
+days, not minutes. Fifteen minutes bought a rota edit reaching the phone forty
+minutes sooner than two hours would, against ninety-six fetches a day of
+somebody else's calendar. Twelve is enough.
+
+**What did not have to move with it.**
+
+- `alarmFor` in guards.js measures *hours since the last good poll*, not missed
+  ticks, so it needed no edit and got none. Six hours is now three intervals
+  rather than twenty-four — the alarm is more sensitive at the new interval,
+  which is the right direction for it to have drifted.
+- Idempotence (§14.5, §14.3's unique index) is about double-fires and skipped
+  fires, both of which are properties of Cron Triggers rather than of the
+  interval.
+- The free-plan arithmetic only got easier: twelve poll records a day against
+  D1's hundred thousand writes, where it was ninety-six.
+- `STALE_MINS`/`COLD_MINS` in view.js look like cron thresholds and are not.
+  They measure how long since *that phone* last reached the Worker, which is a
+  fact about the viewer's own network and its refresh button. The comment above
+  them said the thresholds "come off the cron", which was wrong when it was
+  written and would have been actively misleading now; it has been corrected
+  rather than retuned.
+
+**The figure is out of the prose.** Six screens and eight comments said
+"every fifteen minutes" as a fact. They now say "every couple of hours" where
+the reader needs a sense of the delay, and "on every poll" where the interval
+was never the point — the sentences about the cron rewriting the whole schedule
+when `whereKey` comes back undefined, for instance, are about a bug that would
+happen at any interval. `tests/config.test.js` pinned the exact expression,
+which meant tuning it failed a test named "the Worker is a Worker, with the
+cron that is the point of it". It now asserts what that name claims: that
+`[triggers]` carries a non-empty `crons`, and that every entry has five fields.
+An empty array and a four-field expression both deploy without complaint and
+simply never fire, and those are the failures worth a test.
+
+**Still open, and not what this change was about.** The polls stopped at
+20:15 UTC on 5 September and the Worker has not recorded a tick since, through
+a redeploy at 20:56 that reported `Deployed shift-deck triggers` and
+`schedule: */15 * * * *` in the build log. The schedule was registered and
+still nothing fired, so the gap is not the expression and was not fixed by
+editing it. The leading theory is that `fetch(env.ICS_URL)` in `poll()` has no
+`AbortSignal` and neither does the `res.text()` under it: a feed that *rejects*
+is caught and recorded as "the feed could not be reached", but a feed that
+*hangs* takes the whole invocation down with it — `ctx.waitUntil` is
+terminated, the `.catch` never runs, and no poll row is written at all, which
+is exactly the log there is. Unconfirmed. The check that settles it is the
+Cron Events view in the Worker's dashboard metrics, which reports scheduled
+invocations and their outcomes separately from fetches.

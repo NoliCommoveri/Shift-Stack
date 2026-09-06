@@ -75,7 +75,7 @@ async function readStore(env){
 /* ---------- the cron ------------------------------------------------------
    Idempotent, because Cron Triggers do not retry: an invocation that throws
    or times out is skipped silently until the next fire. A double-fire must be
-   a no-op and a missed fire must cost nothing but fifteen minutes. The
+   a no-op and a missed fire must cost nothing but the interval. The
    `shifts_ext_uid` index is what makes the first of those a fact rather than
    a hope.
    ---------------------------------------------------------------------- */

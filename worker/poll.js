@@ -31,7 +31,7 @@ const { guard, feedJob, zoneFor, todayIn, shiftISO } = require('./guards.js');
    file. A shift on file holds `siteId`; a row off the feed holds only the text
    the employer wrote, and `whereKey` answers those two differently by design —
    so without this every row comes back as `replace` and the cron rewrites the
-   whole schedule every fifteen minutes.
+   whole schedule on every poll.
 
    `resolveNames` is sites.js's and the page's `applyNames` calls the same one.
    This used to be a pair of `matchName` calls of its own, against the whole
